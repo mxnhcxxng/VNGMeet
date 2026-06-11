@@ -1,0 +1,17 @@
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Node / Next
+node_modules/
+.next/
+npm-debug.log*
+.DS_Store
+
+# Local Claude settings
+.claude/

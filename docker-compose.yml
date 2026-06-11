@@ -1,0 +1,26 @@
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      CLIENT_ID: ${CLIENT_ID}
+      CLIENT_SECRET: ${CLIENT_SECRET}
+      TENANT_ID: ${TENANT_ID:-common}
+      REDIRECT_URI: ${REDIRECT_URI:-http://localhost:8000/api/auth/callback}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      SESSION_SECRET: ${SESSION_SECRET:-change-me-in-production-please}
+      TIMEZONE: ${TIMEZONE:-Asia/Ho_Chi_Minh}
+      BUSINESS_START_HOUR: ${BUSINESS_START_HOUR:-8}
+      BUSINESS_END_HOUR: ${BUSINESS_END_HOUR:-18}
+      SLOT_MINUTES: ${SLOT_MINUTES:-30}
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
