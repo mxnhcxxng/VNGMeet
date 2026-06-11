@@ -6,37 +6,15 @@ import {
   Card,
   CardBody,
   CardHeader,
-  Chip,
-  Select,
-  SelectItem,
   Spinner,
   Textarea,
 } from "@heroui/react";
 import { api, type Me, type ScheduleResponse } from "@/lib/api";
-import { RoomGrid } from "@/components/RoomGrid";
+import { Sidebar, type View } from "@/components/Sidebar";
+import { BrowseRooms } from "@/components/BrowseRooms";
+import { ChatPanel } from "@/components/ChatPanel";
 
-const DAY_OPTIONS = [
-  { key: "3", label: "3 ngày" },
-  { key: "5", label: "5 ngày" },
-  { key: "7", label: "7 ngày" },
-  { key: "14", label: "14 ngày" },
-];
-
-function Legend() {
-  return (
-    <div className="flex items-center gap-4 text-xs text-default-500">
-      <span className="flex items-center gap-1">
-        <span className="inline-block h-3 w-3 rounded-small bg-success-400" /> Trống
-      </span>
-      <span className="flex items-center gap-1">
-        <span className="inline-block h-3 w-3 rounded-small bg-warning-400" /> Tạm giữ
-      </span>
-      <span className="flex items-center gap-1">
-        <span className="inline-block h-3 w-3 rounded-small bg-danger-400" /> Đã book
-      </span>
-    </div>
-  );
-}
+const RANGE_DAYS = 14;
 
 function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
   const [token, setToken] = useState("");
@@ -61,9 +39,7 @@ function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
       <Card className="w-full max-w-lg">
         <CardHeader className="flex-col items-start gap-1">
           <h1 className="text-xl font-semibold">VNG Meet</h1>
-          <p className="text-sm text-default-500">
-            Đăng nhập để xem tình trạng phòng họp.
-          </p>
+          <p className="text-sm text-default-500">Đăng nhập để xem tình trạng phòng họp.</p>
         </CardHeader>
         <CardBody className="gap-5">
           <Button color="primary" as="a" href={api.loginUrl()}>
@@ -79,7 +55,7 @@ function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
           <div className="flex flex-col gap-2">
             <Textarea
               label="Graph access token"
-              description="Lấy từ Graph Explorer (developer.microsoft.com/graph/graph-explorer) → tab Access token. Hết hạn ~1h thì dán lại."
+              description="Lấy từ Graph Explorer → tab Access token. Hết hạn ~1h thì dán lại."
               placeholder="eyJ0eXAiOiJKV1QiLCJ..."
               minRows={3}
               value={token}
@@ -105,9 +81,9 @@ function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
 export default function Home() {
   const [me, setMe] = useState<Me | null>(null);
   const [loading, setLoading] = useState(true);
+  const [view, setView] = useState<View>("browse");
   const [data, setData] = useState<ScheduleResponse | null>(null);
-  const [days, setDays] = useState("7");
-  const [selectedEmail, setSelectedEmail] = useState<string | null>(null);
+  const [dayIndex, setDayIndex] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -119,17 +95,11 @@ export default function Home() {
       .finally(() => setLoading(false));
   }, []);
 
-  const loadSchedule = useCallback(async (d: string) => {
+  const loadSchedule = useCallback(async () => {
     setRefreshing(true);
     setError(null);
     try {
-      const res = await api.schedule(parseInt(d, 10));
-      setData(res);
-      setSelectedEmail((prev) =>
-        prev && res.rooms.some((r) => r.email === prev)
-          ? prev
-          : res.rooms[0]?.email ?? null
-      );
+      setData(await api.schedule(RANGE_DAYS));
     } catch (e: any) {
       setError(e.message === "UNAUTHENTICATED" ? "Phiên đăng nhập hết hạn." : e.message);
       if (e.message === "UNAUTHENTICATED") setMe({ authenticated: false });
@@ -139,8 +109,8 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (me?.authenticated) loadSchedule(days);
-  }, [me?.authenticated, days, loadSchedule]);
+    if (me?.authenticated) loadSchedule();
+  }, [me?.authenticated, loadSchedule]);
 
   if (loading) {
     return (
@@ -154,86 +124,53 @@ export default function Home() {
     return <LoginScreen onAuthed={() => api.me().then(setMe)} />;
   }
 
-  const selectedRoom = data?.rooms.find((r) => r.email === selectedEmail) ?? null;
-
   return (
-    <main className="mx-auto max-w-7xl p-4 md:p-6">
-      <header className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold">VNG Meet — Phòng họp</h1>
-          <p className="text-sm text-default-500">
-            {data?.timezone} · slot {data?.slotMinutes ?? "—"} phút
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Chip variant="flat" color="primary">
-            {me.username}
-          </Chip>
-          <Button
-            size="sm"
-            variant="flat"
-            onPress={() => api.logout().then(() => setMe({ authenticated: false }))}
-          >
-            Đăng xuất
-          </Button>
-        </div>
-      </header>
+    <div className="flex h-screen overflow-hidden">
+      <Sidebar
+        view={view}
+        onChange={setView}
+        username={me.username}
+        onLogout={() => api.logout().then(() => setMe({ authenticated: false }))}
+      />
 
-      <Card className="mb-4">
-        <CardBody className="flex flex-row flex-wrap items-center gap-3">
-          <Select
-            label="Phòng họp"
-            selectedKeys={selectedEmail ? [selectedEmail] : []}
-            className="max-w-xs"
-            size="sm"
-            onChange={(e) => setSelectedEmail(e.target.value)}
-          >
-            {(data?.rooms ?? []).map((r) => (
-              <SelectItem key={r.email} textValue={r.name}>
-                {r.name}
-                {r.capacity ? ` · ${r.capacity} chỗ` : ""}
-              </SelectItem>
-            ))}
-          </Select>
-          <Select
-            label="Số ngày"
-            selectedKeys={[days]}
-            className="max-w-[140px]"
-            size="sm"
-            onChange={(e) => e.target.value && setDays(e.target.value)}
-          >
-            {DAY_OPTIONS.map((o) => (
-              <SelectItem key={o.key}>{o.label}</SelectItem>
-            ))}
-          </Select>
-          <Button size="sm" variant="flat" onPress={() => loadSchedule(days)} isLoading={refreshing}>
-            Làm mới
-          </Button>
-          <div className="ml-auto">
-            <Legend />
+      <main className="flex min-w-0 flex-1 flex-col">
+        <header className="flex items-center justify-between border-b border-default-200 px-6 py-3">
+          <h1 className="text-xl font-semibold">
+            {view === "browse" ? "Phòng họp" : "Trợ lý phòng họp"}
+          </h1>
+          <span className="text-xs text-default-400">
+            {data ? `${data.rooms.length} phòng · ${data.timezone}` : ""}
+          </span>
+        </header>
+
+        {error && (
+          <div className="border-b border-danger-200 bg-danger-50 px-6 py-2 text-sm text-danger">
+            {error}
           </div>
-        </CardBody>
-      </Card>
+        )}
 
-      {error && (
-        <Card className="mb-4 border border-danger-200">
-          <CardBody className="text-sm text-danger">{error}</CardBody>
-        </Card>
-      )}
-
-      {refreshing && !data ? (
-        <div className="flex justify-center py-10">
-          <Spinner label="Đang quét phòng họp..." />
+        <div className="min-h-0 flex-1">
+          {refreshing && !data ? (
+            <div className="flex h-full items-center justify-center">
+              <Spinner label="Đang quét phòng họp..." />
+            </div>
+          ) : view === "chat" ? (
+            <ChatPanel data={data} dayIndex={dayIndex} />
+          ) : !data?.rooms.length ? (
+            <div className="flex h-full items-center justify-center text-default-500">
+              Không tìm thấy phòng nào được đánh dấu là meeting room.
+            </div>
+          ) : (
+            <BrowseRooms
+              data={data}
+              dayIndex={dayIndex}
+              setDayIndex={(fn) => setDayIndex((n) => fn(n))}
+              refreshing={refreshing}
+              onRefresh={loadSchedule}
+            />
+          )}
         </div>
-      ) : !data?.rooms.length ? (
-        <Card>
-          <CardBody className="text-center text-default-500">
-            Không tìm thấy phòng nào được đánh dấu là meeting room.
-          </CardBody>
-        </Card>
-      ) : selectedRoom ? (
-        <RoomGrid room={selectedRoom} days={data.days} times={data.times} />
-      ) : null}
-    </main>
+      </main>
+    </div>
   );
 }
