@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { Button, Chip, Switch } from "@heroui/react";
+import { Button, Chip, Switch, useDisclosure } from "@heroui/react";
 import type { ScheduleResponse } from "@/lib/api";
+import { BookingModal, type BookingSlot } from "./BookingModal";
 
 const ROOM_IMAGES = [
   "linear-gradient(135deg,#a8c0ff,#3f2b96)",
@@ -43,8 +44,24 @@ export function BrowseRooms({
   onRefresh: () => void;
 }) {
   const [vacantOnly, setVacantOnly] = useState(false);
+  const { isOpen, onOpen, onClose } = useDisclosure();
+  const [selectedSlot, setSelectedSlot] = useState<BookingSlot | null>(null);
+  const [endOptions, setEndOptions] = useState<string[]>([]);
   const rooms = data.rooms;
   const cols = `72px repeat(${rooms.length}, minmax(150px, 1fr))`;
+
+  // Valid end times for a slot starting at times[ti]: every later slot start
+  // plus the final business-end label.
+  function endOptionsFor(ti: number): string[] {
+    const lastEnd = addLabel(data.times[data.times.length - 1], data.slotMinutes);
+    return [...data.times.slice(ti + 1), lastEnd];
+  }
+
+  function openBooking(roomEmail: string, roomName: string, t: string, ti: number) {
+    setSelectedSlot({ roomEmail, roomName, date: data.days[dayIndex], startTime: t });
+    setEndOptions(endOptionsFor(ti));
+    onOpen();
+  }
 
   return (
     <div className="flex h-full flex-col">
@@ -125,9 +142,12 @@ export function BrowseRooms({
                 return (
                   <div key={r.email} className="h-14 py-0.5">
                     <div
+                      role={free ? "button" : undefined}
+                      tabIndex={free ? 0 : undefined}
+                      onClick={free ? () => openBooking(r.email, r.name, t, ti) : undefined}
                       className={`flex h-full flex-col justify-center rounded-medium border px-2 text-xs ${
                         free
-                          ? "border-success-200 bg-success-50 text-success-700"
+                          ? "cursor-pointer border-success-200 bg-success-50 text-success-700 transition-colors hover:border-success-400 hover:bg-success-100"
                           : "border-danger-200 bg-danger-50 text-danger-600"
                       }`}
                     >
@@ -143,6 +163,14 @@ export function BrowseRooms({
           ))}
         </div>
       </div>
+
+      <BookingModal
+        isOpen={isOpen}
+        onClose={onClose}
+        slot={selectedSlot}
+        endOptions={endOptions}
+        onBooked={onRefresh}
+      />
     </div>
   );
 }

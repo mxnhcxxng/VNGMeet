@@ -21,7 +21,8 @@ class Settings(BaseSettings):
     # Delegated Microsoft Graph permissions we ask consent for.
     # Place.Read.All  -> list meeting rooms
     # Calendars.Read.Shared -> read other people's / rooms' free-busy via getSchedule
-    scopes: list[str] = ["Place.Read.All", "Calendars.Read.Shared", "User.Read"]
+    # Calendars.ReadWrite -> create events (book a room) on the signed-in user's calendar
+    scopes: list[str] = ["Place.Read.All", "Calendars.Read.Shared", "Calendars.ReadWrite", "User.Read"]
 
     # Session cookie signing key (override in .env for production)
     session_secret: str = "change-me-in-production-please"

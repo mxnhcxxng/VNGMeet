@@ -5,7 +5,7 @@ import {
   Button,
   Card,
   CardBody,
-  CardHeader,
+  Chip,
   Spinner,
   Textarea,
 } from "@heroui/react";
@@ -35,31 +35,62 @@ function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center p-4">
-      <Card className="w-full max-w-lg">
-        <CardHeader className="flex-col items-start gap-1">
-          <h1 className="text-xl font-semibold">VNG Meet</h1>
-          <p className="text-sm text-default-500">Đăng nhập để xem tình trạng phòng họp.</p>
-        </CardHeader>
-        <CardBody className="gap-5">
-          <Button color="primary" as="a" href={api.loginUrl()}>
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden p-4">
+      {/* Decorative gradient backdrop */}
+      <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-primary-50 via-background to-secondary-50" />
+      <div className="pointer-events-none absolute -left-24 -top-24 h-72 w-72 rounded-full bg-primary-200/40 blur-3xl" />
+      <div className="pointer-events-none absolute -bottom-24 -right-24 h-72 w-72 rounded-full bg-secondary-200/40 blur-3xl" />
+
+      <Card className="relative w-full max-w-md border border-white/40 shadow-2xl" radius="lg">
+        <CardBody className="gap-6 p-8">
+          {/* Brand */}
+          <div className="flex flex-col items-center gap-3 text-center">
+            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary to-secondary text-2xl font-bold text-white shadow-lg shadow-primary/30">
+              VM
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight">VNG Meet</h1>
+              <p className="mt-1 text-sm text-default-500">
+                Đăng nhập để xem &amp; đặt phòng họp
+              </p>
+            </div>
+          </div>
+
+          <Button
+            color="primary"
+            size="lg"
+            as="a"
+            href={api.loginUrl()}
+            className="font-medium shadow-md shadow-primary/30"
+            startContent={
+              <svg width="18" height="18" viewBox="0 0 21 21" aria-hidden>
+                <rect x="1" y="1" width="9" height="9" fill="#f25022" />
+                <rect x="11" y="1" width="9" height="9" fill="#7fba00" />
+                <rect x="1" y="11" width="9" height="9" fill="#00a4ef" />
+                <rect x="11" y="11" width="9" height="9" fill="#ffb900" />
+              </svg>
+            }
+          >
             Đăng nhập với Microsoft
           </Button>
 
-          <div className="flex items-center gap-3 text-xs text-default-400">
+          <div className="flex items-center gap-3 text-xs font-medium text-default-400">
             <div className="h-px flex-1 bg-default-200" />
             HOẶC TEST NHANH
             <div className="h-px flex-1 bg-default-200" />
           </div>
 
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-3">
             <Textarea
               label="Graph access token"
+              labelPlacement="outside"
               description="Lấy từ Graph Explorer → tab Access token. Hết hạn ~1h thì dán lại."
               placeholder="eyJ0eXAiOiJKV1QiLCJ..."
               minRows={3}
+              variant="bordered"
               value={token}
               onValueChange={setToken}
+              classNames={{ input: "font-mono text-xs" }}
             />
             <Button
               variant="flat"
@@ -70,7 +101,11 @@ function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
             >
               Dùng access token này
             </Button>
-            {err && <p className="text-xs text-danger">{err}</p>}
+            {err && (
+              <Chip color="danger" variant="flat" size="sm" className="self-start">
+                {err}
+              </Chip>
+            )}
           </div>
         </CardBody>
       </Card>

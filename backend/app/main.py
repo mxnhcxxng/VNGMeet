@@ -10,6 +10,7 @@ import httpx
 from fastapi import Body, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
+from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
 
 from . import auth, graph
@@ -186,6 +187,48 @@ async def schedule(
             {**r, "grid": grids[r["email"]]} for r in rooms_list
         ],
     }
+
+
+# --------------------------------------------------------------------------- #
+# Bookings
+# --------------------------------------------------------------------------- #
+class BookingRequest(BaseModel):
+    room_email: str
+    room_name: str | None = None
+    date: str  # "2026-06-11"
+    start_time: str  # "09:00"
+    end_time: str  # "10:00"
+    subject: str
+    attendees: list[str] = []
+    body: str | None = None
+
+
+@app.post("/api/bookings")
+async def create_booking(request: Request, payload: BookingRequest):
+    token = _require_token(request)
+
+    if not payload.subject.strip():
+        raise HTTPException(400, "Tiêu đề cuộc họp không được để trống")
+    if payload.end_time <= payload.start_time:
+        raise HTTPException(400, "Giờ kết thúc phải sau giờ bắt đầu")
+
+    start_iso = f"{payload.date}T{payload.start_time}:00"
+    end_iso = f"{payload.date}T{payload.end_time}:00"
+    try:
+        ev = await graph.create_event(
+            token,
+            payload.subject,
+            start_iso,
+            end_iso,
+            settings.timezone,
+            payload.room_email,
+            payload.room_name,
+            payload.attendees,
+            payload.body,
+        )
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(e.response.status_code, e.response.text)
+    return {"ok": True, **ev}
 
 
 @app.get("/api/health")

@@ -41,6 +41,24 @@ export interface ScheduleResponse {
   rooms: ScheduleRoom[];
 }
 
+export interface BookingRequest {
+  room_email: string;
+  room_name?: string;
+  date: string; // "2026-06-11"
+  start_time: string; // "09:00"
+  end_time: string; // "10:00"
+  subject: string;
+  attendees?: string[];
+  body?: string;
+}
+
+export interface BookingResult {
+  ok: boolean;
+  id: string;
+  webLink?: string;
+  subject?: string;
+}
+
 export const api = {
   loginUrl: () => `${API_URL}/api/auth/login`,
   me: () => req<Me>("/api/auth/me"),
@@ -56,4 +74,10 @@ export const api = {
     req<ScheduleResponse>(
       `/api/schedule?days=${days}${emails ? `&emails=${encodeURIComponent(emails)}` : ""}`
     ),
+  book: (payload: BookingRequest) =>
+    req<BookingResult>("/api/bookings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
 };

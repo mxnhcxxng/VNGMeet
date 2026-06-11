@@ -109,3 +109,63 @@ async def get_schedule(
     for item in data.get("value", []):
         result[item.get("scheduleId")] = item.get("availabilityView", "")
     return result
+
+
+async def create_event(
+    access_token: str,
+    subject: str,
+    start_iso: str,
+    end_iso: str,
+    timezone: str,
+    room_email: str,
+    room_name: str | None = None,
+    attendees: list[str] | None = None,
+    body_text: str | None = None,
+) -> dict:
+    """Create an event on the signed-in user's calendar, booking a room.
+
+    The room is added as a resource attendee; if the room mailbox is set to
+    auto-accept, it will accept the invite and then show as busy in getSchedule.
+    Needs the Calendars.ReadWrite delegated permission.
+    """
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+        "Prefer": f'outlook.timezone="{timezone}"',
+    }
+    event_attendees: list[dict] = [
+        {
+            "emailAddress": {"address": room_email, "name": room_name or room_email},
+            "type": "resource",
+        }
+    ]
+    for email in attendees or []:
+        email = email.strip()
+        if email:
+            event_attendees.append(
+                {"emailAddress": {"address": email}, "type": "required"}
+            )
+
+    body: dict = {
+        "subject": subject,
+        "start": {"dateTime": start_iso, "timeZone": timezone},
+        "end": {"dateTime": end_iso, "timeZone": timezone},
+        "location": {"displayName": room_name or room_email},
+        "attendees": event_attendees,
+    }
+    if body_text:
+        body["body"] = {"contentType": "text", "content": body_text}
+
+    url = f"{GRAPH_BASE}/me/events"
+    async with httpx.AsyncClient(timeout=60) as client:
+        resp = await client.post(url, headers=headers, json=body)
+        resp.raise_for_status()
+        data = resp.json()
+
+    return {
+        "id": data.get("id"),
+        "webLink": data.get("webLink"),
+        "subject": data.get("subject"),
+        "start": data.get("start"),
+        "end": data.get("end"),
+    }
