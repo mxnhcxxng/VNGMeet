@@ -1,15 +1,18 @@
-"""FastAPI backend: Microsoft login + meeting-room availability grid."""
+"""FastAPI backend: meeting-room availability grid.
+
+Two auth paths (see auth.py): paste a Graph access token (works without admin),
+or sign in via Supabase's Azure OAuth provider once SUPABASE_* is configured.
+"""
 
 from __future__ import annotations
 
-import uuid
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import httpx
 from fastapi import Body, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -29,85 +32,60 @@ app.add_middleware(
 )
 
 
-def _session_id(request: Request) -> str:
-    sid = request.session.get("sid")
-    if not sid:
-        sid = uuid.uuid4().hex
-        request.session["sid"] = sid
-    return sid
-
-
-def _require_token(request: Request) -> str:
-    sid = _session_id(request)
-    token = auth.get_access_token(sid)
-    if not token:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    return token
-
-
 # --------------------------------------------------------------------------- #
 # Auth
 # --------------------------------------------------------------------------- #
-@app.get("/api/auth/login")
-def login(request: Request):
-    if not settings.client_id or not settings.client_secret:
-        raise HTTPException(500, "Server is missing CLIENT_ID / CLIENT_SECRET. Check .env")
-    sid = _session_id(request)
-    return RedirectResponse(auth.build_auth_url(sid))
-
-
-@app.get("/api/auth/callback")
-def callback(request: Request):
-    sid = _session_id(request)
-    try:
-        auth.complete_login(sid, dict(request.query_params))
-    except ValueError as e:
-        return RedirectResponse(f"{settings.frontend_url}/?error={e}")
-    return RedirectResponse(settings.frontend_url)
-
-
 @app.post("/api/auth/token")
 def set_token(request: Request, access_token: str = Body(..., embed=True)):
-    """Test mode: dán trực tiếp một Graph access token (vd lấy từ Graph Explorer).
+    """Manual mode: paste a Graph access token (e.g. from Graph Explorer).
 
-    Token không tự refresh — hết hạn (~1h) thì dán lại. Dùng tạm trước khi setup OAuth.
+    Token does not auto-refresh — paste again when it expires (~1h). Works without
+    admin consent / Supabase.
     """
     if not access_token or not access_token.strip():
         raise HTTPException(400, "access_token rỗng")
-    sid = _session_id(request)
+    sid = auth.session_id(request)
     auth.set_manual_token(sid, access_token)
-    return JSONResponse({"ok": True, "username": auth.get_account_name(sid)})
+    name = auth._decode_jwt_claim(access_token, "upn", "preferred_username", "name")
+    return JSONResponse({"ok": True, "username": name or "Graph token"})
+
+
+@app.post("/api/auth/link")
+def link_microsoft(request: Request, provider_refresh_token: str = Body(..., embed=True)):
+    """Supabase mode: store the Microsoft refresh token after Azure sign-in."""
+    bearer = request.headers.get("Authorization", "")
+    if not bearer.startswith("Bearer "):
+        raise HTTPException(401, "Not authenticated")
+    claims = auth.verify_jwt(bearer[len("Bearer ") :])
+    if not provider_refresh_token or not provider_refresh_token.strip():
+        raise HTTPException(400, "provider_refresh_token rỗng")
+    auth.store_refresh_token(claims["sub"], provider_refresh_token.strip())
+    return {"ok": True}
 
 
 @app.get("/api/auth/me")
 def me(request: Request):
-    sid = _session_id(request)
-    name = auth.get_account_name(sid)
-    if not name or not auth.get_access_token(sid):
+    bearer = request.headers.get("Authorization", "")
+    if bearer.startswith("Bearer "):
+        claims = auth.verify_jwt(bearer[len("Bearer ") :])
+        return JSONResponse(
+            {
+                "authenticated": True,
+                "username": claims.get("email"),
+                "graphLinked": auth.has_refresh_token(claims["sub"]),
+            }
+        )
+    sid = auth.session_id(request)
+    token = auth.get_manual_token(sid)
+    if not token:
         return JSONResponse({"authenticated": False})
-    return JSONResponse({"authenticated": True, "username": name})
-
-
-@app.get("/api/auth/scopes")
-def scopes(request: Request):
-    sid = _session_id(request)
-    have = auth.get_token_scopes(sid)
-    # findRooms() needs Calendars.Read; getSchedule needs Calendars.Read.Shared.
-    # Calendars.Read.Shared is a superset, so either covers listing rooms.
-    has_read = any(s in have for s in ("Calendars.Read", "Calendars.Read.Shared", "Calendars.ReadWrite"))
-    has_shared = any(s in have for s in ("Calendars.Read.Shared", "Calendars.ReadWrite.Shared"))
-    missing = []
-    if not has_read:
-        missing.append("Calendars.Read (để liệt kê phòng qua findRooms)")
-    if not has_shared:
-        missing.append("Calendars.Read.Shared (để đọc lịch phòng qua getSchedule)")
-    return JSONResponse({"have": have, "missing": missing})
+    name = auth._decode_jwt_claim(token, "upn", "preferred_username", "name")
+    return JSONResponse({"authenticated": True, "username": name or "Graph token"})
 
 
 @app.post("/api/auth/logout")
 def logout(request: Request):
-    sid = _session_id(request)
-    auth.logout(sid)
+    auth.logout(auth.session_id(request))
     return JSONResponse({"ok": True})
 
 
@@ -116,7 +94,7 @@ def logout(request: Request):
 # --------------------------------------------------------------------------- #
 @app.get("/api/rooms")
 async def rooms(request: Request):
-    token = _require_token(request)
+    token, _ = await auth.resolve_token(request)
     try:
         return await graph.list_rooms(token)
     except httpx.HTTPStatusError as e:
@@ -139,7 +117,7 @@ async def schedule(
     days: int = Query(7, ge=1, le=31),
     emails: str = Query("", description="Comma-separated room emails; empty = all rooms"),
 ):
-    token = _require_token(request)
+    token, _ = await auth.resolve_token(request)
     tz = ZoneInfo(settings.timezone)
 
     # Resolve which rooms to query.
@@ -205,7 +183,7 @@ class BookingRequest(BaseModel):
 
 @app.post("/api/bookings")
 async def create_booking(request: Request, payload: BookingRequest):
-    token = _require_token(request)
+    token, user_id = await auth.resolve_token(request)
 
     if not payload.subject.strip():
         raise HTTPException(400, "Tiêu đề cuộc họp không được để trống")
@@ -228,6 +206,28 @@ async def create_booking(request: Request, payload: BookingRequest):
         )
     except httpx.HTTPStatusError as e:
         raise HTTPException(e.response.status_code, e.response.text)
+
+    # Mirror booking metadata into Supabase when available (Supabase path only).
+    if user_id and settings.supabase_enabled:
+        try:
+            from .supabase_client import get_supabase
+
+            get_supabase().table("bookings").insert(
+                {
+                    "user_id": user_id,
+                    "room_email": payload.room_email,
+                    "room_name": payload.room_name,
+                    "date": payload.date,
+                    "start_time": payload.start_time,
+                    "end_time": payload.end_time,
+                    "subject": payload.subject,
+                    "graph_event_id": ev.get("id"),
+                    "web_link": ev.get("webLink"),
+                }
+            ).execute()
+        except Exception:
+            pass
+
     return {"ok": True, **ev}
 
 

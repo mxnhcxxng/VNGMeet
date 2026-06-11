@@ -7,9 +7,11 @@ services:
       CLIENT_ID: ${CLIENT_ID}
       CLIENT_SECRET: ${CLIENT_SECRET}
       TENANT_ID: ${TENANT_ID:-common}
-      REDIRECT_URI: ${REDIRECT_URI:-http://localhost:8000/api/auth/callback}
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      SUPABASE_JWT_SECRET: ${SUPABASE_JWT_SECRET}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
-      SESSION_SECRET: ${SESSION_SECRET:-change-me-in-production-please}
       TIMEZONE: ${TIMEZONE:-Asia/Ho_Chi_Minh}
       BUSINESS_START_HOUR: ${BUSINESS_START_HOUR:-8}
       BUSINESS_END_HOUR: ${BUSINESS_END_HOUR:-18}
@@ -20,6 +22,8 @@ services:
       context: ./frontend
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:-${SUPABASE_URL}}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY:-${SUPABASE_ANON_KEY}}
     ports:
       - "3000:3000"
     depends_on:

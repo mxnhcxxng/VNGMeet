@@ -10,6 +10,7 @@ import {
   Textarea,
 } from "@heroui/react";
 import { api, type Me, type ScheduleResponse } from "@/lib/api";
+import { supabase, supabaseEnabled } from "@/lib/supabase";
 import { Sidebar, type View } from "@/components/Sidebar";
 import { BrowseRooms } from "@/components/BrowseRooms";
 import { ChatPanel } from "@/components/ChatPanel";
@@ -56,29 +57,33 @@ function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
             </div>
           </div>
 
-          <Button
-            color="primary"
-            size="lg"
-            as="a"
-            href={api.loginUrl()}
-            className="font-medium shadow-md shadow-primary/30"
-            startContent={
-              <svg width="18" height="18" viewBox="0 0 21 21" aria-hidden>
-                <rect x="1" y="1" width="9" height="9" fill="#f25022" />
-                <rect x="11" y="1" width="9" height="9" fill="#7fba00" />
-                <rect x="1" y="11" width="9" height="9" fill="#00a4ef" />
-                <rect x="11" y="11" width="9" height="9" fill="#ffb900" />
-              </svg>
-            }
-          >
-            Đăng nhập với Microsoft
-          </Button>
+          {/* Supabase OAuth — only when configured (cần admin consent). */}
+          {supabaseEnabled && (
+            <>
+              <Button
+                color="primary"
+                size="lg"
+                onPress={() => api.signIn()}
+                className="font-medium shadow-md shadow-primary/30"
+                startContent={
+                  <svg width="18" height="18" viewBox="0 0 21 21" aria-hidden>
+                    <rect x="1" y="1" width="9" height="9" fill="#f25022" />
+                    <rect x="11" y="1" width="9" height="9" fill="#7fba00" />
+                    <rect x="1" y="11" width="9" height="9" fill="#00a4ef" />
+                    <rect x="11" y="11" width="9" height="9" fill="#ffb900" />
+                  </svg>
+                }
+              >
+                Đăng nhập với Microsoft
+              </Button>
 
-          <div className="flex items-center gap-3 text-xs font-medium text-default-400">
-            <div className="h-px flex-1 bg-default-200" />
-            HOẶC TEST NHANH
-            <div className="h-px flex-1 bg-default-200" />
-          </div>
+              <div className="flex items-center gap-3 text-xs font-medium text-default-400">
+                <div className="h-px flex-1 bg-default-200" />
+                HOẶC TEST NHANH
+                <div className="h-px flex-1 bg-default-200" />
+              </div>
+            </>
+          )}
 
           <div className="flex flex-col gap-3">
             <Textarea
@@ -122,13 +127,38 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    api
-      .me()
-      .then(setMe)
-      .catch(() => setMe({ authenticated: false }))
-      .finally(() => setLoading(false));
+  const refreshMe = useCallback(async () => {
+    try {
+      setMe(await api.me());
+    } catch {
+      setMe({ authenticated: false });
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  // Initial auth check (covers the manual-token cookie session).
+  useEffect(() => {
+    refreshMe();
+  }, [refreshMe]);
+
+  // Supabase OAuth flow (only when configured).
+  useEffect(() => {
+    if (!supabase) return;
+    const { data: sub } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (!session) return;
+      // Supabase exposes the Microsoft refresh token only right after OAuth.
+      if (session.provider_refresh_token) {
+        try {
+          await api.link(session.provider_refresh_token);
+        } catch {
+          /* non-fatal */
+        }
+      }
+      if (event !== "TOKEN_REFRESHED") refreshMe();
+    });
+    return () => sub.subscription.unsubscribe();
+  }, [refreshMe]);
 
   const loadSchedule = useCallback(async () => {
     setRefreshing(true);
@@ -147,6 +177,16 @@ export default function Home() {
     if (me?.authenticated) loadSchedule();
   }, [me?.authenticated, loadSchedule]);
 
+  const handleLogout = async () => {
+    try {
+      await api.logout();
+    } catch {
+      /* ignore */
+    }
+    if (supabase) await api.signOut();
+    setMe({ authenticated: false });
+  };
+
   if (loading) {
     return (
       <div className="flex h-screen items-center justify-center">
@@ -156,7 +196,7 @@ export default function Home() {
   }
 
   if (!me?.authenticated) {
-    return <LoginScreen onAuthed={() => api.me().then(setMe)} />;
+    return <LoginScreen onAuthed={refreshMe} />;
   }
 
   return (
@@ -165,19 +205,10 @@ export default function Home() {
         view={view}
         onChange={setView}
         username={me.username}
-        onLogout={() => api.logout().then(() => setMe({ authenticated: false }))}
+        onLogout={handleLogout}
       />
 
-      <main className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center justify-between border-b border-default-200 px-6 py-3">
-          <h1 className="text-xl font-semibold">
-            {view === "browse" ? "Phòng họp" : "Trợ lý phòng họp"}
-          </h1>
-          <span className="text-xs text-default-400">
-            {data ? `${data.rooms.length} phòng · ${data.timezone}` : ""}
-          </span>
-        </header>
-
+      <main className="flex min-w-0 flex-1 flex-col bg-white">
         {error && (
           <div className="border-b border-danger-200 bg-danger-50 px-6 py-2 text-sm text-danger">
             {error}

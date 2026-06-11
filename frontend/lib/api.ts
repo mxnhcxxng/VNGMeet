@@ -1,10 +1,20 @@
+import { supabase } from "./supabase";
+
 export const API_URL =
   process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
+  // Supabase path: attach the session JWT. Manual path: rely on the session cookie.
+  const token = supabase
+    ? (await supabase.auth.getSession()).data.session?.access_token
+    : undefined;
   const res = await fetch(`${API_URL}${path}`, {
     credentials: "include",
     ...init,
+    headers: {
+      ...(init?.headers ?? {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
   });
   if (res.status === 401) {
     throw new Error("UNAUTHENTICATED");
@@ -15,9 +25,13 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+const SCOPES =
+  "offline_access openid email profile Place.Read.All Calendars.Read.Shared Calendars.ReadWrite User.Read";
+
 export interface Me {
   authenticated: boolean;
   username?: string;
+  graphLinked?: boolean;
 }
 
 export interface Room {
@@ -60,8 +74,21 @@ export interface BookingResult {
 }
 
 export const api = {
-  loginUrl: () => `${API_URL}/api/auth/login`,
-  me: () => req<Me>("/api/auth/me"),
+  // Supabase path (only when configured): OAuth via Azure (Microsoft) provider.
+  signIn: () =>
+    supabase?.auth.signInWithOAuth({
+      provider: "azure",
+      options: { scopes: SCOPES, redirectTo: window.location.origin },
+    }),
+  signOut: () => supabase?.auth.signOut(),
+  // Persist the Microsoft refresh token on the backend (once, after OAuth).
+  link: (provider_refresh_token: string) =>
+    req<{ ok: boolean }>("/api/auth/link", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider_refresh_token }),
+    }),
+  // Manual path: paste a Graph access token (no admin / no Supabase needed).
   setToken: (access_token: string) =>
     req<{ ok: boolean; username?: string }>("/api/auth/token", {
       method: "POST",
@@ -69,6 +96,7 @@ export const api = {
       body: JSON.stringify({ access_token }),
     }),
   logout: () => req<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
+  me: () => req<Me>("/api/auth/me"),
   rooms: () => req<Room[]>("/api/rooms"),
   schedule: (days: number, emails?: string) =>
     req<ScheduleResponse>(

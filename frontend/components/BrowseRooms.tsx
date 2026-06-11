@@ -1,25 +1,18 @@
 "use client";
 
 import { useState } from "react";
-import { Button, Chip, Switch, useDisclosure } from "@heroui/react";
+import { useDisclosure } from "@heroui/react";
 import type { ScheduleResponse } from "@/lib/api";
 import { BookingModal, type BookingSlot } from "./BookingModal";
 
-const ROOM_IMAGES = [
-  "linear-gradient(135deg,#a8c0ff,#3f2b96)",
-  "linear-gradient(135deg,#f6d365,#fda085)",
-  "linear-gradient(135deg,#84fab0,#8fd3f4)",
-  "linear-gradient(135deg,#d4fc79,#96e6a1)",
-  "linear-gradient(135deg,#fbc2eb,#a6c1ee)",
-  "linear-gradient(135deg,#fdcbf1,#e6dee9)",
-];
+const SLOT_H = 44; // px per slot row
 
 function fmtDate(iso: string) {
   const d = new Date(iso + "T00:00:00");
   return d.toLocaleDateString("vi-VN", {
-    weekday: "long",
+    weekday: "short",
     day: "2-digit",
-    month: "long",
+    month: "short",
     year: "numeric",
   });
 }
@@ -29,6 +22,23 @@ function addLabel(time: string, slotMinutes: number) {
   const end = h * 60 + m + slotMinutes;
   return `${String(Math.floor(end / 60)).padStart(2, "0")}:${String(end % 60).padStart(2, "0")}`;
 }
+
+function hourLabel(t: string) {
+  const [h] = t.split(":").map(Number);
+  const ap = h < 12 ? "AM" : "PM";
+  return `${h % 12 || 12} ${ap}`;
+}
+
+const IconCalendar = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <rect x="3" y="4" width="18" height="18" rx="2" /><path d="M16 2v4M8 2v4M3 10h18" />
+  </svg>
+);
+const IconClock = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" />
+  </svg>
+);
 
 export function BrowseRooms({
   data,
@@ -47,14 +57,16 @@ export function BrowseRooms({
   const { isOpen, onOpen, onClose } = useDisclosure();
   const [selectedSlot, setSelectedSlot] = useState<BookingSlot | null>(null);
   const [endOptions, setEndOptions] = useState<string[]>([]);
-  const rooms = data.rooms;
-  const cols = `72px repeat(${rooms.length}, minmax(150px, 1fr))`;
 
-  // Valid end times for a slot starting at times[ti]: every later slot start
-  // plus the final business-end label.
+  const rooms = data.rooms;
+  const times = data.times;
+  const cols = `64px repeat(${rooms.length}, minmax(160px, 1fr))`;
+  const dayStart = times[0] ?? "08:00";
+  const dayEnd = addLabel(times[times.length - 1] ?? "17:30", data.slotMinutes);
+
   function endOptionsFor(ti: number): string[] {
-    const lastEnd = addLabel(data.times[data.times.length - 1], data.slotMinutes);
-    return [...data.times.slice(ti + 1), lastEnd];
+    const lastEnd = addLabel(times[times.length - 1], data.slotMinutes);
+    return [...times.slice(ti + 1), lastEnd];
   }
 
   function openBooking(roomEmail: string, roomName: string, t: string, ti: number) {
@@ -63,104 +75,205 @@ export function BrowseRooms({
     onOpen();
   }
 
-  return (
-    <div className="flex h-full flex-col">
-      {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-3 border-b border-default-200 px-6 py-3">
-        <Button size="sm" variant="bordered" onPress={() => setDayIndex(() => 0)}>
-          Hôm nay
-        </Button>
-        <div className="flex items-center gap-1">
-          <Button
-            isIconOnly
-            size="sm"
-            variant="bordered"
-            isDisabled={dayIndex <= 0}
-            onPress={() => setDayIndex((n) => Math.max(0, n - 1))}
-          >
-            ‹
-          </Button>
-          <Button
-            isIconOnly
-            size="sm"
-            variant="bordered"
-            isDisabled={dayIndex >= data.days.length - 1}
-            onPress={() => setDayIndex((n) => Math.min(data.days.length - 1, n + 1))}
-          >
-            ›
-          </Button>
-        </div>
-        <Chip variant="flat" className="capitalize">
-          {fmtDate(data.days[dayIndex])}
-        </Chip>
+  // Current-time marker (only when the selected day is today and within hours).
+  const now = new Date();
+  const todayIso = now.toISOString().slice(0, 10);
+  const [sh, sm] = dayStart.split(":").map(Number);
+  const minutesFromStart = now.getHours() * 60 + now.getMinutes() - (sh * 60 + sm);
+  const markerOffset = (minutesFromStart / data.slotMinutes) * SLOT_H;
+  const showMarker =
+    data.days[dayIndex] === todayIso && markerOffset >= 0 && markerOffset <= times.length * SLOT_H;
 
-        <div className="ml-auto flex items-center gap-4">
-          <div className="flex items-center gap-2">
-            <Switch size="sm" isSelected={vacantOnly} onValueChange={setVacantOnly} color="success" />
-            <span className="text-sm text-default-600">Chỉ phòng trống</span>
-          </div>
-          <Button size="sm" variant="flat" isLoading={refreshing} onPress={onRefresh}>
-            Làm mới
-          </Button>
+  return (
+    <div className="flex h-full flex-col bg-white">
+      {/* Toolbar */}
+      <div className="flex flex-wrap items-center gap-2 border-b border-[#e9eaeb] px-6 py-4">
+        <button
+          onClick={() => setDayIndex(() => 0)}
+          className="rounded-md border border-[#d5d7da] bg-white px-3.5 py-2 text-sm font-semibold text-[#414651] shadow-[0_1px_2px_0_#0a0d120d] hover:bg-[#fafafa]"
+        >
+          Today
+        </button>
+
+        <div className="flex items-center rounded-md border border-[#d5d7da] bg-white shadow-[0_1px_2px_0_#0a0d120d]">
+          <button
+            disabled={dayIndex <= 0}
+            onClick={() => setDayIndex((n) => Math.max(0, n - 1))}
+            className="px-2.5 py-2 text-[#717680] hover:bg-[#fafafa] disabled:opacity-40"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6" /></svg>
+          </button>
+          <div className="h-5 w-px bg-[#e9eaeb]" />
+          <button
+            disabled={dayIndex >= data.days.length - 1}
+            onClick={() => setDayIndex((n) => Math.min(data.days.length - 1, n + 1))}
+            className="px-2.5 py-2 text-[#717680] hover:bg-[#fafafa] disabled:opacity-40"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18l6-6-6-6" /></svg>
+          </button>
         </div>
+
+        <div className="flex items-center gap-2 rounded-md border border-[#d5d7da] bg-white px-3.5 py-2 text-sm font-semibold text-[#414651] shadow-[0_1px_2px_0_#0a0d120d]">
+          <span className="text-[#717680]"><IconCalendar /></span>
+          <span className="capitalize">{fmtDate(data.days[dayIndex])}</span>
+        </div>
+
+        {/* Business-hours window */}
+        <div className="flex items-center gap-2 rounded-md border border-[#d5d7da] bg-white px-3 py-2 text-sm font-semibold text-[#414651] shadow-[0_1px_2px_0_#0a0d120d]">
+          <span className="text-[#717680]"><IconClock /></span>
+          {dayStart}
+        </div>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#717680" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+        <div className="flex items-center gap-2 rounded-md border border-[#d5d7da] bg-white px-3 py-2 text-sm font-semibold text-[#414651] shadow-[0_1px_2px_0_#0a0d120d]">
+          <span className="text-[#717680]"><IconClock /></span>
+          {dayEnd}
+        </div>
+
+        {/* Vacant only toggle */}
+        <div className="ml-1 flex items-center gap-2">
+          <button
+            onClick={() => setVacantOnly((v) => !v)}
+            className={`relative h-5 w-9 rounded-full transition-colors ${vacantOnly ? "bg-[#1570ef]" : "bg-[#e9eaeb]"}`}
+            aria-pressed={vacantOnly}
+          >
+            <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${vacantOnly ? "left-[18px]" : "left-0.5"}`} />
+          </button>
+          <span className="text-sm font-medium text-[#414651]">Vacant only</span>
+        </div>
+
+        <button
+          onClick={onRefresh}
+          disabled={refreshing}
+          className="ml-auto flex items-center gap-2 rounded-md border border-[#d5d7da] bg-white px-3.5 py-2 text-sm font-semibold text-[#414651] shadow-[0_1px_2px_0_#0a0d120d] hover:bg-[#fafafa] disabled:opacity-50"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={refreshing ? "animate-spin" : ""}>
+            <path d="M23 4v6h-6M1 20v-6h6" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+          </svg>
+          Làm mới
+        </button>
       </div>
 
-      {/* Grid */}
-      <div className="flex-1 overflow-auto p-6">
+      {/* Calendar */}
+      <div className="flex-1 overflow-auto">
         <div className="min-w-fit">
-          {/* Room header cards */}
-          <div className="sticky top-0 z-20 grid gap-2 bg-background pb-2" style={{ gridTemplateColumns: cols }}>
-            <div /> {/* corner */}
+          {/* Room header */}
+          <div
+            className="sticky top-0 z-20 grid border-b border-[#e9eaeb] bg-white"
+            style={{ gridTemplateColumns: cols }}
+          >
+            <div className="border-r border-[#e9eaeb]" />
             {rooms.map((r, i) => (
-              <div key={r.email} className="rounded-large border border-default-200 bg-content1 p-2">
-                <div
-                  className="mb-2 h-16 w-full rounded-medium"
-                  style={{ background: ROOM_IMAGES[i % ROOM_IMAGES.length] }}
-                />
-                <p className="truncate text-sm font-semibold" title={r.name}>
+              <div
+                key={r.email}
+                className="border-r border-[#e9eaeb] px-3 py-3 text-center"
+              >
+                <p className="truncate text-sm font-semibold text-[#414651]" title={r.name}>
                   {r.name}
                 </p>
-                <p className="truncate text-xs text-default-400">
-                  {r.capacity ? `👤 ${r.capacity}` : r.email}
+                <p className="truncate text-xs text-[#717680]">
+                  {r.capacity ? `👤 ${r.capacity}` : " "}
                 </p>
               </div>
             ))}
           </div>
 
-          {/* Time rows */}
-          {data.times.map((t, ti) => (
-            <div key={t} className="grid gap-2" style={{ gridTemplateColumns: cols }}>
-              <div className="flex h-14 items-start justify-end pr-2 pt-1 text-xs tabular-nums text-default-400">
-                {t}
-              </div>
-              {rooms.map((r) => {
-                const status = r.grid[ti]?.[dayIndex] ?? 0;
-                const free = status === 0;
-                if (vacantOnly && !free) {
-                  return <div key={r.email} className="h-14" />;
-                }
-                return (
-                  <div key={r.email} className="h-14 py-0.5">
-                    <div
-                      role={free ? "button" : undefined}
-                      tabIndex={free ? 0 : undefined}
-                      onClick={free ? () => openBooking(r.email, r.name, t, ti) : undefined}
-                      className={`flex h-full flex-col justify-center rounded-medium border px-2 text-xs ${
-                        free
-                          ? "cursor-pointer border-success-200 bg-success-50 text-success-700 transition-colors hover:border-success-400 hover:bg-success-100"
-                          : "border-danger-200 bg-danger-50 text-danger-600"
-                      }`}
-                    >
-                      <span className="font-semibold">{free ? "Trống" : "Đã book"}</span>
-                      <span className="opacity-70">
-                        {t} - {addLabel(t, data.slotMinutes)}
+          {/* Rows */}
+          <div className="relative">
+            {times.map((t, ti) => {
+              const onHour = t.endsWith(":00");
+              return (
+                <div key={t} className="grid" style={{ gridTemplateColumns: cols }}>
+                  {/* time label */}
+                  <div
+                    className="relative border-r border-[#e9eaeb]"
+                    style={{ height: SLOT_H }}
+                  >
+                    {onHour && (
+                      <span className="absolute -top-2 right-2 text-xs font-medium text-[#717680]">
+                        {hourLabel(t)}
                       </span>
-                    </div>
+                    )}
                   </div>
-                );
-              })}
-            </div>
-          ))}
+
+                  {rooms.map((r) => {
+                    const status = r.grid[ti]?.[dayIndex] ?? 0;
+                    const free = status === 0;
+                    const prevBusy = ti > 0 && (r.grid[ti - 1]?.[dayIndex] ?? 0) !== 0;
+                    const nextBusy =
+                      ti < times.length - 1 && (r.grid[ti + 1]?.[dayIndex] ?? 0) !== 0;
+
+                    if (vacantOnly && !free) {
+                      return (
+                        <div
+                          key={r.email}
+                          className={`border-r border-[#e9eaeb] ${onHour ? "border-t" : "border-t border-t-[#f5f5f5]"}`}
+                          style={{ height: SLOT_H }}
+                        />
+                      );
+                    }
+
+                    if (free) {
+                      return (
+                        <div
+                          key={r.email}
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => openBooking(r.email, r.name, t, ti)}
+                          className={`group cursor-pointer border-r border-[#e9eaeb] px-1 ${
+                            onHour ? "border-t border-t-[#e9eaeb]" : "border-t border-t-[#f5f5f5]"
+                          } hover:bg-[#f9fafb]`}
+                          style={{ height: SLOT_H }}
+                        >
+                          <div className="flex h-full items-center justify-center rounded-md text-xs font-medium text-transparent group-hover:text-[#1570ef]">
+                            + Book
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    // busy block (merged look across consecutive slots)
+                    return (
+                      <div
+                        key={r.email}
+                        className={`border-r border-[#e9eaeb] ${onHour && !prevBusy ? "border-t border-t-[#e9eaeb]" : ""}`}
+                        style={{ height: SLOT_H }}
+                      >
+                        <div
+                          className="h-full px-2"
+                          style={{
+                            backgroundColor: "#fef3f2",
+                            borderTopLeftRadius: prevBusy ? 0 : 8,
+                            borderTopRightRadius: prevBusy ? 0 : 8,
+                            borderBottomLeftRadius: nextBusy ? 0 : 8,
+                            borderBottomRightRadius: nextBusy ? 0 : 8,
+                          }}
+                        >
+                          {!prevBusy && (
+                            <div className="pt-1.5">
+                              <p className="truncate text-xs font-semibold" style={{ color: "#b42318" }}>
+                                Booked
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
+
+            {/* Current-time marker */}
+            {showMarker && (
+              <div
+                className="pointer-events-none absolute left-0 right-0 z-10 flex items-center"
+                style={{ top: markerOffset }}
+              >
+                <span className="ml-[56px] h-2.5 w-2.5 -translate-y-1/2 rounded-full bg-[#1570ef]" />
+                <span className="h-px flex-1 bg-[#1570ef]" />
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

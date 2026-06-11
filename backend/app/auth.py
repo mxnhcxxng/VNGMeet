@@ -1,76 +1,35 @@
-"""Delegated OAuth2 (authorization code flow) using MSAL.
+"""Auth with two paths:
 
-Token caches are kept server-side, keyed by an opaque session id that lives in a
-signed cookie. This avoids stuffing refresh tokens into the browser cookie.
+1. Manual Graph token (works today, no admin / no Supabase): the user pastes a
+   Graph access token (e.g. from Graph Explorer); we keep it server-side keyed by
+   an opaque session id stored in a signed cookie.
+
+2. Supabase (Azure OAuth provider) — only active once SUPABASE_* is configured.
+   The frontend signs in via Supabase, the backend verifies the session JWT and
+   exchanges the stored Microsoft refresh token for a fresh Graph access token.
+
+`resolve_token()` picks whichever path the request carries.
 """
 
 from __future__ import annotations
 
-import msal
+import base64
+import json
+import time
+import uuid
+
+import httpx
+from fastapi import HTTPException, Request
 
 from .config import get_settings
 
-import base64
-import json
-
-# session_id -> serialized MSAL token cache (JSON string)
-_CACHE_STORE: dict[str, str] = {}
-# session_id -> auth "flow" dict produced by initiate_auth_code_flow (PKCE state, etc.)
-_FLOW_STORE: dict[str, dict] = {}
-# session_id -> manually pasted Graph access token (e.g. from Graph Explorer)
+# --- manual-token path (session-scoped) ------------------------------------- #
+# session_id -> Graph access token pasted by the user.
 _MANUAL_TOKENS: dict[str, str] = {}
 
-
-def _load_cache(session_id: str) -> msal.SerializableTokenCache:
-    cache = msal.SerializableTokenCache()
-    blob = _CACHE_STORE.get(session_id)
-    if blob:
-        cache.deserialize(blob)
-    return cache
-
-
-def _save_cache(session_id: str, cache: msal.SerializableTokenCache) -> None:
-    if cache.has_state_changed:
-        _CACHE_STORE[session_id] = cache.serialize()
-
-
-def _build_app(cache: msal.SerializableTokenCache) -> msal.ConfidentialClientApplication:
-    s = get_settings()
-    return msal.ConfidentialClientApplication(
-        client_id=s.client_id,
-        client_credential=s.client_secret,
-        authority=s.authority,
-        token_cache=cache,
-    )
-
-
-def build_auth_url(session_id: str) -> str:
-    """Start an auth-code flow and return the URL to redirect the user to."""
-    s = get_settings()
-    cache = _load_cache(session_id)
-    app = _build_app(cache)
-    flow = app.initiate_auth_code_flow(scopes=s.scopes, redirect_uri=s.redirect_uri)
-    _FLOW_STORE[session_id] = flow
-    return flow["auth_uri"]
-
-
-def complete_login(session_id: str, query_params: dict) -> dict:
-    """Exchange the auth-code (in query_params) for tokens. Returns the token result."""
-    flow = _FLOW_STORE.pop(session_id, None)
-    if not flow:
-        raise ValueError("No auth flow in progress for this session.")
-    cache = _load_cache(session_id)
-    app = _build_app(cache)
-    result = app.acquire_token_by_auth_code_flow(flow, query_params)
-    _save_cache(session_id, cache)
-    if "access_token" not in result:
-        raise ValueError(result.get("error_description", "Login failed"))
-    return result
-
-
-def set_manual_token(session_id: str, access_token: str) -> None:
-    """Store a Graph access token pasted by the user (test mode, no refresh)."""
-    _MANUAL_TOKENS[session_id] = access_token.strip()
+# --- supabase path ----------------------------------------------------------- #
+# user_id -> (access_token, expires_at_epoch). Rebuildable from the refresh token.
+_GRAPH_TOKEN_CACHE: dict[str, tuple[str, float]] = {}
 
 
 def _decode_jwt_claim(token: str, *claims: str) -> str | None:
@@ -87,46 +46,143 @@ def _decode_jwt_claim(token: str, *claims: str) -> str | None:
     return None
 
 
-def get_access_token(session_id: str) -> str | None:
-    """Return a valid access token for the session, refreshing silently if needed."""
-    manual = _MANUAL_TOKENS.get(session_id)
-    if manual:
-        return manual
+# --------------------------------------------------------------------------- #
+# Session id (for the manual-token path)
+# --------------------------------------------------------------------------- #
+def session_id(request: Request) -> str:
+    sid = request.session.get("sid")
+    if not sid:
+        sid = uuid.uuid4().hex
+        request.session["sid"] = sid
+    return sid
+
+
+def set_manual_token(sid: str, access_token: str) -> None:
+    _MANUAL_TOKENS[sid] = access_token.strip()
+
+
+def get_manual_token(sid: str) -> str | None:
+    return _MANUAL_TOKENS.get(sid)
+
+
+def logout(sid: str) -> None:
+    _MANUAL_TOKENS.pop(sid, None)
+
+
+# --------------------------------------------------------------------------- #
+# Supabase session (JWT) verification
+# --------------------------------------------------------------------------- #
+def verify_jwt(token: str) -> dict:
+    import jwt  # imported lazily so the manual path works even if unused
+
     s = get_settings()
-    cache = _load_cache(session_id)
-    app = _build_app(cache)
-    accounts = app.get_accounts()
-    if not accounts:
-        return None
-    result = app.acquire_token_silent(scopes=s.scopes, account=accounts[0])
-    _save_cache(session_id, cache)
-    if result and "access_token" in result:
-        return result["access_token"]
-    return None
+    if not s.supabase_jwt_secret:
+        raise HTTPException(500, "Server missing SUPABASE_JWT_SECRET. Check .env")
+    try:
+        return jwt.decode(
+            token,
+            s.supabase_jwt_secret,
+            algorithms=["HS256"],
+            audience="authenticated",
+        )
+    except jwt.PyJWTError as e:
+        raise HTTPException(401, f"Invalid session: {e}")
 
 
-def get_account_name(session_id: str) -> str | None:
-    manual = _MANUAL_TOKENS.get(session_id)
-    if manual:
-        return _decode_jwt_claim(manual, "upn", "preferred_username", "name") or "Graph token"
-    cache = _load_cache(session_id)
-    app = _build_app(cache)
-    accounts = app.get_accounts()
-    if accounts:
-        return accounts[0].get("username")
-    return None
+def _bearer(request: Request) -> str | None:
+    header = request.headers.get("Authorization", "")
+    return header[len("Bearer ") :] if header.startswith("Bearer ") else None
 
 
-def get_token_scopes(session_id: str) -> list[str]:
-    """Return the scopes (scp claim) of the current access token, for diagnostics."""
-    token = get_access_token(session_id)
+# --------------------------------------------------------------------------- #
+# Supabase: provider (Graph) refresh-token storage
+# --------------------------------------------------------------------------- #
+def store_refresh_token(user_id: str, refresh_token: str) -> None:
+    from .supabase_client import get_supabase
+
+    get_supabase().table("provider_tokens").upsert(
+        {"user_id": user_id, "refresh_token": refresh_token}
+    ).execute()
+
+
+def has_refresh_token(user_id: str) -> bool:
+    from .supabase_client import get_supabase
+
+    res = (
+        get_supabase()
+        .table("provider_tokens")
+        .select("user_id")
+        .eq("user_id", user_id)
+        .execute()
+    )
+    return bool(res.data)
+
+
+def _load_refresh_token(user_id: str) -> str | None:
+    from .supabase_client import get_supabase
+
+    res = (
+        get_supabase()
+        .table("provider_tokens")
+        .select("refresh_token")
+        .eq("user_id", user_id)
+        .limit(1)
+        .execute()
+    )
+    return res.data[0]["refresh_token"] if res.data else None
+
+
+async def get_graph_token(user_id: str) -> str:
+    """Return a valid Graph access token for a Supabase user, refreshing as needed."""
+    cached = _GRAPH_TOKEN_CACHE.get(user_id)
+    if cached and cached[1] - 60 > time.time():
+        return cached[0]
+
+    refresh_token = _load_refresh_token(user_id)
+    if not refresh_token:
+        raise HTTPException(401, "Microsoft account not linked. Sign in again.")
+
+    s = get_settings()
+    data = {
+        "client_id": s.client_id,
+        "client_secret": s.client_secret,
+        "grant_type": "refresh_token",
+        "refresh_token": refresh_token,
+        "scope": " ".join(s.scopes),
+    }
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(s.token_endpoint, data=data)
+    if resp.status_code != 200:
+        raise HTTPException(401, f"Could not refresh Microsoft token: {resp.text}")
+    payload = resp.json()
+
+    access_token = payload["access_token"]
+    expires_in = int(payload.get("expires_in", 3600))
+    _GRAPH_TOKEN_CACHE[user_id] = (access_token, time.time() + expires_in)
+
+    new_refresh = payload.get("refresh_token")
+    if new_refresh and new_refresh != refresh_token:
+        store_refresh_token(user_id, new_refresh)
+
+    return access_token
+
+
+# --------------------------------------------------------------------------- #
+# Unified resolution used by the API endpoints
+# --------------------------------------------------------------------------- #
+async def resolve_token(request: Request) -> tuple[str, str | None]:
+    """Return (graph_access_token, supabase_user_id|None) for the request.
+
+    Prefers a Supabase bearer token if present; otherwise falls back to the
+    session-scoped manual Graph token. Raises 401 if neither is available.
+    """
+    bearer = _bearer(request)
+    if bearer:
+        claims = verify_jwt(bearer)
+        user_id = claims["sub"]
+        return await get_graph_token(user_id), user_id
+
+    token = get_manual_token(session_id(request))
     if not token:
-        return []
-    scp = _decode_jwt_claim(token, "scp")
-    return scp.split(" ") if scp else []
-
-
-def logout(session_id: str) -> None:
-    _CACHE_STORE.pop(session_id, None)
-    _FLOW_STORE.pop(session_id, None)
-    _MANUAL_TOKENS.pop(session_id, None)
+        raise HTTPException(401, "Not authenticated")
+    return token, None
