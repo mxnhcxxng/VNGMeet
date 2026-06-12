@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useDisclosure } from "@heroui/react";
 import type { ScheduleResponse } from "@/lib/api";
 import { BookingModal, type BookingSlot } from "./BookingModal";
 
@@ -85,7 +84,9 @@ export function BrowseRooms({
   onRefresh: () => void;
 }) {
   const [vacantOnly, setVacantOnly] = useState(false);
-  const { isOpen, onOpen, onClose } = useDisclosure();
+  const [isOpen, setIsOpen] = useState(false);
+  const onOpen = () => setIsOpen(true);
+  const onClose = () => setIsOpen(false);
   const [selectedSlot, setSelectedSlot] = useState<BookingSlot | null>(null);
   const [endOptions, setEndOptions] = useState<string[]>([]);
 

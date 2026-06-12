@@ -1,7 +1,15 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Avatar, Button, Chip, Input, Spinner, Textarea } from "@heroui/react";
+import {
+  Button,
+  Chip,
+  Input,
+  Label,
+  Spinner,
+  TextArea,
+  TextField,
+} from "@heroui/react";
 import { api, type BookingRequest, type ChatMessage, type ChatThread } from "@/lib/api";
 
 function bubbleClass(role: ChatMessage["role"]) {
@@ -43,6 +51,57 @@ function splitAttendees(value: string) {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function FieldInput({
+  label,
+  value,
+  onChange,
+  type,
+  placeholder,
+  isDisabled,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  type?: string;
+  placeholder?: string;
+  isDisabled?: boolean;
+}) {
+  return (
+    <TextField fullWidth isDisabled={isDisabled}>
+      <Label>{label}</Label>
+      <Input
+        type={type}
+        placeholder={placeholder}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      />
+    </TextField>
+  );
+}
+
+function FieldTextArea({
+  label,
+  value,
+  onChange,
+  isDisabled,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  isDisabled?: boolean;
+}) {
+  return (
+    <TextField fullWidth isDisabled={isDisabled}>
+      <Label>{label}</Label>
+      <TextArea
+        rows={3}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      />
+    </TextField>
+  );
 }
 
 function BookingConfirmationCard({
@@ -100,83 +159,73 @@ function BookingConfirmationCard({
           <div className="text-xs text-[#535862]">Kiểm tra và chỉnh thông tin trước khi book.</div>
         </div>
         {actioned && (
-          <Chip size="sm" color="success" variant="flat">
+          <Chip size="sm" color="success" variant="secondary">
             Đã xử lý
           </Chip>
         )}
       </div>
       {localError && (
-        <Chip size="sm" color="danger" variant="flat" className="mb-3">
+        <Chip size="sm" color="danger" variant="secondary" className="mb-3">
           {localError}
         </Chip>
       )}
 
       <div className="grid gap-2 sm:grid-cols-2">
-        <Input
-          size="sm"
+        <FieldInput
           label="Phòng"
           value={draft.room_name || draft.room_email}
-          onValueChange={(value) => update("room_name", value)}
+          onChange={(value) => update("room_name", value)}
           isDisabled={disabled}
         />
-        <Input
-          size="sm"
+        <FieldInput
           label="Email phòng"
           value={draft.room_email}
-          onValueChange={(value) => update("room_email", value)}
+          onChange={(value) => update("room_email", value)}
           isDisabled={disabled}
         />
-        <Input
-          size="sm"
+        <FieldInput
           label="Ngày"
           type="date"
           value={draft.date}
-          onValueChange={(value) => update("date", value)}
+          onChange={(value) => update("date", value)}
           isDisabled={disabled}
         />
         <div className="grid grid-cols-2 gap-2">
-          <Input
-            size="sm"
+          <FieldInput
             label="Bắt đầu"
             type="time"
             value={draft.start_time}
-            onValueChange={(value) => update("start_time", value)}
+            onChange={(value) => update("start_time", value)}
             isDisabled={disabled}
           />
-          <Input
-            size="sm"
+          <FieldInput
             label="Kết thúc"
             type="time"
             value={draft.end_time}
-            onValueChange={(value) => update("end_time", value)}
+            onChange={(value) => update("end_time", value)}
             isDisabled={disabled}
           />
         </div>
       </div>
 
       <div className="mt-2 grid gap-2">
-        <Input
-          size="sm"
+        <FieldInput
           label="Tiêu đề"
           value={draft.subject}
-          onValueChange={(value) => update("subject", value)}
+          onChange={(value) => update("subject", value)}
           isDisabled={disabled}
         />
-        <Input
-          size="sm"
+        <FieldInput
           label="Người tham dự"
           value={attendeesText}
-          onValueChange={setAttendeesText}
+          onChange={setAttendeesText}
           placeholder="email1@company.com, email2@company.com"
           isDisabled={disabled}
         />
-        <Textarea
-          minRows={2}
-          maxRows={3}
-          size="sm"
+        <FieldTextArea
           label="Nội dung"
           value={draft.body ?? ""}
-          onValueChange={(value) => update("body", value)}
+          onChange={(value) => update("body", value)}
           isDisabled={disabled}
         />
       </div>
@@ -184,18 +233,18 @@ function BookingConfirmationCard({
       <div className="mt-3 flex justify-end gap-2">
         <Button
           size="sm"
-          variant="flat"
+          variant="secondary"
           isDisabled={disabled}
-          isLoading={busyAction === "reject"}
+          isPending={busyAction === "reject"}
           onPress={() => submitAction("reject")}
         >
           Từ chối
         </Button>
         <Button
           size="sm"
-          color="primary"
+          variant="primary"
           isDisabled={disabled || !draft.room_email || !draft.subject}
-          isLoading={busyAction === "accept"}
+          isPending={busyAction === "accept"}
           onPress={() => submitAction("accept")}
         >
           Đồng ý
@@ -301,15 +350,16 @@ export function ChatPanel({
   return (
     <div className="mx-auto flex h-full w-full max-w-3xl flex-col px-5 py-6">
       {error && (
-        <Chip color="danger" variant="flat" size="sm" className="mb-3 self-start">
+        <Chip color="danger" variant="secondary" size="sm" className="mb-3 self-start">
           {error}
         </Chip>
       )}
 
       <div className="min-h-0 flex-1 overflow-y-auto pr-1">
         {loading ? (
-          <div className="flex h-full items-center justify-center">
-            <Spinner label="Đang tải chat..." />
+          <div className="flex h-full flex-col items-center justify-center gap-3">
+            <Spinner />
+            <span className="text-sm text-[#535862]">Đang tải chat...</span>
           </div>
         ) : empty ? (
           <div className="flex h-full flex-col items-center justify-center text-center">
@@ -340,11 +390,15 @@ export function ChatPanel({
                   key={message.id}
                   className={`flex gap-3 ${message.role === "user" ? "flex-row-reverse" : ""}`}
                 >
-                  <Avatar
-                    size="sm"
-                    name={message.role === "user" ? "Bạn" : "AI"}
-                    className={message.role === "assistant" ? "bg-[#175cd3] text-white" : ""}
-                  />
+                  <div
+                    className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${
+                      message.role === "assistant"
+                        ? "bg-[#175cd3] text-white"
+                        : "bg-[#f5f5f5] text-[#414651]"
+                    }`}
+                  >
+                    {message.role === "user" ? "Bạn" : "AI"}
+                  </div>
                   <div className="max-w-[82%]">
                     <div
                       className={`whitespace-pre-line rounded-lg px-4 py-3 text-sm leading-6 ${bubbleClass(message.role)}`}
@@ -365,7 +419,9 @@ export function ChatPanel({
             })}
             {sending && (
               <div className="flex gap-3">
-                <Avatar size="sm" name="AI" className="bg-[#175cd3] text-white" />
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#175cd3] text-xs font-semibold text-white">
+                  AI
+                </div>
                 <div className="rounded-lg bg-[#f5f5f5] px-4 py-3 text-sm text-[#535862]">
                   Đang kiểm tra...
                 </div>
@@ -377,17 +433,12 @@ export function ChatPanel({
       </div>
 
       <div className="mt-4 rounded-xl border border-[#d5d7da] bg-white p-2 shadow-sm">
-        <Textarea
-          minRows={1}
-          maxRows={4}
+        <TextArea
+          rows={2}
           value={input}
-          onValueChange={setInput}
+          onChange={(event) => setInput(event.target.value)}
           placeholder="Ví dụ: Tìm phòng cho 6 người ở V1 lúc 14:00-15:00 hôm nay"
-          variant="flat"
-          classNames={{
-            inputWrapper: "bg-transparent shadow-none",
-            input: "text-sm",
-          }}
+          variant="secondary"
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
@@ -397,10 +448,10 @@ export function ChatPanel({
         />
         <div className="flex justify-end px-1 pb-1">
           <Button
-            color="primary"
+            variant="primary"
             size="sm"
             isDisabled={!input.trim()}
-            isLoading={sending}
+            isPending={sending}
             onPress={send}
           >
             Gửi

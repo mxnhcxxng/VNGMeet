@@ -4,13 +4,12 @@ import { useCallback, useEffect, useState } from "react";
 import {
   Button,
   Card,
-  CardBody,
   Chip,
   Input,
-  Select,
-  SelectItem,
+  Label,
+  Link,
   Spinner,
-  Textarea,
+  TextField,
 } from "@heroui/react";
 import {
   api,
@@ -19,17 +18,48 @@ import {
   type ScheduleResponse,
   type UserProfileOptions,
 } from "@/lib/api";
-import { supabase, supabaseEnabled } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase";
 import { Sidebar, type View } from "@/components/Sidebar";
 import { BrowseRooms } from "@/components/BrowseRooms";
 import { ChatPanel } from "@/components/ChatPanel";
 
 const RANGE_DAYS = 14;
+const GRAPH_EXPLORER_URL =
+  "https://developer.microsoft.com/en-us/graph/graph-explorer";
+
+const LOGIN_STEPS = [
+  {
+    title: "Go to Microsoft Graph Explorer",
+    description:
+      "Open Graph Explorer and sign in with your VNG Microsoft work account.",
+    action: "Open Graph Explorer",
+  },
+  {
+    title: "Copy the access token",
+    description:
+      "Open the Access token panel, copy the full token, then return to VNG Meet.",
+    action: "Find Access token",
+  },
+  {
+    title: "Paste and authenticate",
+    description:
+      "Paste the token into the input on the left and continue to browse meeting rooms.",
+    action: "Authenticate",
+  },
+];
 
 function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
   const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [stepIndex, setStepIndex] = useState(0);
+  const currentStep = LOGIN_STEPS[stepIndex];
+
+  const goToStep = (direction: 1 | -1) => {
+    setStepIndex(
+      (current) => (current + direction + LOGIN_STEPS.length) % LOGIN_STEPS.length,
+    );
+  };
 
   const submitToken = async () => {
     setBusy(true);
@@ -45,84 +75,140 @@ function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
   };
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden p-4">
-      {/* Decorative gradient backdrop */}
-      <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-primary-50 via-background to-secondary-50" />
-      <div className="pointer-events-none absolute -left-24 -top-24 h-72 w-72 rounded-full bg-primary-200/40 blur-3xl" />
-      <div className="pointer-events-none absolute -bottom-24 -right-24 h-72 w-72 rounded-full bg-secondary-200/40 blur-3xl" />
+    <div className="min-h-screen bg-white">
+      <main className="grid min-h-screen lg:grid-cols-[1fr_1.04fr]">
+        <section className="flex items-center justify-center px-6 py-12 sm:px-10 lg:px-16">
+          <div className="w-full max-w-[480px]">
+            <img
+              src="/icon.svg"
+              alt="VNG Meet"
+              className="mb-16 h-14 w-14 rounded-2xl shadow-lg shadow-primary/20"
+            />
 
-      <Card className="relative w-full max-w-md border border-white/40 shadow-2xl" radius="lg">
-        <CardBody className="gap-6 p-8">
-          {/* Brand */}
-          <div className="flex flex-col items-center gap-3 text-center">
-            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary to-secondary text-2xl font-bold text-white shadow-lg shadow-primary/30">
-              VM
-            </div>
             <div>
-              <h1 className="text-2xl font-bold tracking-tight">VNG Meet</h1>
-              <p className="mt-1 text-sm text-default-500">
-                Đăng nhập để xem &amp; đặt phòng họp
+              <h1 className="text-4xl font-bold tracking-tight text-default-900">
+                Welcome back
+              </h1>
+              <p className="mt-5 max-w-md text-lg leading-8 text-default-500">
+                Please read the instruction on the right side to get the
+                Microsoft Graph Access Token
               </p>
             </div>
-          </div>
 
-          {/* Supabase OAuth — only when configured (cần admin consent). */}
-          {supabaseEnabled && (
-            <>
+            <form
+              className="mt-12 flex flex-col gap-8"
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (token.trim()) submitToken();
+              }}
+            >
+              <TextField fullWidth>
+                <Label>Access Token</Label>
+                <Input
+                  placeholder="Paste access token here"
+                  type="password"
+                  value={token}
+                  onChange={(event) => setToken(event.target.value)}
+                />
+              </TextField>
+
               <Button
-                color="primary"
+                type="submit"
                 size="lg"
-                onPress={() => api.signIn()}
-                className="font-medium shadow-md shadow-primary/30"
-                startContent={
-                  <svg width="18" height="18" viewBox="0 0 21 21" aria-hidden>
-                    <rect x="1" y="1" width="9" height="9" fill="#f25022" />
-                    <rect x="11" y="1" width="9" height="9" fill="#7fba00" />
-                    <rect x="1" y="11" width="9" height="9" fill="#00a4ef" />
-                    <rect x="11" y="11" width="9" height="9" fill="#ffb900" />
-                  </svg>
-                }
+                fullWidth
+                isDisabled={!token.trim()}
+                isPending={busy}
               >
-                Đăng nhập với Microsoft
+                Authenticate
               </Button>
 
-              <div className="flex items-center gap-3 text-xs font-medium text-default-400">
-                <div className="h-px flex-1 bg-default-200" />
-                HOẶC TEST NHANH
-                <div className="h-px flex-1 bg-default-200" />
-              </div>
-            </>
-          )}
-
-          <div className="flex flex-col gap-3">
-            <Textarea
-              label="Graph access token"
-              labelPlacement="outside"
-              description="Lấy từ Graph Explorer → tab Access token. Hết hạn ~1h thì dán lại."
-              placeholder="paste access token here"
-              minRows={3}
-              variant="bordered"
-              value={token}
-              onValueChange={setToken}
-              classNames={{ input: "font-mono text-xs" }}
-            />
-            <Button
-              variant="flat"
-              color="secondary"
-              isDisabled={!token.trim()}
-              isLoading={busy}
-              onPress={submitToken}
-            >
-              Dùng access token này
-            </Button>
-            {err && (
-              <Chip color="danger" variant="flat" size="sm" className="self-start">
-                {err}
-              </Chip>
-            )}
+              {err && (
+                <Chip color="danger" variant="soft" size="sm">
+                  {err}
+                </Chip>
+              )}
+            </form>
           </div>
-        </CardBody>
-      </Card>
+        </section>
+
+        <section className="relative min-h-[520px] overflow-hidden bg-[#111827] text-white lg:m-0 lg:rounded-bl-[88px]">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(96,165,250,0.32),transparent_32%),radial-gradient(circle_at_80%_20%,rgba(34,197,94,0.2),transparent_28%),linear-gradient(135deg,#1f2937_0%,#111827_46%,#0f172a_100%)]" />
+          <div className="absolute inset-x-12 top-16 hidden h-px bg-white/20 sm:block" />
+          <div className="absolute right-14 top-16 hidden h-[calc(100%-8rem)] w-px bg-white/15 sm:block" />
+          <div className="absolute left-1/2 top-20 hidden h-72 w-72 -translate-x-1/2 rounded-full border border-white/10 sm:block" />
+
+          <div className="relative flex min-h-full flex-col justify-end px-6 py-10 sm:px-12 lg:px-20 lg:py-16">
+            <div className="mb-10 max-w-2xl">
+              <Chip
+                color="accent"
+                variant="soft"
+              >
+                Step {stepIndex + 1} of {LOGIN_STEPS.length}
+              </Chip>
+              <h2 className="text-3xl font-bold leading-tight sm:text-4xl">
+                {currentStep.title}
+              </h2>
+              <p className="mt-5 max-w-xl text-lg leading-8 text-white/75">
+                {currentStep.description}
+              </p>
+
+              <div className="mt-8 flex flex-wrap items-center gap-3">
+                {stepIndex === 0 ? (
+                  <Button
+                    onPress={() => window.open(GRAPH_EXPLORER_URL, "_blank", "noreferrer")}
+                  >
+                    {currentStep.action}
+                  </Button>
+                ) : (
+                  <Button>{currentStep.action}</Button>
+                )}
+                <Link
+                  href={GRAPH_EXPLORER_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {GRAPH_EXPLORER_URL}
+                </Link>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between gap-6">
+              <div className="flex gap-2">
+                {LOGIN_STEPS.map((step, index) => (
+                  <Button
+                    key={step.title}
+                    size="sm"
+                    aria-label={`Go to step ${index + 1}`}
+                    variant={index === stepIndex ? "primary" : "secondary"}
+                    onPress={() => setStepIndex(index)}
+                  >
+                    {index + 1}
+                  </Button>
+                ))}
+              </div>
+
+              <div className="flex gap-4">
+                <Button
+                  isIconOnly
+                  variant="outline"
+                  aria-label="Previous instruction"
+                  onPress={() => goToStep(-1)}
+                >
+                  <span className="text-3xl leading-none">‹</span>
+                </Button>
+                <Button
+                  isIconOnly
+                  variant="outline"
+                  aria-label="Next instruction"
+                  onPress={() => goToStep(1)}
+                >
+                  <span className="text-3xl leading-none">›</span>
+                </Button>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
     </div>
   );
 }
@@ -200,8 +286,8 @@ function ProfileInfoScreen({
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-default-50 p-4">
-      <Card className="w-full max-w-xl border border-default-200 shadow-xl" radius="lg">
-        <CardBody className="gap-6 p-8">
+      <Card className="w-full max-w-xl border border-default-200 shadow-xl">
+        <Card.Content className="gap-6 p-8">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">
               Hoàn tất thông tin cá nhân
@@ -212,87 +298,86 @@ function ProfileInfoScreen({
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
-            <Input
-              label="Email"
-              labelPlacement="outside"
-              value={email}
-              isDisabled
-              variant="bordered"
-              className="sm:col-span-2"
-            />
-            <Input
-              label="Email username"
-              labelPlacement="outside"
-              value={emailUsername}
-              isDisabled
-              variant="bordered"
-              className="sm:col-span-2"
-            />
-            <Select
-              label="Office"
-              labelPlacement="outside"
-              placeholder="Chọn office"
-              selectedKeys={office ? [office] : []}
-              onChange={(event) => setOffice(event.target.value)}
-              isRequired
-              variant="bordered"
-              isDisabled={optionsLoading}
-            >
-              {(options?.office ?? []).map((item) => (
-                <SelectItem key={item.value}>{item.label}</SelectItem>
-              ))}
-            </Select>
-            <Select
-              label="Floor"
-              labelPlacement="outside"
-              placeholder="Chọn floor"
-              selectedKeys={floor ? [floor] : []}
-              onChange={(event) => setFloor(event.target.value)}
-              isRequired={isCampus}
-              variant="bordered"
-              isDisabled={!isCampus || optionsLoading}
-            >
-              {floorOptions.map((item) => (
-                <SelectItem key={item.value}>{item.label}</SelectItem>
-              ))}
-            </Select>
-            <Select
-              label="Building"
-              labelPlacement="outside"
-              placeholder="Chọn building"
-              selectedKeys={building ? [building] : []}
-              onChange={(event) => setBuilding(event.target.value)}
-              isRequired={isCampus}
-              variant="bordered"
-              isDisabled={!isCampus || optionsLoading}
-              className="sm:col-span-2"
-            >
-              {buildingOptions.map((item) => (
-                <SelectItem key={item.value}>{item.label}</SelectItem>
-              ))}
-            </Select>
+            <TextField fullWidth isDisabled className="sm:col-span-2">
+              <Label>Email</Label>
+              <Input value={email} />
+            </TextField>
+            <TextField fullWidth isDisabled className="sm:col-span-2">
+              <Label>Email username</Label>
+              <Input value={emailUsername} />
+            </TextField>
+            <label className="flex flex-col gap-2 text-sm font-medium">
+              Office
+              <select
+                value={office}
+                onChange={(event) => setOffice(event.target.value)}
+                required
+                disabled={optionsLoading}
+                className="rounded-lg border border-default-200 bg-white px-3 py-2"
+              >
+                <option value="">Chọn office</option>
+                {(options?.office ?? []).map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-2 text-sm font-medium">
+              Floor
+              <select
+                value={floor}
+                onChange={(event) => setFloor(event.target.value)}
+                required={isCampus}
+                disabled={!isCampus || optionsLoading}
+                className="rounded-lg border border-default-200 bg-white px-3 py-2"
+              >
+                <option value="">Chọn floor</option>
+                {floorOptions.map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-2 text-sm font-medium sm:col-span-2">
+              Building
+              <select
+                value={building}
+                onChange={(event) => setBuilding(event.target.value)}
+                required={isCampus}
+                disabled={!isCampus || optionsLoading}
+                className="rounded-lg border border-default-200 bg-white px-3 py-2"
+              >
+                <option value="">Chọn building</option>
+                {buildingOptions.map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
 
           {err && (
-            <Chip color="danger" variant="flat" size="sm" className="self-start">
+            <Chip color="danger" variant="soft" size="sm" className="self-start">
               {err}
             </Chip>
           )}
 
           <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-            <Button variant="light" onPress={onLogout}>
+            <Button variant="ghost" onPress={onLogout}>
               Đăng xuất
             </Button>
             <Button
-              color="primary"
               isDisabled={!canSave || optionsLoading}
-              isLoading={busy}
+              isPending={busy}
               onPress={submitProfile}
             >
               Tiếp tục đặt phòng
             </Button>
           </div>
-        </CardBody>
+        </Card.Content>
       </Card>
     </div>
   );
@@ -421,8 +506,9 @@ export default function Home() {
 
   if (loading) {
     return (
-      <div className="flex h-screen items-center justify-center">
-        <Spinner label="Đang tải..." />
+      <div className="flex h-screen flex-col items-center justify-center gap-3">
+        <Spinner />
+        <span className="text-sm text-default-500">Đang tải...</span>
       </div>
     );
   }
@@ -463,8 +549,11 @@ export default function Home() {
 
         <div className="min-h-0 flex-1">
           {refreshing && !data ? (
-            <div className="flex h-full items-center justify-center">
-              <Spinner label="Đang quét phòng họp..." />
+            <div className="flex h-full flex-col items-center justify-center gap-3">
+              <Spinner />
+              <span className="text-sm text-default-500">
+                Đang quét phòng họp...
+              </span>
             </div>
           ) : view === "chat" ? (
             <ChatPanel

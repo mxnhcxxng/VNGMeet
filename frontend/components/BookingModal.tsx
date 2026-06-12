@@ -2,15 +2,9 @@
 
 import { useEffect, useState } from "react";
 import {
-  Modal,
-  ModalContent,
-  ModalBody,
-  ModalFooter,
   Button,
   Input,
-  Textarea,
-  Select,
-  SelectItem,
+  TextArea,
   Chip,
 } from "@heroui/react";
 import { api } from "@/lib/api";
@@ -84,7 +78,7 @@ export function BookingModal({
     }
   }, [isOpen, slot, endOptions]);
 
-  if (!slot) return null;
+  if (!slot || !isOpen) return null;
 
   const initials = slot.roomName
     .split(/\s+/)
@@ -133,15 +127,8 @@ export function BookingModal({
   };
 
   return (
-    <Modal
-      isOpen={isOpen}
-      onClose={onClose}
-      placement="center"
-      backdrop="blur"
-      size="lg"
-      classNames={{ base: "overflow-hidden" }}
-    >
-      <ModalContent>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-2xl overflow-hidden rounded-2xl bg-white shadow-2xl">
         {/* Gradient header */}
         <div className="bg-gradient-to-br from-primary to-secondary px-6 py-5 text-white">
           <div className="flex items-center gap-4">
@@ -157,90 +144,69 @@ export function BookingModal({
           <div className="mt-4 flex flex-wrap gap-2">
             <Chip
               size="sm"
-              variant="flat"
-              startContent={<IconCalendar />}
-              classNames={{ base: "bg-white/20 text-white capitalize", content: "px-1" }}
+              variant="soft"
             >
               {fmtDate(slot.date)}
             </Chip>
             <Chip
               size="sm"
-              variant="flat"
-              startContent={<IconClock />}
-              classNames={{ base: "bg-white/20 text-white", content: "px-1" }}
+              variant="soft"
             >
               {slot.startTime} – {endTime || "…"}
             </Chip>
           </div>
         </div>
 
-        <ModalBody className="gap-4 py-5">
+        <div className="grid gap-4 px-6 py-5">
           <Input
-            isRequired
-            label="Tiêu đề cuộc họp"
-            labelPlacement="outside"
             placeholder="VD: Họp team sprint planning"
             value={subject}
-            onValueChange={setSubject}
-            variant="bordered"
-            startContent={<span className="text-default-400"><IconTitle /></span>}
+            onChange={(event) => setSubject(event.target.value)}
           />
 
-          <Select
-            label="Giờ kết thúc"
-            labelPlacement="outside"
-            selectedKeys={endTime ? [endTime] : []}
-            onSelectionChange={(keys) => setEndTime(Array.from(keys)[0] as string)}
-            variant="bordered"
-            startContent={<span className="text-default-400"><IconClock /></span>}
+          <select
+            value={endTime}
+            onChange={(event) => setEndTime(event.target.value)}
+            className="rounded-lg border border-default-200 bg-white px-3 py-2"
           >
             {endOptions.map((t) => (
-              <SelectItem key={t}>{t}</SelectItem>
+              <option key={t} value={t}>
+                {t}
+              </option>
             ))}
-          </Select>
+          </select>
 
           <Input
-            label="Người tham dự"
-            labelPlacement="outside"
             placeholder="email1@vng.com, email2@vng.com"
             value={attendees}
-            onValueChange={setAttendees}
-            variant="bordered"
-            description="Phân tách bằng dấu phẩy (tùy chọn)"
-            startContent={<span className="text-default-400"><IconUsers /></span>}
+            onChange={(event) => setAttendees(event.target.value)}
           />
 
-          <Textarea
-            label="Ghi chú / nội dung"
-            labelPlacement="outside"
+          <TextArea
             placeholder="Nội dung cuộc họp (tùy chọn)"
             value={notes}
-            onValueChange={setNotes}
-            variant="bordered"
-            minRows={2}
+            onChange={(event) => setNotes(event.target.value)}
           />
 
           {error && (
-            <Chip color="danger" variant="flat" size="sm" className="self-start">
+            <Chip color="danger" variant="soft" size="sm">
               {error}
             </Chip>
           )}
-        </ModalBody>
+        </div>
 
-        <ModalFooter className="border-t border-default-100">
-          <Button variant="light" onPress={onClose} isDisabled={loading}>
+        <div className="flex justify-end gap-3 border-t border-default-100 px-6 py-4">
+          <Button variant="ghost" onPress={onClose} isDisabled={loading}>
             Hủy
           </Button>
           <Button
-            color="primary"
             onPress={submit}
-            isLoading={loading}
-            className="font-medium shadow-md shadow-primary/30"
+            isPending={loading}
           >
             Đặt phòng
           </Button>
-        </ModalFooter>
-      </ModalContent>
-    </Modal>
+        </div>
+      </div>
+    </div>
   );
 }
