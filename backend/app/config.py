@@ -53,6 +53,14 @@ class Settings(BaseSettings):
     # key the server-side token store. Override in .env for production.
     session_secret: str = "change-me-in-production-please"
 
+    # OpenAI-compatible chat provider. Example:
+    # LLM_BASE_URL=https://api.openai.com/v1
+    # LLM_API_KEY=...
+    # LLM_MODEL=gpt-4o-mini
+    llm_base_url: str = ""
+    llm_api_key: str = ""
+    llm_model: str = ""
+
     @property
     def supabase_enabled(self) -> bool:
         return bool(self.supabase_url and self.supabase_service_role_key)

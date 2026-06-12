@@ -57,6 +57,7 @@ backend đổi refresh token đó lấy access token mới tại endpoint token 
 cp .env.example .env
 # điền CLIENT_ID, CLIENT_SECRET, TENANT_ID + SUPABASE_URL / ANON_KEY /
 # SERVICE_ROLE_KEY / JWT_SECRET
+# điền thêm LLM_BASE_URL, LLM_API_KEY, LLM_MODEL để bật chat bot
 
 cp frontend/.env.local.example frontend/.env.local
 # điền NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY
@@ -98,6 +99,7 @@ npm run dev
 | `TIMEZONE` | Múi giờ hiển thị (IANA) | `Asia/Ho_Chi_Minh` |
 | `BUSINESS_START_HOUR` / `BUSINESS_END_HOUR` | Khung giờ làm việc trên lưới | `8` / `18` |
 | `SLOT_MINUTES` | Độ phân giải mỗi ô (phút) | `30` |
+| `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL` | Provider chat OpenAI-compatible | — |
 
 ## Ghi chú
 

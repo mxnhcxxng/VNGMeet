@@ -1,101 +1,411 @@
 "use client";
 
-import { useRef, useState } from "react";
-import { Avatar, Button, Input } from "@heroui/react";
-import type { ScheduleResponse } from "@/lib/api";
+import { useEffect, useRef, useState } from "react";
+import { Avatar, Button, Chip, Input, Spinner, Textarea } from "@heroui/react";
+import { api, type BookingRequest, type ChatMessage, type ChatThread } from "@/lib/api";
 
-interface Msg {
-  role: "user" | "assistant";
-  text: string;
+function bubbleClass(role: ChatMessage["role"]) {
+  return role === "user"
+    ? "bg-[#181d27] text-white"
+    : "bg-[#f5f5f5] text-[#181d27]";
 }
 
-// Very small client-side helper: answers "phòng nào trống lúc <giờ>?" using loaded data.
-function answer(data: ScheduleResponse | null, dayIndex: number, q: string): string {
-  if (!data || !data.rooms.length) {
-    return "Mình chưa có dữ liệu phòng. Bạn mở tab Browse rooms để tải lịch trước nhé.";
-  }
-  const day = data.days[dayIndex];
-  const m = q.match(/(\d{1,2})\s*(?::|h|giờ)?\s*(\d{2})?/);
-  let timeIdx = 0;
-  let timeLabel = data.times[0];
-  if (m) {
-    const hh = parseInt(m[1], 10);
-    const mm = m[2] ? parseInt(m[2], 10) : 0;
-    const target = `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
-    const found = data.times.findIndex((t) => t === target || t.startsWith(String(hh).padStart(2, "0") + ":"));
-    if (found >= 0) {
-      timeIdx = found;
-      timeLabel = data.times[found];
-    }
-  }
-  const free = data.rooms.filter((r) => (r.grid[timeIdx]?.[dayIndex] ?? 0) === 0);
-  if (!free.length) {
-    return `Khung ${timeLabel} ngày ${day} không còn phòng trống 😕`;
-  }
-  const names = free.map((r) => `• ${r.name}`).join("\n");
-  return `Lúc ${timeLabel} ngày ${day} có ${free.length} phòng trống:\n${names}`;
+type PendingBooking = {
+  confirmationId: string;
+  booking: BookingRequest;
+};
+
+function pendingBookingFromMessage(message: ChatMessage): PendingBooking | null {
+  const toolResults = (message.metadata as any)?.tool_results;
+  if (!Array.isArray(toolResults)) return null;
+  const pending = toolResults.find(
+    (item) =>
+      item?.name === "book_room" &&
+      item?.result?.requires_confirmation &&
+      item?.result?.confirmation_id &&
+      item?.result?.booking
+  );
+  if (!pending) return null;
+  return {
+    confirmationId: pending.result.confirmation_id,
+    booking: pending.result.booking,
+  };
 }
 
-export function ChatPanel({
-  data,
-  dayIndex,
+function actionStatusByConfirmation(messages: ChatMessage[], confirmationId: string) {
+  return ([...messages].reverse().find((message) => {
+    return (message.metadata as any)?.booking_action?.confirmation_id === confirmationId;
+  })?.metadata as any)?.booking_action;
+}
+
+function splitAttendees(value: string) {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function BookingConfirmationCard({
+  pending,
+  threadId,
+  actioned,
+  onActionMessage,
 }: {
-  data: ScheduleResponse | null;
-  dayIndex: number;
+  pending: PendingBooking;
+  threadId: string | null;
+  actioned: boolean;
+  onActionMessage: (message: ChatMessage) => void;
 }) {
-  const [msgs, setMsgs] = useState<Msg[]>([
-    {
-      role: "assistant",
-      text: "Chào bạn 👋 Hỏi mình về phòng họp nhé. Ví dụ: \"Phòng nào trống lúc 10h?\"",
-    },
-  ]);
-  const [input, setInput] = useState("");
-  const endRef = useRef<HTMLDivElement>(null);
+  const [draft, setDraft] = useState<BookingRequest>(pending.booking);
+  const [attendeesText, setAttendeesText] = useState(
+    (pending.booking.attendees ?? []).join(", ")
+  );
+  const [busyAction, setBusyAction] = useState<"accept" | "reject" | null>(null);
+  const [localError, setLocalError] = useState<string | null>(null);
+  const disabled = actioned || !!busyAction || !threadId;
 
-  const send = () => {
-    const q = input.trim();
-    if (!q) return;
-    const reply = answer(data, dayIndex, q);
-    setMsgs((m) => [...m, { role: "user", text: q }, { role: "assistant", text: reply }]);
-    setInput("");
-    setTimeout(() => endRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
+  const update = (key: keyof BookingRequest, value: string) => {
+    setDraft((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const submitAction = async (action: "accept" | "reject") => {
+    if (!threadId || disabled) return;
+    setBusyAction(action);
+    setLocalError(null);
+    try {
+      const booking = {
+        ...draft,
+        attendees: splitAttendees(attendeesText),
+        method: "chatbot" as const,
+      };
+      const res = await api.chatBookingAction({
+        thread_id: threadId,
+        confirmation_id: pending.confirmationId,
+        action,
+        booking: action === "accept" ? booking : undefined,
+      });
+      onActionMessage(res.message);
+    } catch (e: any) {
+      setLocalError(e.message);
+    } finally {
+      setBusyAction(null);
+    }
   };
 
   return (
-    <div className="mx-auto flex h-full w-full max-w-2xl flex-col p-6">
-      <div className="flex-1 space-y-4 overflow-y-auto pr-1">
-        {msgs.map((m, i) => (
-          <div key={i} className={`flex gap-3 ${m.role === "user" ? "flex-row-reverse" : ""}`}>
-            <Avatar
-              size="sm"
-              name={m.role === "user" ? "Bạn" : "AI"}
-              className={m.role === "assistant" ? "bg-success-500 text-white" : ""}
-            />
-            <div
-              className={`max-w-[80%] whitespace-pre-line rounded-large px-4 py-2.5 text-sm ${
-                m.role === "user"
-                  ? "bg-foreground text-background"
-                  : "bg-content2 text-foreground"
-              }`}
-            >
-              {m.text}
-            </div>
-          </div>
-        ))}
-        <div ref={endRef} />
+    <div className="mt-3 w-full rounded-lg border border-[#b2ddff] bg-white p-3 text-[#181d27] shadow-sm">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold">Xác nhận đặt phòng</div>
+          <div className="text-xs text-[#535862]">Kiểm tra và chỉnh thông tin trước khi book.</div>
+        </div>
+        {actioned && (
+          <Chip size="sm" color="success" variant="flat">
+            Đã xử lý
+          </Chip>
+        )}
+      </div>
+      {localError && (
+        <Chip size="sm" color="danger" variant="flat" className="mb-3">
+          {localError}
+        </Chip>
+      )}
+
+      <div className="grid gap-2 sm:grid-cols-2">
+        <Input
+          size="sm"
+          label="Phòng"
+          value={draft.room_name || draft.room_email}
+          onValueChange={(value) => update("room_name", value)}
+          isDisabled={disabled}
+        />
+        <Input
+          size="sm"
+          label="Email phòng"
+          value={draft.room_email}
+          onValueChange={(value) => update("room_email", value)}
+          isDisabled={disabled}
+        />
+        <Input
+          size="sm"
+          label="Ngày"
+          type="date"
+          value={draft.date}
+          onValueChange={(value) => update("date", value)}
+          isDisabled={disabled}
+        />
+        <div className="grid grid-cols-2 gap-2">
+          <Input
+            size="sm"
+            label="Bắt đầu"
+            type="time"
+            value={draft.start_time}
+            onValueChange={(value) => update("start_time", value)}
+            isDisabled={disabled}
+          />
+          <Input
+            size="sm"
+            label="Kết thúc"
+            type="time"
+            value={draft.end_time}
+            onValueChange={(value) => update("end_time", value)}
+            isDisabled={disabled}
+          />
+        </div>
       </div>
 
-      <div className="mt-4 flex gap-2">
+      <div className="mt-2 grid gap-2">
         <Input
+          size="sm"
+          label="Tiêu đề"
+          value={draft.subject}
+          onValueChange={(value) => update("subject", value)}
+          isDisabled={disabled}
+        />
+        <Input
+          size="sm"
+          label="Người tham dự"
+          value={attendeesText}
+          onValueChange={setAttendeesText}
+          placeholder="email1@company.com, email2@company.com"
+          isDisabled={disabled}
+        />
+        <Textarea
+          minRows={2}
+          maxRows={3}
+          size="sm"
+          label="Nội dung"
+          value={draft.body ?? ""}
+          onValueChange={(value) => update("body", value)}
+          isDisabled={disabled}
+        />
+      </div>
+
+      <div className="mt-3 flex justify-end gap-2">
+        <Button
+          size="sm"
+          variant="flat"
+          isDisabled={disabled}
+          isLoading={busyAction === "reject"}
+          onPress={() => submitAction("reject")}
+        >
+          Từ chối
+        </Button>
+        <Button
+          size="sm"
+          color="primary"
+          isDisabled={disabled || !draft.room_email || !draft.subject}
+          isLoading={busyAction === "accept"}
+          onPress={() => submitAction("accept")}
+        >
+          Đồng ý
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+export function ChatPanel({
+  threadId,
+  onThreadSelected,
+  onThreadsChanged,
+}: {
+  threadId: string | null;
+  onThreadSelected: (threadId: string) => void;
+  onThreadsChanged: (threads: ChatThread[]) => void;
+}) {
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const endRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      if (!threadId) {
+        setMessages([]);
+        setError(null);
+        return;
+      }
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await api.chatMessages(threadId);
+        if (alive) setMessages(res.messages);
+      } catch (e: any) {
+        if (alive) setError(e.message);
+      } finally {
+        if (alive) setLoading(false);
+      }
+    };
+    load();
+    return () => {
+      alive = false;
+    };
+  }, [threadId]);
+
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages.length, sending]);
+
+  const refreshThreads = async () => {
+    try {
+      const res = await api.chatThreads();
+      onThreadsChanged(res.threads);
+    } catch {
+      /* non-fatal */
+    }
+  };
+
+  const appendActionMessage = (message: ChatMessage) => {
+    setMessages((prev) =>
+      prev.some((item) => item.id === message.id) ? prev : [...prev, message]
+    );
+    refreshThreads();
+  };
+
+  const send = async () => {
+    const content = input.trim();
+    if (!content || sending) return;
+    setInput("");
+    setError(null);
+    setSending(true);
+    const optimistic: ChatMessage = {
+      id: `local-${Date.now()}`,
+      role: "user",
+      content,
+      created_at: new Date().toISOString(),
+    };
+    setMessages((prev) => [...prev, optimistic]);
+    try {
+      const res = await api.sendChatMessage({ thread_id: threadId, content });
+      const returned = res.messages;
+      setMessages((prev) => [
+        ...prev.filter((m) => m.id !== optimistic.id),
+        ...returned,
+      ]);
+      if (!threadId) onThreadSelected(res.thread.id);
+      await refreshThreads();
+    } catch (e: any) {
+      setError(e.message);
+      setMessages((prev) => prev.filter((m) => m.id !== optimistic.id));
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const empty = !threadId && messages.length === 0 && !sending;
+
+  return (
+    <div className="mx-auto flex h-full w-full max-w-3xl flex-col px-5 py-6">
+      {error && (
+        <Chip color="danger" variant="flat" size="sm" className="mb-3 self-start">
+          {error}
+        </Chip>
+      )}
+
+      <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+        {loading ? (
+          <div className="flex h-full items-center justify-center">
+            <Spinner label="Đang tải chat..." />
+          </div>
+        ) : empty ? (
+          <div className="flex h-full flex-col items-center justify-center text-center">
+            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-[#eff8ff] text-[#175cd3]">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+              </svg>
+            </div>
+            <h1 className="text-2xl font-semibold tracking-tight text-[#181d27]">
+              Bạn muốn đặt phòng lúc nào?
+            </h1>
+            <p className="mt-2 max-w-md text-sm text-[#535862]">
+              Nói ngày, giờ, số người và khu vực. Mình sẽ kiểm tra phòng trống trước khi đặt.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-5 pb-4">
+            {messages.map((message) => {
+              const pending = pendingBookingFromMessage(message);
+              const action = pending
+                ? actionStatusByConfirmation(messages, pending.confirmationId)
+                : null;
+              const actioned = Boolean(
+                action && (action.action === "reject" || action.status === "ok")
+              );
+              return (
+                <div
+                  key={message.id}
+                  className={`flex gap-3 ${message.role === "user" ? "flex-row-reverse" : ""}`}
+                >
+                  <Avatar
+                    size="sm"
+                    name={message.role === "user" ? "Bạn" : "AI"}
+                    className={message.role === "assistant" ? "bg-[#175cd3] text-white" : ""}
+                  />
+                  <div className="max-w-[82%]">
+                    <div
+                      className={`whitespace-pre-line rounded-lg px-4 py-3 text-sm leading-6 ${bubbleClass(message.role)}`}
+                    >
+                      {message.content}
+                    </div>
+                    {pending && (
+                      <BookingConfirmationCard
+                        pending={pending}
+                        threadId={threadId}
+                        actioned={actioned}
+                        onActionMessage={appendActionMessage}
+                      />
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+            {sending && (
+              <div className="flex gap-3">
+                <Avatar size="sm" name="AI" className="bg-[#175cd3] text-white" />
+                <div className="rounded-lg bg-[#f5f5f5] px-4 py-3 text-sm text-[#535862]">
+                  Đang kiểm tra...
+                </div>
+              </div>
+            )}
+            <div ref={endRef} />
+          </div>
+        )}
+      </div>
+
+      <div className="mt-4 rounded-xl border border-[#d5d7da] bg-white p-2 shadow-sm">
+        <Textarea
+          minRows={1}
+          maxRows={4}
           value={input}
           onValueChange={setInput}
-          onKeyDown={(e) => e.key === "Enter" && send()}
-          placeholder="Hỏi về phòng họp..."
-          variant="bordered"
+          placeholder="Ví dụ: Tìm phòng cho 6 người ở V1 lúc 14:00-15:00 hôm nay"
+          variant="flat"
+          classNames={{
+            inputWrapper: "bg-transparent shadow-none",
+            input: "text-sm",
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              send();
+            }
+          }}
         />
-        <Button color="success" className="text-white" onPress={send}>
-          Gửi
-        </Button>
+        <div className="flex justify-end px-1 pb-1">
+          <Button
+            color="primary"
+            size="sm"
+            isDisabled={!input.trim()}
+            isLoading={sending}
+            onPress={send}
+          >
+            Gửi
+          </Button>
+        </div>
       </div>
     </div>
   );

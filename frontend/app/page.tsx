@@ -6,10 +6,19 @@ import {
   Card,
   CardBody,
   Chip,
+  Input,
+  Select,
+  SelectItem,
   Spinner,
   Textarea,
 } from "@heroui/react";
-import { api, type Me, type ScheduleResponse } from "@/lib/api";
+import {
+  api,
+  type ChatThread,
+  type Me,
+  type ScheduleResponse,
+  type UserProfileOptions,
+} from "@/lib/api";
 import { supabase, supabaseEnabled } from "@/lib/supabase";
 import { Sidebar, type View } from "@/components/Sidebar";
 import { BrowseRooms } from "@/components/BrowseRooms";
@@ -118,14 +127,188 @@ function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
   );
 }
 
+function ProfileInfoScreen({
+  me,
+  onSaved,
+  onLogout,
+}: {
+  me: Me;
+  onSaved: (me: Me) => void;
+  onLogout: () => void;
+}) {
+  const [office, setOffice] = useState(me.profile?.office ?? "");
+  const [floor, setFloor] = useState(me.profile?.floor ?? "");
+  const [building, setBuilding] = useState(me.profile?.building ?? "");
+  const [options, setOptions] = useState<UserProfileOptions | null>(null);
+  const [optionsLoading, setOptionsLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const email = me.profile?.email || me.email || "";
+  const emailUsername =
+    me.profile?.email_username || (email.includes("@") ? email.split("@")[0] : "");
+  const isCampus = office === "campus";
+  const floorOptions =
+    options?.floor.filter((item) => item.parentValue === office) ?? [];
+  const buildingOptions =
+    options?.building.filter((item) => item.parentValue === office) ?? [];
+  const canSave = Boolean(office && (!isCampus || (floor && building)));
+
+  useEffect(() => {
+    const loadOptions = async () => {
+      setOptionsLoading(true);
+      setErr(null);
+      try {
+        setOptions(await api.userProfileOptions());
+      } catch (e: any) {
+        setErr(e.message);
+      } finally {
+        setOptionsLoading(false);
+      }
+    };
+    loadOptions();
+  }, []);
+
+  useEffect(() => {
+    if (!isCampus) {
+      setFloor("");
+      setBuilding("");
+    }
+  }, [isCampus]);
+
+  const submitProfile = async () => {
+    if (!canSave) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const res = await api.updateUserProfile({
+        office,
+        floor: isCampus ? floor : "",
+        building: isCampus ? building : "",
+      });
+      onSaved({
+        ...me,
+        profile: res.profile,
+        profileComplete: res.profileComplete,
+      });
+    } catch (e: any) {
+      setErr(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-default-50 p-4">
+      <Card className="w-full max-w-xl border border-default-200 shadow-xl" radius="lg">
+        <CardBody className="gap-6 p-8">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">
+              Hoàn tất thông tin cá nhân
+            </h1>
+            <p className="mt-2 text-sm text-default-500">
+              Thông tin này giúp gợi ý và lọc phòng họp đúng địa điểm làm việc của bạn.
+            </p>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Input
+              label="Email"
+              labelPlacement="outside"
+              value={email}
+              isDisabled
+              variant="bordered"
+              className="sm:col-span-2"
+            />
+            <Input
+              label="Email username"
+              labelPlacement="outside"
+              value={emailUsername}
+              isDisabled
+              variant="bordered"
+              className="sm:col-span-2"
+            />
+            <Select
+              label="Office"
+              labelPlacement="outside"
+              placeholder="Chọn office"
+              selectedKeys={office ? [office] : []}
+              onChange={(event) => setOffice(event.target.value)}
+              isRequired
+              variant="bordered"
+              isDisabled={optionsLoading}
+            >
+              {(options?.office ?? []).map((item) => (
+                <SelectItem key={item.value}>{item.label}</SelectItem>
+              ))}
+            </Select>
+            <Select
+              label="Floor"
+              labelPlacement="outside"
+              placeholder="Chọn floor"
+              selectedKeys={floor ? [floor] : []}
+              onChange={(event) => setFloor(event.target.value)}
+              isRequired={isCampus}
+              variant="bordered"
+              isDisabled={!isCampus || optionsLoading}
+            >
+              {floorOptions.map((item) => (
+                <SelectItem key={item.value}>{item.label}</SelectItem>
+              ))}
+            </Select>
+            <Select
+              label="Building"
+              labelPlacement="outside"
+              placeholder="Chọn building"
+              selectedKeys={building ? [building] : []}
+              onChange={(event) => setBuilding(event.target.value)}
+              isRequired={isCampus}
+              variant="bordered"
+              isDisabled={!isCampus || optionsLoading}
+              className="sm:col-span-2"
+            >
+              {buildingOptions.map((item) => (
+                <SelectItem key={item.value}>{item.label}</SelectItem>
+              ))}
+            </Select>
+          </div>
+
+          {err && (
+            <Chip color="danger" variant="flat" size="sm" className="self-start">
+              {err}
+            </Chip>
+          )}
+
+          <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+            <Button variant="light" onPress={onLogout}>
+              Đăng xuất
+            </Button>
+            <Button
+              color="primary"
+              isDisabled={!canSave || optionsLoading}
+              isLoading={busy}
+              onPress={submitProfile}
+            >
+              Tiếp tục đặt phòng
+            </Button>
+          </div>
+        </CardBody>
+      </Card>
+    </div>
+  );
+}
+
 export default function Home() {
   const [me, setMe] = useState<Me | null>(null);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<View>("browse");
   const [data, setData] = useState<ScheduleResponse | null>(null);
   const [dayIndex, setDayIndex] = useState(0);
+  const [chatThreads, setChatThreads] = useState<ChatThread[]>([]);
+  const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const canEnterBooking = Boolean(me?.authenticated && me.profileComplete !== false);
 
   const refreshMe = useCallback(async () => {
     try {
@@ -182,11 +365,24 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (me?.authenticated) loadSchedule();
-  }, [me?.authenticated, loadSchedule]);
+    if (canEnterBooking) loadSchedule();
+  }, [canEnterBooking, loadSchedule]);
+
+  const loadChatThreads = useCallback(async () => {
+    try {
+      const res = await api.chatThreads();
+      setChatThreads(res.threads);
+    } catch {
+      setChatThreads([]);
+    }
+  }, []);
 
   useEffect(() => {
-    if (!me?.authenticated) return;
+    if (canEnterBooking) loadChatThreads();
+  }, [canEnterBooking, loadChatThreads]);
+
+  useEffect(() => {
+    if (!canEnterBooking) return;
 
     const touch = async () => {
       try {
@@ -209,7 +405,7 @@ export default function Home() {
       window.removeEventListener("focus", touch);
       document.removeEventListener("visibilitychange", touchWhenVisible);
     };
-  }, [me?.authenticated]);
+  }, [canEnterBooking]);
 
   const handleLogout = async () => {
     try {
@@ -219,6 +415,8 @@ export default function Home() {
     }
     if (supabase) await api.signOut();
     setMe({ authenticated: false });
+    setChatThreads([]);
+    setActiveThreadId(null);
   };
 
   if (loading) {
@@ -233,6 +431,16 @@ export default function Home() {
     return <LoginScreen onAuthed={refreshMe} />;
   }
 
+  if (me.profileComplete === false) {
+    return (
+      <ProfileInfoScreen
+        me={me}
+        onSaved={setMe}
+        onLogout={handleLogout}
+      />
+    );
+  }
+
   return (
     <div className="flex h-screen overflow-hidden">
       <Sidebar
@@ -240,6 +448,10 @@ export default function Home() {
         onChange={setView}
         username={me.username}
         onLogout={handleLogout}
+        chatThreads={chatThreads}
+        activeThreadId={activeThreadId}
+        onNewChat={() => setActiveThreadId(null)}
+        onSelectThread={setActiveThreadId}
       />
 
       <main className="flex min-w-0 flex-1 flex-col bg-white">
@@ -255,7 +467,11 @@ export default function Home() {
               <Spinner label="Đang quét phòng họp..." />
             </div>
           ) : view === "chat" ? (
-            <ChatPanel data={data} dayIndex={dayIndex} />
+            <ChatPanel
+              threadId={activeThreadId}
+              onThreadSelected={setActiveThreadId}
+              onThreadsChanged={setChatThreads}
+            />
           ) : !data?.rooms.length ? (
             <div className="flex h-full items-center justify-center text-default-500">
               Không tìm thấy phòng nào được đánh dấu là meeting room.

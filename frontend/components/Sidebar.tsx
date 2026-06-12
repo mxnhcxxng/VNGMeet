@@ -1,5 +1,7 @@
 "use client";
 
+import type { ChatThread } from "@/lib/api";
+
 export type View = "browse" | "chat";
 
 const ITEMS: { key: View; label: string; icon: React.ReactNode }[] = [
@@ -40,11 +42,19 @@ export function Sidebar({
   onChange,
   username,
   onLogout,
+  chatThreads,
+  activeThreadId,
+  onNewChat,
+  onSelectThread,
 }: {
   view: View;
   onChange: (v: View) => void;
   username?: string;
   onLogout: () => void;
+  chatThreads?: ChatThread[];
+  activeThreadId?: string | null;
+  onNewChat?: () => void;
+  onSelectThread?: (threadId: string) => void;
 }) {
   const display = username || "Người dùng";
   const name = display.replace(/@.*/, "");
@@ -82,6 +92,52 @@ export function Sidebar({
           );
         })}
       </nav>
+
+      <div className="mt-6 min-h-0 flex-1 border-t border-[#e9eaeb] pt-4">
+        <button
+          onClick={() => {
+            onChange("chat");
+            onNewChat?.();
+          }}
+          className="mb-3 flex w-full items-center gap-3 rounded-md px-3 py-2 text-[14px] font-semibold text-[#252b37] transition-colors hover:bg-[#fafafa]"
+        >
+          <span className="text-[#717680]">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+          </span>
+          New chat
+        </button>
+
+        <div className="mb-2 px-3 text-xs font-semibold uppercase tracking-wide text-[#a4a7ae]">
+          Threads
+        </div>
+        <div className="max-h-[calc(100vh-270px)] space-y-1 overflow-y-auto pr-1">
+          {(chatThreads ?? []).map((thread) => {
+            const active = view === "chat" && activeThreadId === thread.id;
+            return (
+              <button
+                key={thread.id}
+                onClick={() => {
+                  onChange("chat");
+                  onSelectThread?.(thread.id);
+                }}
+                className={`block w-full truncate rounded-md px-3 py-2 text-left text-sm transition-colors ${
+                  active
+                    ? "bg-[#f5f5f5] font-semibold text-[#181d27]"
+                    : "text-[#535862] hover:bg-[#fafafa] hover:text-[#181d27]"
+                }`}
+                title={thread.title || "Chat mới"}
+              >
+                {thread.title || "Chat mới"}
+              </button>
+            );
+          })}
+          {!(chatThreads ?? []).length && (
+            <div className="px-3 py-2 text-sm text-[#a4a7ae]">Chưa có thread</div>
+          )}
+        </div>
+      </div>
 
       {/* User */}
       <div className="mt-auto flex items-center gap-3 border-t border-[#e9eaeb] pt-4">

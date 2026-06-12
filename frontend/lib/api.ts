@@ -33,6 +33,29 @@ export interface Me {
   username?: string;
   email?: string;
   graphLinked?: boolean;
+  profile?: UserProfile | null;
+  profileComplete?: boolean;
+}
+
+export interface UserProfile {
+  email: string;
+  email_username: string;
+  office: string;
+  floor: string;
+  building: string;
+}
+
+export interface UserProfileOption {
+  value: string;
+  label: string;
+  parentField?: string | null;
+  parentValue?: string | null;
+}
+
+export interface UserProfileOptions {
+  office: UserProfileOption[];
+  floor: UserProfileOption[];
+  building: UserProfileOption[];
 }
 
 export interface Room {
@@ -78,6 +101,28 @@ export interface BookingResult {
   subject?: string;
 }
 
+export interface ChatThread {
+  id: string;
+  title?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  created_at?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ChatBookingActionPayload {
+  thread_id: string;
+  confirmation_id: string;
+  action: "accept" | "reject";
+  booking?: BookingRequest;
+}
+
 export const api = {
   // Supabase path (only when configured): OAuth via Azure (Microsoft) provider.
   signIn: () =>
@@ -102,6 +147,16 @@ export const api = {
     }),
   logout: () => req<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
   me: () => req<Me>("/api/auth/me"),
+  userProfileOptions: () => req<UserProfileOptions>("/api/users/profile-options"),
+  updateUserProfile: (payload: Pick<UserProfile, "office" | "floor" | "building">) =>
+    req<{ ok: boolean; profile: UserProfile | null; profileComplete: boolean }>(
+      "/api/users/me/profile",
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }
+    ),
   touchUserActivity: () =>
     req<{ ok: boolean }>("/api/users/me/activity", { method: "POST" }),
   rooms: () => req<Room[]>("/api/rooms"),
@@ -119,6 +174,21 @@ export const api = {
     ),
   book: (payload: BookingRequest) =>
     req<BookingResult>("/api/bookings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+  chatThreads: () => req<{ threads: ChatThread[] }>("/api/chat/threads"),
+  chatMessages: (threadId: string) =>
+    req<{ messages: ChatMessage[] }>(`/api/chat/threads/${threadId}/messages`),
+  sendChatMessage: (payload: { thread_id?: string | null; content: string }) =>
+    req<{ thread: ChatThread; messages: ChatMessage[] }>("/api/chat/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+  chatBookingAction: (payload: ChatBookingActionPayload) =>
+    req<{ ok: boolean; message: ChatMessage }>("/api/chat/bookings/action", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),

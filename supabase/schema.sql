@@ -17,11 +17,17 @@ create table if not exists user_profiles (
   auth_user_id uuid unique references auth.users on delete cascade,
   email text not null,
   email_username text generated always as (split_part(email, '@', 1)) stored,
+  office text,
+  floor text,
+  building text,
   last_seen_at timestamptz not null default now(),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint user_profiles_email_has_at check (position('@' in email) > 1)
 );
+alter table user_profiles add column if not exists office text;
+alter table user_profiles add column if not exists floor text;
+alter table user_profiles add column if not exists building text;
 create unique index if not exists user_profiles_email_lower_key
   on user_profiles (lower(email));
 create unique index if not exists user_profiles_email_key
@@ -29,6 +35,148 @@ create unique index if not exists user_profiles_email_key
 alter table user_profiles enable row level security;
 create policy "users can read own profile" on user_profiles
   for select to authenticated using ((select auth.uid()) = auth_user_id);
+
+-- Lookup options for the onboarding user profile form. Read through backend
+-- service_role so the frontend always gets the current DB-managed list.
+create table if not exists user_profile_field_options (
+  field text not null,
+  value text not null,
+  label text not null,
+  parent_field text,
+  parent_value text,
+  display_order integer not null default 0,
+  enabled boolean not null default true,
+  primary key (field, value),
+  constraint user_profile_field_options_field_check
+    check (field in ('office', 'floor', 'building')),
+  constraint user_profile_field_options_parent_check
+    check (
+      (parent_field is null and parent_value is null)
+      or (parent_field = 'office' and parent_value is not null)
+    )
+);
+alter table user_profile_field_options enable row level security;
+insert into user_profile_field_options
+  (field, value, label, parent_field, parent_value, display_order)
+values
+  ('office', 'campus', 'Campus', null, null, 10),
+  ('office', 'sala', 'Sala', null, null, 20),
+  ('office', 'tnr', 'TNR', null, null, 30),
+  ('floor', '1', '1', 'office', 'campus', 10),
+  ('floor', '2', '2', 'office', 'campus', 20),
+  ('floor', '3', '3', 'office', 'campus', 30),
+  ('floor', '4', '4', 'office', 'campus', 40),
+  ('building', 'V1', 'V1 (VNG, Zalo, Greennode)', 'office', 'campus', 10),
+  ('building', 'V2', 'V2 (Zalopay)', 'office', 'campus', 20)
+on conflict (field, value) do update set
+  label = excluded.label,
+  parent_field = excluded.parent_field,
+  parent_value = excluded.parent_value,
+  display_order = excluded.display_order,
+  enabled = true;
+
+-- Chat thread lưu theo user_profiles.id. Client chỉ thao tác thread của chính mình;
+-- backend service_role có thể ghi/đọc toàn bộ khi xử lý chatbot.
+create table if not exists thread (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references user_profiles(id) on delete cascade,
+  title text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists idx_thread_user_updated_at
+  on thread (user_id, updated_at desc);
+alter table thread enable row level security;
+create policy "users can read own threads" on thread
+  for select to authenticated
+  using (
+    exists (
+      select 1
+      from user_profiles
+      where user_profiles.id = thread.user_id
+        and user_profiles.auth_user_id = (select auth.uid())
+    )
+  );
+create policy "users can create own threads" on thread
+  for insert to authenticated
+  with check (
+    exists (
+      select 1
+      from user_profiles
+      where user_profiles.id = thread.user_id
+        and user_profiles.auth_user_id = (select auth.uid())
+    )
+  );
+create policy "users can update own threads" on thread
+  for update to authenticated
+  using (
+    exists (
+      select 1
+      from user_profiles
+      where user_profiles.id = thread.user_id
+        and user_profiles.auth_user_id = (select auth.uid())
+    )
+  )
+  with check (
+    exists (
+      select 1
+      from user_profiles
+      where user_profiles.id = thread.user_id
+        and user_profiles.auth_user_id = (select auth.uid())
+    )
+  );
+create policy "users can delete own threads" on thread
+  for delete to authenticated
+  using (
+    exists (
+      select 1
+      from user_profiles
+      where user_profiles.id = thread.user_id
+        and user_profiles.auth_user_id = (select auth.uid())
+    )
+  );
+
+-- Messages thuộc thread, có người gửi/người nhận đều trỏ về user_profiles.id.
+create table if not exists messages (
+  id uuid primary key default gen_random_uuid(),
+  thread_id uuid not null references thread(id) on delete cascade,
+  from_user_id uuid not null references user_profiles(id) on delete cascade,
+  to_user_id uuid not null references user_profiles(id) on delete cascade,
+  content text not null,
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  constraint messages_content_not_blank check (length(btrim(content)) > 0)
+);
+create index if not exists idx_messages_thread_created_at
+  on messages (thread_id, created_at);
+create index if not exists idx_messages_from_user_created_at
+  on messages (from_user_id, created_at desc);
+create index if not exists idx_messages_to_user_created_at
+  on messages (to_user_id, created_at desc);
+alter table messages enable row level security;
+create policy "users can read own thread messages" on messages
+  for select to authenticated
+  using (
+    exists (
+      select 1
+      from thread
+      join user_profiles on user_profiles.id = thread.user_id
+      where thread.id = messages.thread_id
+        and user_profiles.auth_user_id = (select auth.uid())
+    )
+  );
+create policy "users can create messages in own threads" on messages
+  for insert to authenticated
+  with check (
+    exists (
+      select 1
+      from thread
+      join user_profiles on user_profiles.id = thread.user_id
+      where thread.id = messages.thread_id
+        and user_profiles.auth_user_id = (select auth.uid())
+        and messages.from_user_id = user_profiles.id
+    )
+  );
 
 -- Mirror metadata booking (event thật vẫn nằm ở Microsoft calendar).
 create table if not exists bookings (

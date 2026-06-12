@@ -16,6 +16,9 @@ services:
       BUSINESS_START_HOUR: ${BUSINESS_START_HOUR:-8}
       BUSINESS_END_HOUR: ${BUSINESS_END_HOUR:-18}
       SLOT_MINUTES: ${SLOT_MINUTES:-30}
+      LLM_BASE_URL: ${LLM_BASE_URL}
+      LLM_API_KEY: ${LLM_API_KEY}
+      LLM_MODEL: ${LLM_MODEL}
 
   frontend:
     build:
