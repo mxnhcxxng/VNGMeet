@@ -4,10 +4,12 @@ import { useEffect, useState } from "react";
 import {
   Button,
   Input,
+  Label,
   ListBox,
   ListBoxItem,
   Select,
   TextArea,
+  TextField,
   Chip,
 } from "@heroui/react";
 import { api } from "@/lib/api";
@@ -161,19 +163,22 @@ export function BookingModal({
         </div>
 
         <div className="grid gap-4 px-6 py-5">
-          <Input
-            variant="secondary"
-            placeholder="VD: Họp team sprint planning"
-            value={subject}
-            onChange={(event) => setSubject(event.target.value)}
-          />
+          <TextField fullWidth>
+            <Label>Tiêu đề cuộc họp</Label>
+            <Input
+              variant="secondary"
+              placeholder="VD: Họp team sprint planning"
+              value={subject}
+              onChange={(event) => setSubject(event.target.value)}
+            />
+          </TextField>
 
           <Select
-            aria-label="Giờ kết thúc"
             variant="secondary"
             selectedKey={endTime || null}
             onSelectionChange={(key) => setEndTime((key as string) ?? "")}
           >
+            <Label>Giờ kết thúc</Label>
             <Select.Trigger>
               <Select.Value />
               <Select.Indicator />
@@ -189,19 +194,25 @@ export function BookingModal({
             </Select.Popover>
           </Select>
 
-          <Input
-            variant="secondary"
-            placeholder="email1@vng.com, email2@vng.com"
-            value={attendees}
-            onChange={(event) => setAttendees(event.target.value)}
-          />
+          <TextField fullWidth>
+            <Label>Người tham dự</Label>
+            <Input
+              variant="secondary"
+              placeholder="email1@vng.com, email2@vng.com"
+              value={attendees}
+              onChange={(event) => setAttendees(event.target.value)}
+            />
+          </TextField>
 
-          <TextArea
-            variant="secondary"
-            placeholder="Nội dung cuộc họp (tùy chọn)"
-            value={notes}
-            onChange={(event) => setNotes(event.target.value)}
-          />
+          <TextField fullWidth>
+            <Label>Nội dung cuộc họp</Label>
+            <TextArea
+              variant="secondary"
+              placeholder="Nội dung cuộc họp (tùy chọn)"
+              value={notes}
+              onChange={(event) => setNotes(event.target.value)}
+            />
+          </TextField>
 
           {error && (
             <Chip color="danger" variant="soft" size="sm">

@@ -28,8 +28,7 @@ function addLabel(time: string, slotMinutes: number) {
 
 function hourLabel(t: string) {
   const [h] = t.split(":").map(Number);
-  const ap = h < 12 ? "AM" : "PM";
-  return `${h % 12 || 12} ${ap}`;
+  return `${String(h).padStart(2, "0")}:00`;
 }
 
 const IconCalendar = () => (
@@ -159,12 +158,34 @@ export function BrowseRooms({
   };
 
   const times = data.times;
+  const slotMinutes = data.slotMinutes;
   const cols = `64px repeat(${rooms.length}, minmax(160px, 1fr))`;
   const dayStart = times[0] ?? "08:00";
-  const dayEnd = addLabel(times[times.length - 1] ?? "17:30", data.slotMinutes);
+  const dayEnd = addLabel(times[times.length - 1] ?? "17:30", slotMinutes);
+
+  // Full 24h grid: render every slot from 00:00 → 24:00. Slots inside the
+  // business window map onto the API's per-room availability grid; the rest are
+  // shown greyed out and are not bookable.
+  const slotsPerDay = Math.floor((24 * 60) / slotMinutes);
+  const allTimes = useMemo(
+    () =>
+      Array.from({ length: slotsPerDay }, (_, i) => {
+        const mins = i * slotMinutes;
+        return `${String(Math.floor(mins / 60)).padStart(2, "0")}:${String(
+          mins % 60
+        ).padStart(2, "0")}`;
+      }),
+    [slotsPerDay, slotMinutes]
+  );
+  // Maps a time string to its index in the business-hours availability grid.
+  const businessIndexByTime = useMemo(() => {
+    const map = new Map<string, number>();
+    times.forEach((t, i) => map.set(t, i));
+    return map;
+  }, [times]);
 
   function endOptionsFor(ti: number): string[] {
-    const lastEnd = addLabel(times[times.length - 1], data.slotMinutes);
+    const lastEnd = addLabel(times[times.length - 1], slotMinutes);
     return [...times.slice(ti + 1), lastEnd];
   }
 
@@ -174,14 +195,13 @@ export function BrowseRooms({
     onOpen();
   }
 
-  // Current-time marker (only when the selected day is today and within hours).
+  // Current-time marker (only when the selected day is today). Offset is measured
+  // from midnight since the grid now spans the full day.
   const now = new Date();
   const todayIso = now.toISOString().slice(0, 10);
-  const [sh, sm] = dayStart.split(":").map(Number);
-  const minutesFromStart = now.getHours() * 60 + now.getMinutes() - (sh * 60 + sm);
-  const markerOffset = (minutesFromStart / data.slotMinutes) * SLOT_H;
-  const showMarker =
-    data.days[dayIndex] === todayIso && markerOffset >= 0 && markerOffset <= times.length * SLOT_H;
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+  const markerOffset = (nowMinutes / slotMinutes) * SLOT_H;
+  const showMarker = data.days[dayIndex] === todayIso;
 
   return (
     <div className="flex h-full flex-col bg-default-50">
@@ -264,7 +284,7 @@ export function BrowseRooms({
         </DateField>
 
         {/* Business-hours window */}
-        <TimeField aria-label="Giờ bắt đầu" value={parseTime(dayStart)} isReadOnly>
+        <TimeField aria-label="Giờ bắt đầu" value={parseTime(dayStart)} hourCycle={24} isReadOnly>
           <TimeField.Group variant="secondary">
             <TimeField.Input>
               {(segment) => <TimeField.Segment segment={segment} />}
@@ -274,7 +294,7 @@ export function BrowseRooms({
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-default-400">
           <path d="M5 12h14M13 6l6 6-6 6" />
         </svg>
-        <TimeField aria-label="Giờ kết thúc" value={parseTime(dayEnd)} isReadOnly>
+        <TimeField aria-label="Giờ kết thúc" value={parseTime(dayEnd)} hourCycle={24} isReadOnly>
           <TimeField.Group variant="secondary">
             <TimeField.Input>
               {(segment) => <TimeField.Segment segment={segment} />}
@@ -346,7 +366,7 @@ export function BrowseRooms({
               className="sticky top-0 z-20 grid border-b border-default-200 bg-white shadow-sm"
               style={{ gridTemplateColumns: cols }}
             >
-              <div className="border-r border-default-200" />
+              <div className="sticky left-0 z-30 border-r border-default-200 bg-white" />
               {rooms.map((r) => (
                 <div
                   key={r.email}
@@ -370,31 +390,50 @@ export function BrowseRooms({
 
             {/* Rows */}
             <div className="relative">
-              {times.map((t, ti) => {
+              {allTimes.map((t) => {
                 const onHour = t.endsWith(":00");
+                const bi = businessIndexByTime.get(t);
                 return (
                   <div key={t} className="grid" style={{ gridTemplateColumns: cols }}>
-                    {/* time label */}
+                    {/* time label (sticky to the left while scrolling) */}
                     <div
-                      className="relative border-r border-default-200 bg-white"
+                      className="sticky left-0 z-10 border-r border-default-200 bg-white"
                       style={{ height: SLOT_H }}
                     >
                       {onHour && (
-                        <span className="absolute -top-2 right-2 text-xs font-medium text-default-500">
+                        <span className="absolute right-2 top-1 text-xs font-medium text-default-500">
                           {hourLabel(t)}
                         </span>
                       )}
                     </div>
 
                   {rooms.map((r) => {
-                    const status = r.grid[ti]?.[dayIndex] ?? 0;
+                    // Outside the business-hours window → greyed out, not bookable.
+                    if (bi === undefined) {
+                      return (
+                        <div
+                          key={r.email}
+                          aria-disabled
+                          className={`border-r border-default-200 ${
+                            onHour ? "border-t border-t-default-200" : "border-t border-t-default-100"
+                          }`}
+                          style={{
+                            height: SLOT_H,
+                            backgroundColor: "var(--default)",
+                            opacity: 0.6,
+                          }}
+                        />
+                      );
+                    }
+
+                    const status = r.grid[bi]?.[dayIndex] ?? 0;
                     const free = status === 0;
                     const myBooking = status === 2;
                     const prevBusy =
-                      ti > 0 && (r.grid[ti - 1]?.[dayIndex] ?? 0) === status;
+                      bi > 0 && (r.grid[bi - 1]?.[dayIndex] ?? 0) === status;
                     const nextBusy =
-                      ti < times.length - 1 &&
-                      (r.grid[ti + 1]?.[dayIndex] ?? 0) === status;
+                      bi < times.length - 1 &&
+                      (r.grid[bi + 1]?.[dayIndex] ?? 0) === status;
 
                     if (free) {
                       return (
@@ -402,20 +441,22 @@ export function BrowseRooms({
                           key={r.email}
                           role="button"
                           tabIndex={0}
-                          onClick={() => openBooking(r.email, r.name, t, ti)}
+                          onClick={() => openBooking(r.email, r.name, t, bi)}
                           onKeyDown={(event) => {
                             if (event.key === "Enter" || event.key === " ") {
                               event.preventDefault();
-                              openBooking(r.email, r.name, t, ti);
+                              openBooking(r.email, r.name, t, bi);
                             }
                           }}
-                          className={`group cursor-pointer border-r border-default-200 bg-white px-1 outline-none transition-colors ${
+                          className={`group cursor-pointer border-r border-default-200 bg-white px-1 outline-none transition-colors hover:bg-[var(--accent-soft)] hover:shadow-[inset_0_0_0_1px_var(--accent)] focus:bg-[var(--accent-soft)] focus:shadow-[inset_0_0_0_1px_var(--accent)] ${
                             onHour ? "border-t border-t-default-200" : "border-t border-t-default-100"
-                          } hover:bg-primary-50 focus:bg-primary-50`}
+                          }`}
                           style={{ height: SLOT_H }}
                         >
-                          <div className="flex h-full items-center justify-center rounded-lg text-xs font-semibold text-transparent group-hover:text-primary group-focus:text-primary">
-                            + Book
+                          <div className="flex h-full items-center justify-center">
+                            <span className="rounded-md px-2 py-0.5 text-xs font-semibold text-transparent transition-colors group-hover:bg-[var(--accent)] group-hover:text-[var(--accent-foreground)] group-focus:bg-[var(--accent)] group-focus:text-[var(--accent-foreground)]">
+                              + Book
+                            </span>
                           </div>
                         </div>
                       );
@@ -465,11 +506,14 @@ export function BrowseRooms({
             {/* Current-time marker */}
             {showMarker && (
               <div
-                className="pointer-events-none absolute left-0 right-0 z-10 flex items-center"
+                className="pointer-events-none absolute left-0 right-0 z-20 flex items-center"
                 style={{ top: markerOffset }}
               >
-                <span className="ml-[56px] h-2.5 w-2.5 -translate-y-1/2 rounded-full bg-primary" />
-                <span className="h-px flex-1 bg-primary" />
+                <span
+                  className="ml-[56px] h-2.5 w-2.5 -translate-y-1/2 rounded-full"
+                  style={{ backgroundColor: "var(--success)" }}
+                />
+                <span className="h-0.5 flex-1" style={{ backgroundColor: "var(--success)" }} />
               </div>
             )}
           </div>
