@@ -75,21 +75,21 @@ function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
   };
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen bg-[#F3F3F3]">
       <main className="grid min-h-screen lg:grid-cols-[1fr_1.04fr]">
         <section className="flex items-center justify-center px-6 py-12 sm:px-10 lg:px-16">
           <div className="w-full max-w-[480px]">
             <img
               src="/icon.svg"
               alt="VNG Meet"
-              className="mb-16 h-14 w-14 rounded-2xl shadow-lg shadow-primary/20"
+              className="mb-16 h-14 w-14 rounded-2xl"
             />
 
             <div>
-              <h1 className="text-4xl font-bold tracking-tight text-default-900">
+              <h1 className="text-2xl font-bold leading-8 tracking-tight text-default-900">
                 Welcome back
               </h1>
-              <p className="mt-5 max-w-md text-lg leading-8 text-default-500">
+              <p className="mt-5 max-w-md text-base leading-6 text-default-500">
                 Please read the instruction on the right side to get the
                 Microsoft Graph Access Token
               </p>
