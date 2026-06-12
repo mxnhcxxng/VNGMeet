@@ -72,6 +72,7 @@ function FieldInput({
     <TextField fullWidth isDisabled={isDisabled}>
       <Label>{label}</Label>
       <Input
+        variant="secondary"
         type={type}
         placeholder={placeholder}
         value={value}

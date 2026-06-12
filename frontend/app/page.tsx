@@ -8,6 +8,9 @@ import {
   Input,
   Label,
   Link,
+  ListBox,
+  ListBoxItem,
+  Select,
   Spinner,
   TextField,
 } from "@heroui/react";
@@ -75,7 +78,7 @@ function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
   };
 
   return (
-    <div className="min-h-screen bg-[#F3F3F3]">
+    <div className="min-h-screen bg-white">
       <main className="grid min-h-screen lg:grid-cols-[1fr_1.04fr]">
         <section className="flex items-center justify-center px-6 py-12 sm:px-10 lg:px-16">
           <div className="w-full max-w-[480px]">
@@ -105,6 +108,7 @@ function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
               <TextField fullWidth>
                 <Label>Access Token</Label>
                 <Input
+                  variant="secondary"
                   placeholder="Paste access token here"
                   type="password"
                   value={token}
@@ -300,63 +304,81 @@ function ProfileInfoScreen({
           <div className="grid gap-4 sm:grid-cols-2">
             <TextField fullWidth isDisabled className="sm:col-span-2">
               <Label>Email</Label>
-              <Input value={email} />
+              <Input variant="secondary" value={email} />
             </TextField>
             <TextField fullWidth isDisabled className="sm:col-span-2">
               <Label>Email username</Label>
-              <Input value={emailUsername} />
+              <Input variant="secondary" value={emailUsername} />
             </TextField>
-            <label className="flex flex-col gap-2 text-sm font-medium">
-              Office
-              <select
-                value={office}
-                onChange={(event) => setOffice(event.target.value)}
-                required
-                disabled={optionsLoading}
-                className="rounded-lg border border-default-200 bg-white px-3 py-2"
-              >
-                <option value="">Chọn office</option>
-                {(options?.office ?? []).map((item) => (
-                  <option key={item.value} value={item.value}>
-                    {item.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="flex flex-col gap-2 text-sm font-medium">
-              Floor
-              <select
-                value={floor}
-                onChange={(event) => setFloor(event.target.value)}
-                required={isCampus}
-                disabled={!isCampus || optionsLoading}
-                className="rounded-lg border border-default-200 bg-white px-3 py-2"
-              >
-                <option value="">Chọn floor</option>
-                {floorOptions.map((item) => (
-                  <option key={item.value} value={item.value}>
-                    {item.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="flex flex-col gap-2 text-sm font-medium sm:col-span-2">
-              Building
-              <select
-                value={building}
-                onChange={(event) => setBuilding(event.target.value)}
-                required={isCampus}
-                disabled={!isCampus || optionsLoading}
-                className="rounded-lg border border-default-200 bg-white px-3 py-2"
-              >
-                <option value="">Chọn building</option>
-                {buildingOptions.map((item) => (
-                  <option key={item.value} value={item.value}>
-                    {item.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <Select
+              className="flex flex-col gap-2"
+              placeholder="Chọn office"
+              selectedKey={office || null}
+              onSelectionChange={(key) => setOffice((key as string) ?? "")}
+              isRequired
+              isDisabled={optionsLoading}
+            >
+              <Label>Office</Label>
+              <Select.Trigger>
+                <Select.Value />
+                <Select.Indicator />
+              </Select.Trigger>
+              <Select.Popover>
+                <ListBox>
+                  {(options?.office ?? []).map((item) => (
+                    <ListBoxItem key={item.value} id={item.value}>
+                      {item.label}
+                    </ListBoxItem>
+                  ))}
+                </ListBox>
+              </Select.Popover>
+            </Select>
+            <Select
+              className="flex flex-col gap-2"
+              placeholder="Chọn floor"
+              selectedKey={floor || null}
+              onSelectionChange={(key) => setFloor((key as string) ?? "")}
+              isRequired={isCampus}
+              isDisabled={!isCampus || optionsLoading}
+            >
+              <Label>Floor</Label>
+              <Select.Trigger>
+                <Select.Value />
+                <Select.Indicator />
+              </Select.Trigger>
+              <Select.Popover>
+                <ListBox>
+                  {floorOptions.map((item) => (
+                    <ListBoxItem key={item.value} id={item.value}>
+                      {item.label}
+                    </ListBoxItem>
+                  ))}
+                </ListBox>
+              </Select.Popover>
+            </Select>
+            <Select
+              className="flex flex-col gap-2 sm:col-span-2"
+              placeholder="Chọn building"
+              selectedKey={building || null}
+              onSelectionChange={(key) => setBuilding((key as string) ?? "")}
+              isRequired={isCampus}
+              isDisabled={!isCampus || optionsLoading}
+            >
+              <Label>Building</Label>
+              <Select.Trigger>
+                <Select.Value />
+                <Select.Indicator />
+              </Select.Trigger>
+              <Select.Popover>
+                <ListBox>
+                  {buildingOptions.map((item) => (
+                    <ListBoxItem key={item.value} id={item.value}>
+                      {item.label}
+                    </ListBoxItem>
+                  ))}
+                </ListBox>
+              </Select.Popover>
+            </Select>
           </div>
 
           {err && (

@@ -4,6 +4,9 @@ import { useEffect, useState } from "react";
 import {
   Button,
   Input,
+  ListBox,
+  ListBoxItem,
+  Select,
   TextArea,
   Chip,
 } from "@heroui/react";
@@ -130,15 +133,15 @@ export function BookingModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className="w-full max-w-2xl overflow-hidden rounded-2xl bg-white shadow-2xl">
         {/* Gradient header */}
-        <div className="bg-gradient-to-br from-primary to-secondary px-6 py-5 text-white">
+        <div className="bg-gradient-to-br from-primary to-secondary px-6 py-5">
           <div className="flex items-center gap-4">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-white/20 text-lg font-bold backdrop-blur">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-white/20 text-lg font-bold text-default-900 backdrop-blur">
               {initials}
             </div>
             <div className="min-w-0">
-              <p className="text-xs uppercase tracking-wide text-white/70">Đặt phòng</p>
-              <h2 className="truncate text-lg font-bold">{slot.roomName}</h2>
-              <p className="truncate text-xs text-white/80">{slot.roomEmail}</p>
+              <p className="text-xs uppercase tracking-wide text-default-500">Đặt phòng</p>
+              <h2 className="truncate text-lg font-bold text-default-900">{slot.roomName}</h2>
+              <p className="truncate text-xs text-default-500">{slot.roomEmail}</p>
             </div>
           </div>
           <div className="mt-4 flex flex-wrap gap-2">
@@ -159,30 +162,42 @@ export function BookingModal({
 
         <div className="grid gap-4 px-6 py-5">
           <Input
+            variant="secondary"
             placeholder="VD: Họp team sprint planning"
             value={subject}
             onChange={(event) => setSubject(event.target.value)}
           />
 
-          <select
-            value={endTime}
-            onChange={(event) => setEndTime(event.target.value)}
-            className="rounded-lg border border-default-200 bg-white px-3 py-2"
+          <Select
+            aria-label="Giờ kết thúc"
+            variant="secondary"
+            selectedKey={endTime || null}
+            onSelectionChange={(key) => setEndTime((key as string) ?? "")}
           >
-            {endOptions.map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ))}
-          </select>
+            <Select.Trigger>
+              <Select.Value />
+              <Select.Indicator />
+            </Select.Trigger>
+            <Select.Popover>
+              <ListBox>
+                {endOptions.map((t) => (
+                  <ListBoxItem key={t} id={t}>
+                    {t}
+                  </ListBoxItem>
+                ))}
+              </ListBox>
+            </Select.Popover>
+          </Select>
 
           <Input
+            variant="secondary"
             placeholder="email1@vng.com, email2@vng.com"
             value={attendees}
             onChange={(event) => setAttendees(event.target.value)}
           />
 
           <TextArea
+            variant="secondary"
             placeholder="Nội dung cuộc họp (tùy chọn)"
             value={notes}
             onChange={(event) => setNotes(event.target.value)}

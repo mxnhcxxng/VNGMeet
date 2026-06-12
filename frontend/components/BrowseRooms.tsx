@@ -1,21 +1,24 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Button, Card, Chip, Spinner } from "@heroui/react";
+import {
+  Button,
+  ButtonGroup,
+  Card,
+  Chip,
+  DateField,
+  ListBox,
+  ListBoxItem,
+  Select,
+  Spinner,
+  Tabs,
+  TimeField,
+} from "@heroui/react";
+import { parseDate, parseTime } from "@internationalized/date";
 import type { Room, ScheduleResponse } from "@/lib/api";
 import { BookingModal, type BookingSlot } from "./BookingModal";
 
 const SLOT_H = 44; // px per slot row
-
-function fmtDate(iso: string) {
-  const d = new Date(iso + "T00:00:00");
-  return d.toLocaleDateString("vi-VN", {
-    weekday: "short",
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
-}
 
 function addLabel(time: string, slotMinutes: number) {
   const [h, m] = time.split(":").map(Number);
@@ -34,12 +37,6 @@ const IconCalendar = () => (
     <rect x="3" y="4" width="18" height="18" rx="2" /><path d="M16 2v4M8 2v4M3 10h18" />
   </svg>
 );
-const IconClock = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-    <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" />
-  </svg>
-);
-
 const CAPACITY_SIZE_OPTIONS = [
   { value: "small", label: "Nhỏ" },
   { value: "medium", label: "Vừa" },
@@ -58,7 +55,10 @@ function capacitySizeFor(room: Room): CapacitySize | "" {
   return "";
 }
 
-/** Compact native dropdown styled with Hero UI tokens to match the toolbar. */
+/** Sentinel key for the "no filter" entry, since react-aria keys can't be "". */
+const FILTER_ALL_KEY = "__all__";
+
+/** Compact Hero UI dropdown to match the toolbar. */
 function FilterSelect({
   label,
   value,
@@ -70,22 +70,31 @@ function FilterSelect({
   onChange: (v: string) => void;
   options: { value: string; label: string }[];
 }) {
-  const active = value !== "";
   return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className={`h-10 rounded-lg border bg-white px-3 text-sm font-medium outline-none transition-colors hover:bg-default-50 focus:border-primary ${
-        active ? "border-primary text-primary" : "border-default-200 text-default-700"
-      }`}
+    <Select
+      aria-label={label}
+      variant="secondary"
+      placeholder={label}
+      selectedKey={value || FILTER_ALL_KEY}
+      onSelectionChange={(key) =>
+        onChange(key === FILTER_ALL_KEY ? "" : (key as string))
+      }
     >
-      <option value="">{label}</option>
-      {options.map((o) => (
-        <option key={o.value} value={o.value}>
-          {o.label}
-        </option>
-      ))}
-    </select>
+      <Select.Trigger>
+        <Select.Value />
+        <Select.Indicator />
+      </Select.Trigger>
+      <Select.Popover>
+        <ListBox>
+          <ListBoxItem id={FILTER_ALL_KEY}>{label}</ListBoxItem>
+          {options.map((o) => (
+            <ListBoxItem key={o.value} id={o.value}>
+              {o.label}
+            </ListBoxItem>
+          ))}
+        </ListBox>
+      </Select.Popover>
+    </Select>
   );
 }
 
@@ -176,6 +185,28 @@ export function BrowseRooms({
 
   return (
     <div className="flex h-full flex-col bg-default-50">
+      {/* Office tabs */}
+      {opts.offices.length > 0 && (
+        <div className="border-b border-default-200 bg-white px-6 pt-3">
+          <Tabs
+            variant="secondary"
+            selectedKey={office || undefined}
+            onSelectionChange={(key) => setOffice(key as string)}
+          >
+            <Tabs.ListContainer>
+              <Tabs.List>
+                {opts.offices.map((o) => (
+                  <Tabs.Tab key={o} id={o} className="w-auto min-w-fit">
+                    {o}
+                    <Tabs.Indicator />
+                  </Tabs.Tab>
+                ))}
+              </Tabs.List>
+            </Tabs.ListContainer>
+          </Tabs>
+        </div>
+      )}
+
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2 border-b border-default-200 bg-white px-6 py-4">
         <Button
@@ -185,70 +216,73 @@ export function BrowseRooms({
           Today
         </Button>
 
-        <div className="flex items-center overflow-hidden rounded-lg border border-default-200 bg-white">
+        <ButtonGroup variant="secondary">
           <Button
             isIconOnly
-            variant="ghost"
             aria-label="Ngày trước"
             isDisabled={dayIndex <= 0}
             onPress={() => setDayIndex((n) => Math.max(0, n - 1))}
-            className="rounded-none"
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M15 18l-6-6 6-6" />
             </svg>
           </Button>
-          <div className="h-5 w-px bg-default-200" />
           <Button
             isIconOnly
-            variant="ghost"
             aria-label="Ngày sau"
             isDisabled={dayIndex >= data.days.length - 1}
             onPress={() => setDayIndex((n) => Math.min(data.days.length - 1, n + 1))}
-            className="rounded-none"
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M9 18l6-6-6-6" />
             </svg>
           </Button>
-        </div>
+        </ButtonGroup>
 
-        <Chip
-          variant="secondary"
-          className="h-10 gap-2 px-3 text-sm font-medium capitalize"
+        {/* Date field — navigates within the available schedule range */}
+        <DateField
+          aria-label="Ngày"
+          value={parseDate(data.days[dayIndex])}
+          minValue={parseDate(data.days[0])}
+          maxValue={parseDate(data.days[data.days.length - 1])}
+          onChange={(date) => {
+            if (!date) return;
+            const idx = data.days.indexOf(date.toString());
+            if (idx >= 0) setDayIndex(() => idx);
+          }}
         >
-          <span className="text-default-500">
-            <IconCalendar />
-          </span>
-          <span className="capitalize">{fmtDate(data.days[dayIndex])}</span>
-        </Chip>
+          <DateField.Group variant="secondary">
+            <DateField.Prefix>
+              <span className="text-default-500">
+                <IconCalendar />
+              </span>
+            </DateField.Prefix>
+            <DateField.Input>
+              {(segment) => <DateField.Segment segment={segment} />}
+            </DateField.Input>
+          </DateField.Group>
+        </DateField>
 
         {/* Business-hours window */}
-        <Chip variant="secondary" className="h-10 gap-2 px-3 text-sm font-medium">
-          <span className="text-default-500">
-            <IconClock />
-          </span>
-          {dayStart}
-        </Chip>
+        <TimeField aria-label="Giờ bắt đầu" value={parseTime(dayStart)} isReadOnly>
+          <TimeField.Group variant="secondary">
+            <TimeField.Input>
+              {(segment) => <TimeField.Segment segment={segment} />}
+            </TimeField.Input>
+          </TimeField.Group>
+        </TimeField>
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-default-400">
           <path d="M5 12h14M13 6l6 6-6 6" />
         </svg>
-        <Chip variant="secondary" className="h-10 gap-2 px-3 text-sm font-medium">
-          <span className="text-default-500">
-            <IconClock />
-          </span>
-          {dayEnd}
-        </Chip>
+        <TimeField aria-label="Giờ kết thúc" value={parseTime(dayEnd)} isReadOnly>
+          <TimeField.Group variant="secondary">
+            <TimeField.Input>
+              {(segment) => <TimeField.Segment segment={segment} />}
+            </TimeField.Input>
+          </TimeField.Group>
+        </TimeField>
 
-        {/* Metadata filters (office / capacity size) */}
-        {opts.offices.length > 0 && (
-          <FilterSelect
-            label="Văn phòng"
-            value={office}
-            onChange={setOffice}
-            options={opts.offices.map((o) => ({ value: o, label: o }))}
-          />
-        )}
+        {/* Capacity filter (office is selected via the tabs above) */}
         {opts.capacitySizes.length > 0 && (
           <FilterSelect
             label="Sức chứa"
