@@ -10,6 +10,7 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
+from uuid import UUID
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -95,6 +96,58 @@ app.add_middleware(
 # --------------------------------------------------------------------------- #
 # Auth
 # --------------------------------------------------------------------------- #
+def _profile_email(claims: dict) -> str | None:
+    for key in ("email", "upn", "preferred_username", "unique_name"):
+        value = claims.get(key)
+        if isinstance(value, str) and "@" in value:
+            return value.strip().lower()
+    return None
+
+
+def _profile_auth_user_id(claims: dict) -> str | None:
+    value = claims.get("sub")
+    if not isinstance(value, str):
+        return None
+    try:
+        UUID(value)
+    except ValueError:
+        return None
+    return value
+
+
+def _upsert_user_profile(claims: dict) -> None:
+    """Mirror the signed-in user into public.user_profiles."""
+    user_id = _profile_auth_user_id(claims)
+    email = _profile_email(claims)
+    if not email:
+        log.warning("could not upsert user profile: token has no email-like claim")
+        return
+    if not settings.supabase_enabled:
+        log.warning("could not upsert user profile: Supabase service role not configured")
+        return
+    try:
+        from .supabase_client import get_supabase
+
+        now = datetime.now(timezone.utc).isoformat()
+        payload = {
+            "email": email,
+            "last_seen_at": now,
+            "updated_at": now,
+        }
+        if user_id:
+            payload["auth_user_id"] = user_id
+        get_supabase().table("user_profiles").upsert(payload, on_conflict="email").execute()
+    except Exception as e:  # noqa: BLE001 - profile mirroring must not block login
+        log.warning("could not upsert user profile: %s", e)
+
+
+def _claims_from_bearer(request: Request) -> dict:
+    bearer = request.headers.get("Authorization", "")
+    if not bearer.startswith("Bearer "):
+        raise HTTPException(401, "Not authenticated")
+    return auth.verify_jwt(bearer[len("Bearer ") :])
+
+
 @app.post("/api/auth/token")
 def set_token(request: Request, access_token: str = Body(..., embed=True)):
     """Manual mode: paste a Graph access token (e.g. from Graph Explorer).
@@ -106,6 +159,8 @@ def set_token(request: Request, access_token: str = Body(..., embed=True)):
         raise HTTPException(400, "access_token rỗng")
     sid = auth.session_id(request)
     auth.set_manual_token(sid, access_token)
+    claims = auth.decode_jwt_claims(access_token)
+    _upsert_user_profile(claims)
     name = auth._decode_jwt_claim(access_token, "upn", "preferred_username", "name")
     return JSONResponse({"ok": True, "username": name or "Graph token"})
 
@@ -127,7 +182,8 @@ def link_microsoft(request: Request, provider_refresh_token: str = Body(..., emb
 def me(request: Request):
     bearer = request.headers.get("Authorization", "")
     if bearer.startswith("Bearer "):
-        claims = auth.verify_jwt(bearer[len("Bearer ") :])
+        claims = _claims_from_bearer(request)
+        _upsert_user_profile(claims)
         return JSONResponse(
             {
                 "authenticated": True,
@@ -139,8 +195,23 @@ def me(request: Request):
     token = auth.get_manual_token(sid)
     if not token:
         return JSONResponse({"authenticated": False})
+    _upsert_user_profile(auth.decode_jwt_claims(token))
     name = auth._decode_jwt_claim(token, "upn", "preferred_username", "name")
     return JSONResponse({"authenticated": True, "username": name or "Graph token"})
+
+
+@app.post("/api/users/me/activity")
+def touch_user_activity(request: Request):
+    """Update the current user's profile activity timestamp."""
+    if request.headers.get("Authorization", "").startswith("Bearer "):
+        claims = _claims_from_bearer(request)
+    else:
+        token = auth.get_manual_token(auth.session_id(request))
+        if not token:
+            raise HTTPException(401, "Not authenticated")
+        claims = auth.decode_jwt_claims(token)
+    _upsert_user_profile(claims)
+    return {"ok": True}
 
 
 @app.post("/api/auth/logout")

@@ -185,6 +185,32 @@ export default function Home() {
     if (me?.authenticated) loadSchedule();
   }, [me?.authenticated, loadSchedule]);
 
+  useEffect(() => {
+    if (!me?.authenticated) return;
+
+    const touch = async () => {
+      try {
+        await api.touchUserActivity();
+      } catch {
+        /* non-fatal */
+      }
+    };
+    const touchWhenVisible = () => {
+      if (document.visibilityState === "visible") touch();
+    };
+
+    touch();
+    const interval = window.setInterval(touchWhenVisible, 60_000);
+    window.addEventListener("focus", touch);
+    document.addEventListener("visibilitychange", touchWhenVisible);
+
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", touch);
+      document.removeEventListener("visibilitychange", touchWhenVisible);
+    };
+  }, [me?.authenticated]);
+
   const handleLogout = async () => {
     try {
       await api.logout();

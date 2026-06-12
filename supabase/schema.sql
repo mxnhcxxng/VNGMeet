@@ -10,6 +10,26 @@ create table if not exists provider_tokens (
 );
 alter table provider_tokens enable row level security;
 
+-- Mirror user profile lấy từ Supabase/Azure auth claim hoặc manual Graph token.
+-- Client chỉ đọc được profile của chính mình; backend service_role ghi/upsert.
+create table if not exists user_profiles (
+  id uuid primary key default gen_random_uuid(),
+  auth_user_id uuid unique references auth.users on delete cascade,
+  email text not null,
+  email_username text generated always as (split_part(email, '@', 1)) stored,
+  last_seen_at timestamptz not null default now(),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint user_profiles_email_has_at check (position('@' in email) > 1)
+);
+create unique index if not exists user_profiles_email_lower_key
+  on user_profiles (lower(email));
+create unique index if not exists user_profiles_email_key
+  on user_profiles (email);
+alter table user_profiles enable row level security;
+create policy "users can read own profile" on user_profiles
+  for select to authenticated using ((select auth.uid()) = auth_user_id);
+
 -- Mirror metadata booking (event thật vẫn nằm ở Microsoft calendar).
 create table if not exists bookings (
   id uuid primary key default gen_random_uuid(),

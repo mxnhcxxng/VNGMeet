@@ -99,6 +99,8 @@ export const api = {
     }),
   logout: () => req<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
   me: () => req<Me>("/api/auth/me"),
+  touchUserActivity: () =>
+    req<{ ok: boolean }>("/api/users/me/activity", { method: "POST" }),
   rooms: () => req<Room[]>("/api/rooms"),
   // Cached availability served from Supabase. The backend refreshes it on demand
   // with the current user's delegated Graph token when rows are older than 5 min.

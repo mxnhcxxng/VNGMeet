@@ -32,17 +32,23 @@ _MANUAL_TOKENS: dict[str, str] = {}
 _GRAPH_TOKEN_CACHE: dict[str, tuple[str, float]] = {}
 
 
-def _decode_jwt_claim(token: str, *claims: str) -> str | None:
-    """Best-effort read of a claim from a JWT without verifying the signature."""
+def decode_jwt_claims(token: str) -> dict:
+    """Best-effort read of JWT claims without verifying the signature."""
     try:
         payload = token.split(".")[1]
         payload += "=" * (-len(payload) % 4)  # pad base64
         data = json.loads(base64.urlsafe_b64decode(payload))
-        for c in claims:
-            if data.get(c):
-                return data[c]
+        return data if isinstance(data, dict) else {}
     except Exception:
-        pass
+        return {}
+
+
+def _decode_jwt_claim(token: str, *claims: str) -> str | None:
+    """Best-effort read of a claim from a JWT without verifying the signature."""
+    data = decode_jwt_claims(token)
+    for c in claims:
+        if data.get(c):
+            return data[c]
     return None
 
 
