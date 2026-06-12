@@ -49,11 +49,37 @@ class Settings(BaseSettings):
     def supabase_enabled(self) -> bool:
         return bool(self.supabase_url and self.supabase_service_role_key)
 
+    @property
+    def graph_app_enabled(self) -> bool:
+        """App-only (client-credentials) flow is usable for the background job.
+
+        Needs a real tenant id (not the multi-tenant "common" placeholder) plus
+        a client id/secret, and the Calendars.Read *application* permission
+        granted admin consent in Azure.
+        """
+        return bool(
+            self.client_id
+            and self.client_secret
+            and self.tenant_id
+            and self.tenant_id != "common"
+        )
+
     # Default business window shown in the grid
     timezone: str = "Asia/Ho_Chi_Minh"
     business_start_hour: int = 9
     business_end_hour: int = 18
     slot_minutes: int = 30
+
+    # Availability cache (room_availability table). A background job refreshes it
+    # app-only from Graph every 15 min and the browse grid reads from the cache
+    # instead of calling Graph live. The cache always stores the FULL day at
+    # 15-min granularity (96 slots) for `availability_days` days starting today.
+    availability_days: int = 15
+    availability_slot_minutes: int = 15  # 24h / 15min = 96 slots per day
+    # Cron minutes the refresh fires on (aligned to the quarter hour: :00 :15 :30 :45).
+    availability_refresh_minutes: str = "0,15,30,45"
+    # Set true to disable the scheduler even when app creds are present.
+    availability_refresh_disabled: bool = False
 
     @property
     def authority(self) -> str:

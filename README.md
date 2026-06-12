@@ -106,6 +106,9 @@ npm run dev
 - `provider_refresh_token` được lưu bền trong Supabase (`provider_tokens`); Graph access
   token chỉ cache **in-memory** theo user (mất khi restart nhưng tự dựng lại từ refresh
   token). Supabase **không** tự refresh provider token — backend phải tự đổi.
+- Browse grid đọc `/api/availability` từ bảng `room_availability`; nếu cache thiếu hoặc
+  `updated_at` cũ hơn 5 phút, backend dùng delegated Graph token của user hiện tại để
+  refresh bảng rồi mới trả UI.
 - Trạng thái map từ Graph `availabilityView`: `0` free, `1` tentative, `2` busy,
   `3` out-of-office, `4` working-elsewhere. Mọi thứ khác `0` đều coi là "đã book" (đỏ).
 ```

@@ -2,10 +2,85 @@
 
 from __future__ import annotations
 
+import time
+
 import httpx
+
+from .config import get_settings
 
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 GRAPH_BETA = "https://graph.microsoft.com/beta"
+
+# App-only (client-credentials) token cache: (access_token, expires_at_epoch).
+_APP_TOKEN_CACHE: tuple[str, float] | None = None
+
+
+async def get_app_token() -> str:
+    """Return an app-only Graph token via the client-credentials flow, cached.
+
+    Used by the background availability job, which has no signed-in user. Requires
+    the Calendars.Read *application* permission (admin consented) and a real
+    tenant id in config (see Settings.graph_app_enabled).
+    """
+    global _APP_TOKEN_CACHE
+    if _APP_TOKEN_CACHE and _APP_TOKEN_CACHE[1] - 60 > time.time():
+        return _APP_TOKEN_CACHE[0]
+
+    s = get_settings()
+    data = {
+        "client_id": s.client_id,
+        "client_secret": s.client_secret,
+        "grant_type": "client_credentials",
+        "scope": "https://graph.microsoft.com/.default",
+    }
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.post(s.token_endpoint, data=data)
+    resp.raise_for_status()
+    payload = resp.json()
+    access_token = payload["access_token"]
+    expires_in = int(payload.get("expires_in", 3600))
+    _APP_TOKEN_CACHE = (access_token, time.time() + expires_in)
+    return access_token
+
+
+async def get_schedule_app(
+    access_token: str,
+    owner_email: str,
+    emails: list[str],
+    start_iso: str,
+    end_iso: str,
+    timezone: str,
+    interval_minutes: int,
+) -> dict[str, str]:
+    """App-only getSchedule, calling /users/{owner}/calendar/getSchedule.
+
+    The app-only flow has no /me; it acts against a specific mailbox. We use each
+    room as its own calendar owner (owner_email == the room) so no service
+    mailbox is required. Same response shape as get_schedule().
+    """
+    if not emails:
+        return {}
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+        "Prefer": f'outlook.timezone="{timezone}"',
+    }
+    body = {
+        "schedules": emails,
+        "startTime": {"dateTime": start_iso, "timeZone": timezone},
+        "endTime": {"dateTime": end_iso, "timeZone": timezone},
+        "availabilityViewInterval": interval_minutes,
+    }
+    url = f"{GRAPH_BASE}/users/{owner_email}/calendar/getSchedule"
+    async with httpx.AsyncClient(timeout=60) as client:
+        resp = await client.post(url, headers=headers, json=body)
+        resp.raise_for_status()
+        data = resp.json()
+
+    result: dict[str, str] = {}
+    for item in data.get("value", []):
+        result[item.get("scheduleId")] = item.get("availabilityView", "")
+    return result
 
 
 async def _list_rooms_places(client: httpx.AsyncClient, headers: dict) -> list[dict]:

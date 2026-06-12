@@ -38,3 +38,21 @@ create table if not exists favorite_rooms (
 alter table favorite_rooms enable row level security;
 create policy "manage own favorites" on favorite_rooms
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+-- Cache availability phòng họp. Một background job (app-only Graph) refresh mỗi
+-- 15 phút; frontend đọc grid từ đây thay vì gọi Graph trực tiếp.
+-- slots: mảng 96 slot 15 phút/ngày, index = hour*4 + minute/15 (0=00:00 .. 95=23:45).
+-- Giá trị: 0 = free, 1 = busy.
+create table if not exists room_availability (
+  room_id    uuid not null references meeting_room_metadata(id) on delete cascade,
+  date       date not null,
+  slots      smallint[] not null,
+  updated_at timestamptz not null default now(),
+  primary key (room_id, date),
+  constraint room_availability_slots_len check (array_length(slots, 1) = 96)
+);
+create index if not exists idx_room_availability_date on room_availability(date);
+alter table room_availability enable row level security;
+-- Chỉ user đã đăng nhập đọc được; ghi chỉ qua service_role (backend job).
+create policy "authenticated_can_read_availability" on room_availability
+  for select to authenticated using (true);

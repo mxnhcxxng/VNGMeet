@@ -41,6 +41,8 @@ export interface Room {
   building?: string;
   floor?: string;
   capacity?: number;
+  zone?: string;
+  office?: string;
 }
 
 export interface ScheduleRoom extends Room {
@@ -98,6 +100,14 @@ export const api = {
   logout: () => req<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
   me: () => req<Me>("/api/auth/me"),
   rooms: () => req<Room[]>("/api/rooms"),
+  // Cached availability served from Supabase. The backend refreshes it on demand
+  // with the current user's delegated Graph token when rows are older than 5 min.
+  // Same shape as schedule() — preferred for the browse grid.
+  availability: (days: number, emails?: string) =>
+    req<ScheduleResponse>(
+      `/api/availability?days=${days}${emails ? `&emails=${encodeURIComponent(emails)}` : ""}`
+    ),
+  // Live Graph query (kept as a fallback; needs a valid Graph token).
   schedule: (days: number, emails?: string) =>
     req<ScheduleResponse>(
       `/api/schedule?days=${days}${emails ? `&emails=${encodeURIComponent(emails)}` : ""}`

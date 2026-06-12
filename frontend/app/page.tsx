@@ -90,7 +90,7 @@ function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
               label="Graph access token"
               labelPlacement="outside"
               description="Lấy từ Graph Explorer → tab Access token. Hết hạn ~1h thì dán lại."
-              placeholder="eyJ0eXAiOiJKV1QiLCJ..."
+              placeholder="paste access token here"
               minRows={3}
               variant="bordered"
               value={token}
@@ -164,7 +164,15 @@ export default function Home() {
     setRefreshing(true);
     setError(null);
     try {
-      setData(await api.schedule(RANGE_DAYS));
+      // Read from the cached availability table (refreshed every 15 min) instead
+      // of querying Graph live. Fall back to a live Graph query when the cache
+      // isn't available (e.g. manual-token dev mode without Supabase → 503).
+      try {
+        setData(await api.availability(RANGE_DAYS));
+      } catch (e: any) {
+        if (e.message === "UNAUTHENTICATED") throw e;
+        setData(await api.schedule(RANGE_DAYS));
+      }
     } catch (e: any) {
       setError(e.message === "UNAUTHENTICATED" ? "Phiên đăng nhập hết hạn." : e.message);
       if (e.message === "UNAUTHENTICATED") setMe({ authenticated: false });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useDisclosure } from "@heroui/react";
 import type { ScheduleResponse } from "@/lib/api";
 import { BookingModal, type BookingSlot } from "./BookingModal";
@@ -40,6 +40,37 @@ const IconClock = () => (
   </svg>
 );
 
+/** Compact toolbar dropdown styled to match the surrounding buttons. */
+function FilterSelect({
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  options: { value: string; label: string }[];
+}) {
+  const active = value !== "";
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className={`rounded-md border bg-white px-3 py-2 text-sm font-semibold shadow-[0_1px_2px_0_#0a0d120d] hover:bg-[#fafafa] ${
+        active ? "border-[#1570ef] text-[#1570ef]" : "border-[#d5d7da] text-[#414651]"
+      }`}
+    >
+      <option value="">{label}</option>
+      {options.map((o) => (
+        <option key={o.value} value={o.value}>
+          {o.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 export function BrowseRooms({
   data,
   dayIndex,
@@ -58,7 +89,53 @@ export function BrowseRooms({
   const [selectedSlot, setSelectedSlot] = useState<BookingSlot | null>(null);
   const [endOptions, setEndOptions] = useState<string[]>([]);
 
-  const rooms = data.rooms;
+  // Room metadata filters (sourced from meeting_room_metadata via the API).
+  const [building, setBuilding] = useState("");
+  const [floor, setFloor] = useState("");
+  const [zone, setZone] = useState("");
+  const [office, setOffice] = useState("");
+  const [minCapacity, setMinCapacity] = useState("");
+
+  // Distinct, sorted option lists derived from the rooms' metadata.
+  const opts = useMemo(() => {
+    const uniq = (vals: (string | undefined)[]) =>
+      [...new Set(vals.filter((v): v is string => !!v))].sort((a, b) =>
+        a.localeCompare(b)
+      );
+    const caps = [...new Set(data.rooms.map((r) => r.capacity).filter((c): c is number => !!c))].sort(
+      (a, b) => a - b
+    );
+    return {
+      buildings: uniq(data.rooms.map((r) => r.building)),
+      floors: uniq(data.rooms.map((r) => r.floor)),
+      zones: uniq(data.rooms.map((r) => r.zone)),
+      offices: uniq(data.rooms.map((r) => r.office)),
+      capacities: caps,
+    };
+  }, [data.rooms]);
+
+  const filtersActive = !!(building || floor || zone || office || minCapacity);
+
+  const rooms = useMemo(() => {
+    const minCap = minCapacity ? Number(minCapacity) : 0;
+    return data.rooms.filter(
+      (r) =>
+        (!building || r.building === building) &&
+        (!floor || r.floor === floor) &&
+        (!zone || r.zone === zone) &&
+        (!office || r.office === office) &&
+        (!minCap || (r.capacity ?? 0) >= minCap)
+    );
+  }, [data.rooms, building, floor, zone, office, minCapacity]);
+
+  const clearFilters = () => {
+    setBuilding("");
+    setFloor("");
+    setZone("");
+    setOffice("");
+    setMinCapacity("");
+  };
+
   const times = data.times;
   const cols = `64px repeat(${rooms.length}, minmax(160px, 1fr))`;
   const dayStart = times[0] ?? "08:00";
@@ -141,6 +218,56 @@ export function BrowseRooms({
           <span className="text-sm font-medium text-[#414651]">Vacant only</span>
         </div>
 
+        {/* Metadata filters (building / floor / zone / capacity) */}
+        {opts.buildings.length > 0 && (
+          <FilterSelect
+            label="Tòa nhà"
+            value={building}
+            onChange={setBuilding}
+            options={opts.buildings.map((b) => ({ value: b, label: b }))}
+          />
+        )}
+        {opts.floors.length > 0 && (
+          <FilterSelect
+            label="Tầng"
+            value={floor}
+            onChange={setFloor}
+            options={opts.floors.map((f) => ({ value: f, label: f }))}
+          />
+        )}
+        {opts.zones.length > 0 && (
+          <FilterSelect
+            label="Khu vực"
+            value={zone}
+            onChange={setZone}
+            options={opts.zones.map((z) => ({ value: z, label: z }))}
+          />
+        )}
+        {opts.offices.length > 0 && (
+          <FilterSelect
+            label="Văn phòng"
+            value={office}
+            onChange={setOffice}
+            options={opts.offices.map((o) => ({ value: o, label: o }))}
+          />
+        )}
+        {opts.capacities.length > 0 && (
+          <FilterSelect
+            label="Sức chứa"
+            value={minCapacity}
+            onChange={setMinCapacity}
+            options={opts.capacities.map((c) => ({ value: String(c), label: `≥ ${c} 👤` }))}
+          />
+        )}
+        {filtersActive && (
+          <button
+            onClick={clearFilters}
+            className="rounded-md px-2.5 py-2 text-sm font-semibold text-[#717680] hover:text-[#414651] hover:underline"
+          >
+            Xóa lọc
+          </button>
+        )}
+
         <button
           onClick={onRefresh}
           disabled={refreshing}
@@ -155,6 +282,19 @@ export function BrowseRooms({
 
       {/* Calendar */}
       <div className="flex-1 overflow-auto">
+        {rooms.length === 0 ? (
+          <div className="flex h-full flex-col items-center justify-center gap-3 text-default-500">
+            <p>Không có phòng nào khớp bộ lọc.</p>
+            {filtersActive && (
+              <button
+                onClick={clearFilters}
+                className="rounded-md border border-[#d5d7da] bg-white px-3.5 py-2 text-sm font-semibold text-[#414651] shadow-[0_1px_2px_0_#0a0d120d] hover:bg-[#fafafa]"
+              >
+                Xóa bộ lọc
+              </button>
+            )}
+          </div>
+        ) : (
         <div className="min-w-fit">
           {/* Room header */}
           <div
@@ -275,6 +415,7 @@ export function BrowseRooms({
             )}
           </div>
         </div>
+        )}
       </div>
 
       <BookingModal
