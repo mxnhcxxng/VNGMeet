@@ -10,6 +10,7 @@ Cache layout (room_availability):
   date     date  -> today .. today + (availability_days - 1)
   slots    smallint[96]  -> one 15-min slot per element, index = hour*4 + minute//15
                            value 0 = free, 1 = busy
+  slot_owner_ids uuid[96] -> nullable user_profiles.id for API-created bookings
   updated_at timestamptz
 """
 
@@ -53,6 +54,38 @@ def _in_use_rooms() -> list[dict]:
     return [r for r in (rows or []) if r.get("id") and r.get("email")]
 
 
+def _read_existing_owner_ids(sb, room_ids: list[str], day_list: list) -> dict[tuple[str, str], list]:
+    if not room_ids or not day_list:
+        return {}
+    rows = (
+        sb.table("room_availability")
+        .select("room_id, date, slot_owner_ids")
+        .in_("room_id", room_ids)
+        .gte("date", day_list[0].isoformat())
+        .lte("date", day_list[-1].isoformat())
+        .execute()
+        .data
+        or []
+    )
+    out: dict[tuple[str, str], list] = {}
+    for row in rows:
+        owner_ids = list(row.get("slot_owner_ids") or [])
+        if len(owner_ids) != SLOTS_PER_DAY:
+            owner_ids = [None] * SLOTS_PER_DAY
+        out[(row["room_id"], str(row["date"]))] = owner_ids
+    return out
+
+
+def _merge_owner_ids_with_slots(existing_owner_ids: list | None, slots: list[int]) -> list:
+    owner_ids = list(existing_owner_ids or [])
+    if len(owner_ids) != SLOTS_PER_DAY:
+        owner_ids = [None] * SLOTS_PER_DAY
+    return [
+        owner_ids[idx] if idx < len(slots) and slots[idx] != 0 else None
+        for idx in range(SLOTS_PER_DAY)
+    ]
+
+
 async def refresh_availability() -> dict:
     """Refresh the room_availability cache for all in-use rooms. Returns a summary.
 
@@ -79,11 +112,14 @@ async def refresh_availability() -> dict:
     if not rooms:
         log.warning("refresh_availability: no in_use rooms found")
         return {"rooms": 0, "rows": 0, "errors": 0}
+    room_ids = [room["id"] for room in rooms]
 
     start_iso = f"{day_list[0].isoformat()}T00:00:00"
     end_iso = f"{(today + timedelta(days=days)).isoformat()}T00:00:00"
 
     token = await graph.get_app_token()
+    sb = get_supabase()
+    existing_owner_ids = _read_existing_owner_ids(sb, room_ids, day_list)
 
     upserts: list[dict] = []
     errors = 0
@@ -116,16 +152,20 @@ async def refresh_availability() -> dict:
             # Pad if Graph returned a short view (defensive; treat missing as free).
             if len(slots) < SLOTS_PER_DAY:
                 slots += [0] * (SLOTS_PER_DAY - len(slots))
+            slot_owner_ids = _merge_owner_ids_with_slots(
+                existing_owner_ids.get((room["id"], day.isoformat())),
+                slots,
+            )
             upserts.append(
                 {
                     "room_id": room["id"],
                     "date": day.isoformat(),
                     "slots": slots,
+                    "slot_owner_ids": slot_owner_ids,
                     "updated_at": now_iso,
                 }
             )
 
-    sb = get_supabase()
     if upserts:
         sb.table("room_availability").upsert(
             upserts, on_conflict="room_id,date"
@@ -168,12 +208,15 @@ async def refresh_availability_delegated(token: str) -> dict:
     if not rooms:
         log.warning("refresh_availability_delegated: no in_use rooms found")
         return {"rooms": 0, "rows": 0, "errors": 0}
+    room_ids = [room["id"] for room in rooms]
 
     start_iso = f"{day_list[0].isoformat()}T00:00:00"
     end_iso = f"{(today + timedelta(days=days)).isoformat()}T00:00:00"
 
     by_email = {r["email"].lower(): r for r in rooms}
     emails = [r["email"] for r in rooms]
+    sb = get_supabase()
+    existing_owner_ids = _read_existing_owner_ids(sb, room_ids, day_list)
 
     upserts: list[dict] = []
     errors = 0
@@ -212,16 +255,20 @@ async def refresh_availability_delegated(token: str) -> dict:
                 # Pad if Graph returned a short view (defensive; missing = free).
                 if len(slots) < SLOTS_PER_DAY:
                     slots += [0] * (SLOTS_PER_DAY - len(slots))
+                slot_owner_ids = _merge_owner_ids_with_slots(
+                    existing_owner_ids.get((room["id"], day.isoformat())),
+                    slots,
+                )
                 upserts.append(
                     {
                         "room_id": room["id"],
                         "date": day.isoformat(),
                         "slots": slots,
+                        "slot_owner_ids": slot_owner_ids,
                         "updated_at": now_iso,
                     }
                 )
 
-    sb = get_supabase()
     if upserts:
         sb.table("room_availability").upsert(
             upserts, on_conflict="room_id,date"

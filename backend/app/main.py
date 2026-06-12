@@ -10,6 +10,7 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
+from typing import Literal
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
@@ -115,16 +116,16 @@ def _profile_auth_user_id(claims: dict) -> str | None:
     return value
 
 
-def _upsert_user_profile(claims: dict) -> None:
+def _upsert_user_profile(claims: dict) -> str | None:
     """Mirror the signed-in user into public.user_profiles."""
     user_id = _profile_auth_user_id(claims)
     email = _profile_email(claims)
     if not email:
         log.warning("could not upsert user profile: token has no email-like claim")
-        return
+        return None
     if not settings.supabase_enabled:
         log.warning("could not upsert user profile: Supabase service role not configured")
-        return
+        return None
     try:
         from .supabase_client import get_supabase
 
@@ -136,9 +137,26 @@ def _upsert_user_profile(claims: dict) -> None:
         }
         if user_id:
             payload["auth_user_id"] = user_id
-        get_supabase().table("user_profiles").upsert(payload, on_conflict="email").execute()
+        supabase = get_supabase()
+        res = (
+            supabase.table("user_profiles")
+            .upsert(payload, on_conflict="email")
+            .execute()
+        )
+        if res.data and res.data[0].get("id"):
+            return str(res.data[0]["id"])
+
+        res = (
+            supabase.table("user_profiles")
+            .select("id")
+            .eq("email", email)
+            .limit(1)
+            .execute()
+        )
+        return str(res.data[0]["id"]) if res.data else None
     except Exception as e:  # noqa: BLE001 - profile mirroring must not block login
         log.warning("could not upsert user profile: %s", e)
+        return None
 
 
 def _claims_from_bearer(request: Request) -> dict:
@@ -146,6 +164,42 @@ def _claims_from_bearer(request: Request) -> dict:
     if not bearer.startswith("Bearer "):
         raise HTTPException(401, "Not authenticated")
     return auth.verify_jwt(bearer[len("Bearer ") :])
+
+
+def _request_identity(request: Request) -> tuple[str | None, str | None]:
+    """Return (auth.users id, email) for either auth path without fetching Graph."""
+    bearer = request.headers.get("Authorization", "")
+    if bearer.startswith("Bearer "):
+        claims = _claims_from_bearer(request)
+        return claims.get("sub"), _profile_email(claims)
+
+    token = auth.get_manual_token(auth.session_id(request))
+    if not token:
+        raise HTTPException(401, "Not authenticated")
+    claims = auth.decode_jwt_claims(token)
+    return None, _profile_email(claims)
+
+
+async def _booking_auth_context(
+    request: Request,
+) -> tuple[str, str | None, str | None, str | None]:
+    """Return Graph token, auth.users id, user_profiles id, and email."""
+    if request.headers.get("Authorization", "").startswith("Bearer "):
+        claims = _claims_from_bearer(request)
+        auth_user_id = claims["sub"]
+        graph_token = await auth.get_graph_token(auth_user_id)
+        return (
+            graph_token,
+            auth_user_id,
+            _upsert_user_profile(claims),
+            _profile_email(claims),
+        )
+
+    token = auth.get_manual_token(auth.session_id(request))
+    if not token:
+        raise HTTPException(401, "Not authenticated")
+    claims = auth.decode_jwt_claims(token)
+    return token, None, _upsert_user_profile(claims), _profile_email(claims)
 
 
 @app.post("/api/auth/token")
@@ -188,6 +242,7 @@ def me(request: Request):
             {
                 "authenticated": True,
                 "username": claims.get("email"),
+                "email": _profile_email(claims),
                 "graphLinked": auth.has_refresh_token(claims["sub"]),
             }
         )
@@ -195,9 +250,16 @@ def me(request: Request):
     token = auth.get_manual_token(sid)
     if not token:
         return JSONResponse({"authenticated": False})
-    _upsert_user_profile(auth.decode_jwt_claims(token))
+    claims = auth.decode_jwt_claims(token)
+    _upsert_user_profile(claims)
     name = auth._decode_jwt_claim(token, "upn", "preferred_username", "name")
-    return JSONResponse({"authenticated": True, "username": name or "Graph token"})
+    return JSONResponse(
+        {
+            "authenticated": True,
+            "username": name or "Graph token",
+            "email": _profile_email(claims),
+        }
+    )
 
 
 @app.post("/api/users/me/activity")
@@ -338,7 +400,7 @@ async def schedule(
             if email not in grids:
                 continue
             for ti in range(len(times)):
-                status = int(view[ti]) if ti < len(view) and view[ti].isdigit() else 0
+                status = 0 if ti < len(view) and view[ti] == "0" else 1
                 grids[email][ti][di] = status
 
     return {
@@ -358,13 +420,7 @@ async def schedule(
 def _require_auth(request: Request) -> None:
     """Allow any authenticated session (Supabase JWT or manual token) — but do
     NOT fetch a Graph token until the cache is known to be stale."""
-    bearer = auth._bearer(request)
-    if bearer:
-        auth.verify_jwt(bearer)  # raises 401 on invalid/missing secret
-        return
-    if auth.get_manual_token(auth.session_id(request)):
-        return
-    raise HTTPException(401, "Not authenticated")
+    _request_identity(request)
 
 
 def _parse_cache_updated_at(value: object) -> datetime | None:
@@ -400,7 +456,7 @@ def _read_availability_cache(
         return {}
     rows = (
         sb.table("room_availability")
-        .select("room_id, date, slots, updated_at")
+        .select("room_id, date, slots, slot_owner_ids, updated_at")
         .in_("room_id", room_ids)
         .gte("date", day_list[0])
         .lte("date", day_list[-1])
@@ -429,6 +485,9 @@ def _availability_cache_is_stale(
                 return True
             slots = row.get("slots") or []
             if len(slots) != availability.SLOTS_PER_DAY:
+                return True
+            owner_ids = row.get("slot_owner_ids") or []
+            if len(owner_ids) != availability.SLOTS_PER_DAY:
                 return True
             updated_at = _parse_cache_updated_at(row.get("updated_at"))
             if not updated_at or updated_at < cutoff:
@@ -485,6 +544,40 @@ async def _ensure_availability_cache_fresh(
         return cache
 
 
+def _availability_slot_index(time_value: str | None) -> int | None:
+    if not time_value:
+        return None
+    try:
+        hour, minute = [int(part) for part in time_value.split(":")[:2]]
+    except (TypeError, ValueError):
+        return None
+    total_minutes = hour * 60 + minute
+    idx = total_minutes // settings.availability_slot_minutes
+    return max(0, min(availability.SLOTS_PER_DAY, idx))
+
+
+def _profile_email_by_id(sb, profile_ids: set[str]) -> dict[str, str]:
+    if not profile_ids:
+        return {}
+    try:
+        rows = (
+            sb.table("user_profiles")
+            .select("id, email")
+            .in_("id", list(profile_ids))
+            .execute()
+            .data
+            or []
+        )
+        return {
+            str(row["id"]): row["email"].strip().lower()
+            for row in rows
+            if row.get("id") and row.get("email")
+        }
+    except Exception as e:  # noqa: BLE001 - booking-owner overlay is best-effort
+        log.warning("could not read user profiles by id for booking overlay: %s", e)
+        return {}
+
+
 @app.get("/api/availability")
 async def availability_grid(
     request: Request,
@@ -502,7 +595,8 @@ async def availability_grid(
     rows are missing or older than five minutes, the backend refreshes the table
     with the current user's delegated Graph token before returning the grid.
     """
-    _require_auth(request)
+    _, current_user_email = _request_identity(request)
+    current_user_email = (current_user_email or "").strip().lower()
     if not settings.supabase_enabled:
         raise HTTPException(503, "Availability cache requires Supabase configuration.")
     from .supabase_client import get_supabase
@@ -532,6 +626,13 @@ async def availability_grid(
 
     room_ids = [r["id"] for r in rooms_list]
     cache = await _ensure_availability_cache_fresh(request, sb, room_ids, day_list)
+    owner_profile_ids = {
+        str(owner_id)
+        for row in cache.values()
+        for owner_id in (row.get("slot_owner_ids") or [])
+        if owner_id
+    }
+    owner_email_by_profile_id = _profile_email_by_id(sb, owner_profile_ids)
 
     # Precompute, for each display time label, the underlying 15-min slot indices.
     base_idx = [int(t[:2]) * 4 + int(t[3:5]) // (60 // 4) for t in times]
@@ -539,19 +640,34 @@ async def availability_grid(
 
     out_rooms = []
     for r in rooms_list:
-        grid = [[0] * days for _ in times]
+        api_grid = [[0] * days for _ in times]
         for di, day in enumerate(day_list):
             row = cache.get((r["id"], day))
-            slots = row.get("slots") if row else None
-            if not slots:
-                continue
+            slots = row.get("slots") if row else []
+            slot_owner_ids = row.get("slot_owner_ids") if row else []
             for ti, start in enumerate(base_idx):
+                owner_profile_id = next(
+                    (
+                        str(slot_owner_ids[start + k])
+                        for k in range(sub_per_slot)
+                        if start + k < len(slot_owner_ids)
+                        and slot_owner_ids[start + k]
+                    ),
+                    None,
+                )
+                owner_email = (
+                    owner_email_by_profile_id.get(owner_profile_id)
+                    if owner_profile_id
+                    else None
+                )
                 busy = any(
-                    start + k < len(slots) and slots[start + k] == 1
+                    start + k < len(slots) and slots[start + k] != 0
                     for k in range(sub_per_slot)
                 )
-                grid[ti][di] = 1 if busy else 0
-        out_rooms.append({**r, "grid": grid})
+                is_your_booking = bool(owner_email and owner_email == current_user_email)
+                final_value = 2 if is_your_booking else (1 if owner_profile_id or busy else 0)
+                api_grid[ti][di] = final_value
+        out_rooms.append({**r, "grid": api_grid})
 
     return {
         "timezone": settings.timezone,
@@ -594,18 +710,127 @@ class BookingRequest(BaseModel):
     date: str  # "2026-06-11"
     start_time: str  # "09:00"
     end_time: str  # "10:00"
+    booking_type: Literal["instant", "schedule"] = "instant"
+    method: Literal["manual", "chatbot"] = "manual"
     subject: str
     attendees: list[str] = []
     body: str | None = None
 
 
+def _log_user_booking_activity(
+    user_profile_id: str | None,
+    payload: BookingRequest,
+    status: Literal["ok", "failed"],
+    error_message: str | None = None,
+) -> None:
+    if not user_profile_id or not settings.supabase_enabled:
+        return
+    try:
+        from .supabase_client import get_supabase
+
+        get_supabase().table("user_activity").insert(
+            {
+                "user_id": user_profile_id,
+                "room_email": payload.room_email,
+                "room_name": payload.room_name,
+                "date": payload.date,
+                "start_time": payload.start_time,
+                "end_time": payload.end_time,
+                "booking_type": payload.booking_type,
+                "method": payload.method,
+                "status": status,
+                "error_message": error_message,
+            }
+        ).execute()
+    except Exception as e:  # noqa: BLE001 - booking log must not block booking flow
+        log.warning("could not insert user_activity booking log: %s", e)
+
+
+def _mark_room_availability_owner(
+    user_profile_id: str | None,
+    payload: BookingRequest,
+) -> None:
+    """Persist the API-created booking owner per 15-min slot."""
+    if not user_profile_id or not settings.supabase_enabled:
+        return
+
+    start = _availability_slot_index(payload.start_time)
+    end = _availability_slot_index(payload.end_time)
+    if start is None or end is None or end <= start:
+        return
+
+    try:
+        from .supabase_client import get_supabase
+
+        sb = get_supabase()
+        room_rows = (
+            sb.table("meeting_room_metadata")
+            .select("id, email")
+            .execute()
+            .data
+            or []
+        )
+        room_email = payload.room_email.strip().lower()
+        room = next(
+            (r for r in room_rows if (r.get("email") or "").strip().lower() == room_email),
+            None,
+        )
+        if not room:
+            log.warning(
+                "could not mark room_availability owner: room not found for %s",
+                payload.room_email,
+            )
+            return
+
+        room_id = room["id"]
+        rows = (
+            sb.table("room_availability")
+            .select("slots, slot_owner_ids")
+            .eq("room_id", room_id)
+            .eq("date", payload.date)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+
+        slots = list(rows[0].get("slots") or []) if rows else []
+        if len(slots) != availability.SLOTS_PER_DAY:
+            slots = [0] * availability.SLOTS_PER_DAY
+
+        slot_owner_ids = list(rows[0].get("slot_owner_ids") or []) if rows else []
+        if len(slot_owner_ids) != availability.SLOTS_PER_DAY:
+            slot_owner_ids = [None] * availability.SLOTS_PER_DAY
+
+        for idx in range(start, min(end, availability.SLOTS_PER_DAY)):
+            slots[idx] = 1
+            slot_owner_ids[idx] = user_profile_id
+
+        sb.table("room_availability").upsert(
+            {
+                "room_id": room_id,
+                "date": payload.date,
+                "slots": slots,
+                "slot_owner_ids": slot_owner_ids,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            },
+            on_conflict="room_id,date",
+        ).execute()
+    except Exception as e:  # noqa: BLE001 - owner cache must not block booking
+        log.warning("could not mark room_availability owner: %s", e)
+
+
 @app.post("/api/bookings")
 async def create_booking(request: Request, payload: BookingRequest):
-    token, user_id = await auth.resolve_token(request)
+    token, auth_user_id, user_profile_id, _auth_email = await _booking_auth_context(
+        request
+    )
 
     if not payload.subject.strip():
+        _log_user_booking_activity(user_profile_id, payload, "failed", "empty_subject")
         raise HTTPException(400, "Tiêu đề cuộc họp không được để trống")
     if payload.end_time <= payload.start_time:
+        _log_user_booking_activity(user_profile_id, payload, "failed", "invalid_time_range")
         raise HTTPException(400, "Giờ kết thúc phải sau giờ bắt đầu")
 
     start_iso = f"{payload.date}T{payload.start_time}:00"
@@ -623,16 +848,23 @@ async def create_booking(request: Request, payload: BookingRequest):
             payload.body,
         )
     except httpx.HTTPStatusError as e:
+        _log_user_booking_activity(user_profile_id, payload, "failed", e.response.text)
         raise HTTPException(e.response.status_code, e.response.text)
+    except Exception as e:
+        _log_user_booking_activity(user_profile_id, payload, "failed", str(e))
+        raise
+
+    _log_user_booking_activity(user_profile_id, payload, "ok")
+    _mark_room_availability_owner(user_profile_id, payload)
 
     # Mirror booking metadata into Supabase when available (Supabase path only).
-    if user_id and settings.supabase_enabled:
+    if auth_user_id and settings.supabase_enabled:
         try:
             from .supabase_client import get_supabase
 
             get_supabase().table("bookings").insert(
                 {
-                    "user_id": user_id,
+                    "user_id": auth_user_id,
                     "room_email": payload.room_email,
                     "room_name": payload.room_name,
                     "date": payload.date,

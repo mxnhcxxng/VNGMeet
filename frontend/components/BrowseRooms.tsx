@@ -338,9 +338,12 @@ export function BrowseRooms({
                   {rooms.map((r) => {
                     const status = r.grid[ti]?.[dayIndex] ?? 0;
                     const free = status === 0;
-                    const prevBusy = ti > 0 && (r.grid[ti - 1]?.[dayIndex] ?? 0) !== 0;
+                    const myBooking = status === 2;
+                    const prevBusy =
+                      ti > 0 && (r.grid[ti - 1]?.[dayIndex] ?? 0) === status;
                     const nextBusy =
-                      ti < times.length - 1 && (r.grid[ti + 1]?.[dayIndex] ?? 0) !== 0;
+                      ti < times.length - 1 &&
+                      (r.grid[ti + 1]?.[dayIndex] ?? 0) === status;
 
                     if (vacantOnly && !free) {
                       return (
@@ -381,7 +384,7 @@ export function BrowseRooms({
                         <div
                           className="h-full px-2"
                           style={{
-                            backgroundColor: "#fef3f2",
+                            backgroundColor: myBooking ? "#ecfdf3" : "#fef3f2",
                             borderTopLeftRadius: prevBusy ? 0 : 8,
                             borderTopRightRadius: prevBusy ? 0 : 8,
                             borderBottomLeftRadius: nextBusy ? 0 : 8,
@@ -390,8 +393,11 @@ export function BrowseRooms({
                         >
                           {!prevBusy && (
                             <div className="pt-1.5">
-                              <p className="truncate text-xs font-semibold" style={{ color: "#b42318" }}>
-                                Booked
+                              <p
+                                className="truncate text-xs font-semibold"
+                                style={{ color: myBooking ? "#027a48" : "#b42318" }}
+                              >
+                                {myBooking ? "My booking" : "Booked"}
                               </p>
                             </div>
                           )}

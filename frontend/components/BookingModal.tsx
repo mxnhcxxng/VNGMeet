@@ -107,6 +107,8 @@ export function BookingModal({
         date: slot.date,
         start_time: slot.startTime,
         end_time: endTime,
+        booking_type: "instant",
+        method: "manual",
         subject: subject.trim(),
         attendees: attendees
           .split(",")

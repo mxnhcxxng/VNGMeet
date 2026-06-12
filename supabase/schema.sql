@@ -48,6 +48,28 @@ alter table bookings enable row level security;
 create policy "own bookings" on bookings
   for select using (auth.uid() = user_id);
 
+-- Log kết quả đặt phòng theo user profile. Ghi qua backend service_role; client chưa đọc/ghi trực tiếp.
+create table if not exists user_activity (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references user_profiles(id) on delete cascade,
+  room_email text not null,
+  room_name text,
+  date date not null,
+  start_time text not null,
+  end_time text not null,
+  booking_type text not null,
+  method text not null,
+  status text not null,
+  error_message text,
+  created_at timestamptz not null default now(),
+  constraint user_activity_booking_type_check check (booking_type in ('instant', 'schedule')),
+  constraint user_activity_method_check check (method in ('manual', 'chatbot')),
+  constraint user_activity_status_check check (status in ('ok', 'failed'))
+);
+create index if not exists idx_user_activity_user_created_at
+  on user_activity (user_id, created_at desc);
+alter table user_activity enable row level security;
+
 -- Phòng yêu thích (client tự quản qua anon key + RLS).
 create table if not exists favorite_rooms (
   user_id uuid references auth.users on delete cascade,
@@ -63,14 +85,23 @@ create policy "manage own favorites" on favorite_rooms
 -- 15 phút; frontend đọc grid từ đây thay vì gọi Graph trực tiếp.
 -- slots: mảng 96 slot 15 phút/ngày, index = hour*4 + minute/15 (0=00:00 .. 95=23:45).
 -- Giá trị: 0 = free, 1 = busy.
+-- slot_owner_ids: mảng 96 user_profiles.id nullable, dùng để map busy slot nào là của user hiện tại.
 create table if not exists room_availability (
-  room_id    uuid not null references meeting_room_metadata(id) on delete cascade,
-  date       date not null,
-  slots      smallint[] not null,
-  updated_at timestamptz not null default now(),
+  room_id        uuid not null references meeting_room_metadata(id) on delete cascade,
+  date           date not null,
+  slots          smallint[] not null,
+  slot_owner_ids uuid[] not null default array_fill(null::uuid, ARRAY[96]),
+  updated_at     timestamptz not null default now(),
   primary key (room_id, date),
-  constraint room_availability_slots_len check (array_length(slots, 1) = 96)
+  constraint room_availability_slots_len check (array_length(slots, 1) = 96),
+  constraint room_availability_slot_owner_ids_len check (array_length(slot_owner_ids, 1) = 96)
 );
+alter table room_availability
+  add column if not exists slot_owner_ids uuid[] not null default array_fill(null::uuid, ARRAY[96]);
+alter table room_availability
+  drop constraint if exists room_availability_slot_owner_ids_len;
+alter table room_availability
+  add constraint room_availability_slot_owner_ids_len check (array_length(slot_owner_ids, 1) = 96);
 create index if not exists idx_room_availability_date on room_availability(date);
 alter table room_availability enable row level security;
 -- Chỉ user đã đăng nhập đọc được; ghi chỉ qua service_role (backend job).
