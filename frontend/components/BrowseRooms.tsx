@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { Button, Card, Chip, Spinner } from "@heroui/react";
 import type { Room, ScheduleResponse } from "@/lib/api";
 import { BookingModal, type BookingSlot } from "./BookingModal";
 
@@ -57,7 +58,7 @@ function capacitySizeFor(room: Room): CapacitySize | "" {
   return "";
 }
 
-/** Compact toolbar dropdown styled to match the surrounding buttons. */
+/** Compact native dropdown styled with Hero UI tokens to match the toolbar. */
 function FilterSelect({
   label,
   value,
@@ -74,8 +75,8 @@ function FilterSelect({
     <select
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      className={`rounded-md border bg-white px-3 py-2 text-sm font-semibold shadow-[0_1px_2px_0_#0a0d120d] hover:bg-[#fafafa] ${
-        active ? "border-[#1570ef] text-[#1570ef]" : "border-[#d5d7da] text-[#414651]"
+      className={`h-10 rounded-lg border bg-white px-3 text-sm font-medium outline-none transition-colors hover:bg-default-50 focus:border-primary ${
+        active ? "border-primary text-primary" : "border-default-200 text-default-700"
       }`}
     >
       <option value="">{label}</option>
@@ -174,49 +175,70 @@ export function BrowseRooms({
     data.days[dayIndex] === todayIso && markerOffset >= 0 && markerOffset <= times.length * SLOT_H;
 
   return (
-    <div className="flex h-full flex-col bg-white">
+    <div className="flex h-full flex-col bg-default-50">
       {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-[#e9eaeb] px-6 py-4">
-        <button
-          onClick={() => setDayIndex(() => 0)}
-          className="rounded-md border border-[#d5d7da] bg-white px-3.5 py-2 text-sm font-semibold text-[#414651] shadow-[0_1px_2px_0_#0a0d120d] hover:bg-[#fafafa]"
+      <div className="flex flex-wrap items-center gap-2 border-b border-default-200 bg-white px-6 py-4">
+        <Button
+          variant={dayIndex === 0 ? "primary" : "secondary"}
+          onPress={() => setDayIndex(() => 0)}
         >
           Today
-        </button>
+        </Button>
 
-        <div className="flex items-center rounded-md border border-[#d5d7da] bg-white shadow-[0_1px_2px_0_#0a0d120d]">
-          <button
-            disabled={dayIndex <= 0}
-            onClick={() => setDayIndex((n) => Math.max(0, n - 1))}
-            className="px-2.5 py-2 text-[#717680] hover:bg-[#fafafa] disabled:opacity-40"
+        <div className="flex items-center overflow-hidden rounded-lg border border-default-200 bg-white">
+          <Button
+            isIconOnly
+            variant="ghost"
+            aria-label="Ngày trước"
+            isDisabled={dayIndex <= 0}
+            onPress={() => setDayIndex((n) => Math.max(0, n - 1))}
+            className="rounded-none"
           >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6" /></svg>
-          </button>
-          <div className="h-5 w-px bg-[#e9eaeb]" />
-          <button
-            disabled={dayIndex >= data.days.length - 1}
-            onClick={() => setDayIndex((n) => Math.min(data.days.length - 1, n + 1))}
-            className="px-2.5 py-2 text-[#717680] hover:bg-[#fafafa] disabled:opacity-40"
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M15 18l-6-6 6-6" />
+            </svg>
+          </Button>
+          <div className="h-5 w-px bg-default-200" />
+          <Button
+            isIconOnly
+            variant="ghost"
+            aria-label="Ngày sau"
+            isDisabled={dayIndex >= data.days.length - 1}
+            onPress={() => setDayIndex((n) => Math.min(data.days.length - 1, n + 1))}
+            className="rounded-none"
           >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18l6-6-6-6" /></svg>
-          </button>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M9 18l6-6-6-6" />
+            </svg>
+          </Button>
         </div>
 
-        <div className="flex items-center gap-2 rounded-md border border-[#d5d7da] bg-white px-3.5 py-2 text-sm font-semibold text-[#414651] shadow-[0_1px_2px_0_#0a0d120d]">
-          <span className="text-[#717680]"><IconCalendar /></span>
+        <Chip
+          variant="secondary"
+          className="h-10 gap-2 px-3 text-sm font-medium capitalize"
+        >
+          <span className="text-default-500">
+            <IconCalendar />
+          </span>
           <span className="capitalize">{fmtDate(data.days[dayIndex])}</span>
-        </div>
+        </Chip>
 
         {/* Business-hours window */}
-        <div className="flex items-center gap-2 rounded-md border border-[#d5d7da] bg-white px-3 py-2 text-sm font-semibold text-[#414651] shadow-[0_1px_2px_0_#0a0d120d]">
-          <span className="text-[#717680]"><IconClock /></span>
+        <Chip variant="secondary" className="h-10 gap-2 px-3 text-sm font-medium">
+          <span className="text-default-500">
+            <IconClock />
+          </span>
           {dayStart}
-        </div>
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#717680" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
-        <div className="flex items-center gap-2 rounded-md border border-[#d5d7da] bg-white px-3 py-2 text-sm font-semibold text-[#414651] shadow-[0_1px_2px_0_#0a0d120d]">
-          <span className="text-[#717680]"><IconClock /></span>
+        </Chip>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-default-400">
+          <path d="M5 12h14M13 6l6 6-6 6" />
+        </svg>
+        <Chip variant="secondary" className="h-10 gap-2 px-3 text-sm font-medium">
+          <span className="text-default-500">
+            <IconClock />
+          </span>
           {dayEnd}
-        </div>
+        </Chip>
 
         {/* Metadata filters (office / capacity size) */}
         {opts.offices.length > 0 && (
@@ -236,80 +258,99 @@ export function BrowseRooms({
           />
         )}
         {filtersActive && (
-          <button
-            onClick={clearFilters}
-            className="rounded-md px-2.5 py-2 text-sm font-semibold text-[#717680] hover:text-[#414651] hover:underline"
-          >
+          <Button variant="ghost" onPress={clearFilters}>
             Xóa lọc
-          </button>
+          </Button>
         )}
 
-        <button
-          onClick={onRefresh}
-          disabled={refreshing}
-          className="ml-auto flex items-center gap-2 rounded-md border border-[#d5d7da] bg-white px-3.5 py-2 text-sm font-semibold text-[#414651] shadow-[0_1px_2px_0_#0a0d120d] hover:bg-[#fafafa] disabled:opacity-50"
+        <Button
+          variant="secondary"
+          onPress={onRefresh}
+          isDisabled={refreshing}
+          className="ml-auto"
         >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={refreshing ? "animate-spin" : ""}>
-            <path d="M23 4v6h-6M1 20v-6h6" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-          </svg>
+          {refreshing ? (
+            <Spinner size="sm" />
+          ) : (
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M23 4v6h-6M1 20v-6h6" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+            </svg>
+          )}
           Làm mới
-        </button>
+        </Button>
       </div>
 
       {/* Calendar */}
       <div className="flex-1 overflow-auto">
         {rooms.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center gap-3 text-default-500">
-            <p>Không có phòng nào khớp bộ lọc.</p>
-            {filtersActive && (
-              <button
-                onClick={clearFilters}
-                className="rounded-md border border-[#d5d7da] bg-white px-3.5 py-2 text-sm font-semibold text-[#414651] shadow-[0_1px_2px_0_#0a0d120d] hover:bg-[#fafafa]"
-              >
-                Xóa bộ lọc
-              </button>
-            )}
+          <div className="flex h-full items-center justify-center p-6">
+            <Card className="w-full max-w-md border border-default-200 bg-white text-center shadow-sm">
+              <Card.Content className="items-center gap-4 p-8">
+                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-default-100 text-default-500">
+                  <IconCalendar />
+                </div>
+                <div>
+                  <h2 className="text-base font-semibold text-default-900">
+                    Không có phòng phù hợp
+                  </h2>
+                  <p className="mt-1 text-sm text-default-500">
+                    Thử đổi văn phòng, sức chứa hoặc quay lại bộ lọc mặc định.
+                  </p>
+                </div>
+                {filtersActive && (
+                  <Button variant="secondary" onPress={clearFilters}>
+                    Xóa bộ lọc
+                  </Button>
+                )}
+              </Card.Content>
+            </Card>
           </div>
         ) : (
-        <div className="min-w-fit">
-          {/* Room header */}
-          <div
-            className="sticky top-0 z-20 grid border-b border-[#e9eaeb] bg-white"
-            style={{ gridTemplateColumns: cols }}
-          >
-            <div className="border-r border-[#e9eaeb]" />
-            {rooms.map((r, i) => (
-              <div
-                key={r.email}
-                className="border-r border-[#e9eaeb] px-3 py-3 text-center"
-              >
-                <p className="truncate text-sm font-semibold text-[#414651]" title={r.name}>
-                  {r.name}
-                </p>
-                <p className="truncate text-xs text-[#717680]">
-                  {r.capacity ? `👤 ${r.capacity}` : " "}
-                </p>
-              </div>
-            ))}
-          </div>
-
-          {/* Rows */}
-          <div className="relative">
-            {times.map((t, ti) => {
-              const onHour = t.endsWith(":00");
-              return (
-                <div key={t} className="grid" style={{ gridTemplateColumns: cols }}>
-                  {/* time label */}
-                  <div
-                    className="relative border-r border-[#e9eaeb]"
-                    style={{ height: SLOT_H }}
-                  >
-                    {onHour && (
-                      <span className="absolute -top-2 right-2 text-xs font-medium text-[#717680]">
-                        {hourLabel(t)}
-                      </span>
+          <div className="min-w-fit">
+            {/* Room header */}
+            <div
+              className="sticky top-0 z-20 grid border-b border-default-200 bg-white shadow-sm"
+              style={{ gridTemplateColumns: cols }}
+            >
+              <div className="border-r border-default-200" />
+              {rooms.map((r) => (
+                <div
+                  key={r.email}
+                  className="border-r border-default-200 px-3 py-3 text-center"
+                >
+                  <p className="truncate text-sm font-semibold text-default-800" title={r.name}>
+                    {r.name}
+                  </p>
+                  <div className="mt-1 flex justify-center">
+                    {r.capacity ? (
+                      <Chip size="sm" variant="soft">
+                        {r.capacity} người
+                      </Chip>
+                    ) : (
+                      <span className="h-6" />
                     )}
                   </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Rows */}
+            <div className="relative">
+              {times.map((t, ti) => {
+                const onHour = t.endsWith(":00");
+                return (
+                  <div key={t} className="grid" style={{ gridTemplateColumns: cols }}>
+                    {/* time label */}
+                    <div
+                      className="relative border-r border-default-200 bg-white"
+                      style={{ height: SLOT_H }}
+                    >
+                      {onHour && (
+                        <span className="absolute -top-2 right-2 text-xs font-medium text-default-500">
+                          {hourLabel(t)}
+                        </span>
+                      )}
+                    </div>
 
                   {rooms.map((r) => {
                     const status = r.grid[ti]?.[dayIndex] ?? 0;
@@ -328,12 +369,18 @@ export function BrowseRooms({
                           role="button"
                           tabIndex={0}
                           onClick={() => openBooking(r.email, r.name, t, ti)}
-                          className={`group cursor-pointer border-r border-[#e9eaeb] px-1 ${
-                            onHour ? "border-t border-t-[#e9eaeb]" : "border-t border-t-[#f5f5f5]"
-                          } hover:bg-[#f9fafb]`}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              openBooking(r.email, r.name, t, ti);
+                            }
+                          }}
+                          className={`group cursor-pointer border-r border-default-200 bg-white px-1 outline-none transition-colors ${
+                            onHour ? "border-t border-t-default-200" : "border-t border-t-default-100"
+                          } hover:bg-primary-50 focus:bg-primary-50`}
                           style={{ height: SLOT_H }}
                         >
-                          <div className="flex h-full items-center justify-center rounded-md text-xs font-medium text-transparent group-hover:text-[#1570ef]">
+                          <div className="flex h-full items-center justify-center rounded-lg text-xs font-semibold text-transparent group-hover:text-primary group-focus:text-primary">
                             + Book
                           </div>
                         </div>
@@ -344,13 +391,15 @@ export function BrowseRooms({
                     return (
                       <div
                         key={r.email}
-                        className={`border-r border-[#e9eaeb] ${onHour && !prevBusy ? "border-t border-t-[#e9eaeb]" : ""}`}
+                        className={`border-r border-default-200 bg-white ${onHour && !prevBusy ? "border-t border-t-default-200" : ""}`}
                         style={{ height: SLOT_H }}
                       >
                         <div
                           className="h-full px-2"
                           style={{
-                            backgroundColor: myBooking ? "#ecfdf3" : "#fef3f2",
+                            backgroundColor: myBooking
+                              ? "var(--success-soft)"
+                              : "var(--danger-soft)",
                             borderTopLeftRadius: prevBusy ? 0 : 8,
                             borderTopRightRadius: prevBusy ? 0 : 8,
                             borderBottomLeftRadius: nextBusy ? 0 : 8,
@@ -361,7 +410,11 @@ export function BrowseRooms({
                             <div className="pt-1.5">
                               <p
                                 className="truncate text-xs font-semibold"
-                                style={{ color: myBooking ? "#027a48" : "#b42318" }}
+                                style={{
+                                  color: myBooking
+                                    ? "var(--success-soft-foreground)"
+                                    : "var(--danger-soft-foreground)",
+                                }}
                               >
                                 {myBooking ? "My booking" : "Booked"}
                               </p>
@@ -381,8 +434,8 @@ export function BrowseRooms({
                 className="pointer-events-none absolute left-0 right-0 z-10 flex items-center"
                 style={{ top: markerOffset }}
               >
-                <span className="ml-[56px] h-2.5 w-2.5 -translate-y-1/2 rounded-full bg-[#1570ef]" />
-                <span className="h-px flex-1 bg-[#1570ef]" />
+                <span className="ml-[56px] h-2.5 w-2.5 -translate-y-1/2 rounded-full bg-primary" />
+                <span className="h-px flex-1 bg-primary" />
               </div>
             )}
           </div>
