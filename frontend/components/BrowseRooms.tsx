@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import type { ScheduleResponse } from "@/lib/api";
+import { useEffect, useMemo, useState } from "react";
+import type { Room, ScheduleResponse } from "@/lib/api";
 import { BookingModal, type BookingSlot } from "./BookingModal";
 
 const SLOT_H = 44; // px per slot row
@@ -38,6 +38,24 @@ const IconClock = () => (
     <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" />
   </svg>
 );
+
+const CAPACITY_SIZE_OPTIONS = [
+  { value: "small", label: "Nhỏ" },
+  { value: "medium", label: "Vừa" },
+  { value: "large", label: "Lớn" },
+] as const;
+
+type CapacitySize = (typeof CAPACITY_SIZE_OPTIONS)[number]["value"];
+
+function capacitySizeFor(room: Room): CapacitySize | "" {
+  if (room.capacity_size) return room.capacity_size;
+  const capacity = room.capacity ?? 0;
+  if (capacity <= 0) return "";
+  if (capacity <= 4) return "small";
+  if (capacity >= 6 && capacity <= 8) return "medium";
+  if (capacity > 8) return "large";
+  return "";
+}
 
 /** Compact toolbar dropdown styled to match the surrounding buttons. */
 function FilterSelect({
@@ -76,14 +94,15 @@ export function BrowseRooms({
   setDayIndex,
   refreshing,
   onRefresh,
+  userOffice,
 }: {
   data: ScheduleResponse;
   dayIndex: number;
   setDayIndex: (fn: (n: number) => number) => void;
   refreshing: boolean;
   onRefresh: () => void;
+  userOffice?: string;
 }) {
-  const [vacantOnly, setVacantOnly] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
   const onOpen = () => setIsOpen(true);
   const onClose = () => setIsOpen(false);
@@ -91,11 +110,13 @@ export function BrowseRooms({
   const [endOptions, setEndOptions] = useState<string[]>([]);
 
   // Room metadata filters (sourced from meeting_room_metadata via the API).
-  const [building, setBuilding] = useState("");
-  const [floor, setFloor] = useState("");
-  const [zone, setZone] = useState("");
-  const [office, setOffice] = useState("");
-  const [minCapacity, setMinCapacity] = useState("");
+  const defaultOffice = userOffice ?? "";
+  const [office, setOffice] = useState(defaultOffice);
+  const [capacitySize, setCapacitySize] = useState("");
+
+  useEffect(() => {
+    setOffice(defaultOffice);
+  }, [defaultOffice]);
 
   // Distinct, sorted option lists derived from the rooms' metadata.
   const opts = useMemo(() => {
@@ -103,38 +124,28 @@ export function BrowseRooms({
       [...new Set(vals.filter((v): v is string => !!v))].sort((a, b) =>
         a.localeCompare(b)
       );
-    const caps = [...new Set(data.rooms.map((r) => r.capacity).filter((c): c is number => !!c))].sort(
-      (a, b) => a - b
+    const capacitySizes = new Set(
+      data.rooms.map(capacitySizeFor).filter((size): size is CapacitySize => !!size)
     );
     return {
-      buildings: uniq(data.rooms.map((r) => r.building)),
-      floors: uniq(data.rooms.map((r) => r.floor)),
-      zones: uniq(data.rooms.map((r) => r.zone)),
       offices: uniq(data.rooms.map((r) => r.office)),
-      capacities: caps,
+      capacitySizes: CAPACITY_SIZE_OPTIONS.filter((option) => capacitySizes.has(option.value)),
     };
   }, [data.rooms]);
 
-  const filtersActive = !!(building || floor || zone || office || minCapacity);
+  const filtersActive = office !== defaultOffice || !!capacitySize;
 
   const rooms = useMemo(() => {
-    const minCap = minCapacity ? Number(minCapacity) : 0;
     return data.rooms.filter(
       (r) =>
-        (!building || r.building === building) &&
-        (!floor || r.floor === floor) &&
-        (!zone || r.zone === zone) &&
         (!office || r.office === office) &&
-        (!minCap || (r.capacity ?? 0) >= minCap)
+        (!capacitySize || capacitySizeFor(r) === capacitySize)
     );
-  }, [data.rooms, building, floor, zone, office, minCapacity]);
+  }, [data.rooms, office, capacitySize]);
 
   const clearFilters = () => {
-    setBuilding("");
-    setFloor("");
-    setZone("");
-    setOffice("");
-    setMinCapacity("");
+    setOffice(defaultOffice);
+    setCapacitySize("");
   };
 
   const times = data.times;
@@ -207,43 +218,7 @@ export function BrowseRooms({
           {dayEnd}
         </div>
 
-        {/* Vacant only toggle */}
-        <div className="ml-1 flex items-center gap-2">
-          <button
-            onClick={() => setVacantOnly((v) => !v)}
-            className={`relative h-5 w-9 rounded-full transition-colors ${vacantOnly ? "bg-[#1570ef]" : "bg-[#e9eaeb]"}`}
-            aria-pressed={vacantOnly}
-          >
-            <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${vacantOnly ? "left-[18px]" : "left-0.5"}`} />
-          </button>
-          <span className="text-sm font-medium text-[#414651]">Vacant only</span>
-        </div>
-
-        {/* Metadata filters (building / floor / zone / capacity) */}
-        {opts.buildings.length > 0 && (
-          <FilterSelect
-            label="Tòa nhà"
-            value={building}
-            onChange={setBuilding}
-            options={opts.buildings.map((b) => ({ value: b, label: b }))}
-          />
-        )}
-        {opts.floors.length > 0 && (
-          <FilterSelect
-            label="Tầng"
-            value={floor}
-            onChange={setFloor}
-            options={opts.floors.map((f) => ({ value: f, label: f }))}
-          />
-        )}
-        {opts.zones.length > 0 && (
-          <FilterSelect
-            label="Khu vực"
-            value={zone}
-            onChange={setZone}
-            options={opts.zones.map((z) => ({ value: z, label: z }))}
-          />
-        )}
+        {/* Metadata filters (office / capacity size) */}
         {opts.offices.length > 0 && (
           <FilterSelect
             label="Văn phòng"
@@ -252,12 +227,12 @@ export function BrowseRooms({
             options={opts.offices.map((o) => ({ value: o, label: o }))}
           />
         )}
-        {opts.capacities.length > 0 && (
+        {opts.capacitySizes.length > 0 && (
           <FilterSelect
             label="Sức chứa"
-            value={minCapacity}
-            onChange={setMinCapacity}
-            options={opts.capacities.map((c) => ({ value: String(c), label: `≥ ${c} 👤` }))}
+            value={capacitySize}
+            onChange={setCapacitySize}
+            options={opts.capacitySizes}
           />
         )}
         {filtersActive && (
@@ -345,16 +320,6 @@ export function BrowseRooms({
                     const nextBusy =
                       ti < times.length - 1 &&
                       (r.grid[ti + 1]?.[dayIndex] ?? 0) === status;
-
-                    if (vacantOnly && !free) {
-                      return (
-                        <div
-                          key={r.email}
-                          className={`border-r border-[#e9eaeb] ${onHour ? "border-t" : "border-t border-t-[#f5f5f5]"}`}
-                          style={{ height: SLOT_H }}
-                        />
-                      );
-                    }
 
                     if (free) {
                       return (

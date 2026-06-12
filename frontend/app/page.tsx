@@ -572,6 +572,7 @@ export default function Home() {
               setDayIndex={(fn) => setDayIndex((n) => fn(n))}
               refreshing={refreshing}
               onRefresh={loadSchedule}
+              userOffice={me.profile?.office}
             />
           )}
         </div>

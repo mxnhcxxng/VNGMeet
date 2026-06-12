@@ -229,6 +229,19 @@ alter table favorite_rooms enable row level security;
 create policy "manage own favorites" on favorite_rooms
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
+-- Nhóm sức chứa cho meeting_room_metadata, dùng cho filter Browse rooms.
+-- Quy ước hiện tại: <=4 Nhỏ, 6-8 Vừa, >8 Lớn.
+alter table meeting_room_metadata
+  add column if not exists capacity_size text generated always as (
+    case
+      when capacity is null then null
+      when capacity <= 4 then 'small'
+      when capacity between 6 and 8 then 'medium'
+      when capacity > 8 then 'large'
+      else null
+    end
+  ) stored;
+
 -- Cache availability phòng họp. Một background job (app-only Graph) refresh mỗi
 -- 15 phút; frontend đọc grid từ đây thay vì gọi Graph trực tiếp.
 -- slots: mảng 96 slot 15 phút/ngày, index = hour*4 + minute/15 (0=00:00 .. 95=23:45).

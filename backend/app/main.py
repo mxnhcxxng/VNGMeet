@@ -430,7 +430,7 @@ def _room_metadata() -> dict[str, dict]:
         rows = (
             get_supabase()
             .table("meeting_room_metadata")
-            .select("email, office, building, floor, zone, capacity")
+            .select("email, office, building, floor, zone, capacity, capacity_size")
             .execute()
             .data
         )
@@ -463,6 +463,7 @@ def _enrich_rooms(rooms: list[dict]) -> list[dict]:
                 "building": r.get("building") or m.get("building"),
                 "floor": r.get("floor") or m.get("floor"),
                 "capacity": r.get("capacity") or m.get("capacity"),
+                "capacity_size": m.get("capacity_size"),
                 "zone": m.get("zone"),
                 "office": m.get("office"),
             }
@@ -743,7 +744,7 @@ async def availability_grid(
         r
         for r in (
             sb.table("meeting_room_metadata")
-            .select("id, name, email, building, floor, zone, capacity, office")
+            .select("id, name, email, building, floor, zone, capacity, capacity_size, office")
             .eq("in_use", True)
             .execute()
             .data

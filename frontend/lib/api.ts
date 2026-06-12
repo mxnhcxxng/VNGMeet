@@ -65,6 +65,7 @@ export interface Room {
   building?: string;
   floor?: string;
   capacity?: number;
+  capacity_size?: "small" | "medium" | "large";
   zone?: string;
   office?: string;
 }
