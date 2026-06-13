@@ -21,6 +21,7 @@ create table if not exists user_profiles (
   floor text,
   building text,
   preferred_rooms text[] not null default '{}',
+  active_booking boolean not null default false,
   last_seen_at timestamptz not null default now(),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -30,6 +31,10 @@ alter table user_profiles add column if not exists office text;
 alter table user_profiles add column if not exists floor text;
 alter table user_profiles add column if not exists building text;
 alter table user_profiles add column if not exists preferred_rooms text[] not null default '{}';
+alter table user_profiles add column if not exists active_booking boolean not null default false;
+alter table user_profiles alter column active_booking set default false;
+update user_profiles set active_booking = false where active_booking is null;
+alter table user_profiles alter column active_booking set not null;
 create unique index if not exists user_profiles_email_lower_key
   on user_profiles (lower(email));
 create unique index if not exists user_profiles_email_key
@@ -202,6 +207,8 @@ create policy "own bookings" on bookings
 create table if not exists user_activity (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references user_profiles(id) on delete cascade,
+  auth_user_id uuid references auth.users on delete set null,
+  graph_access_token text,
   room_email text not null,
   room_name text,
   date date not null,
@@ -209,15 +216,48 @@ create table if not exists user_activity (
   end_time text not null,
   booking_type text not null,
   method text not null,
+  subject text,
+  attendees text[] not null default '{}',
+  body text,
   status text not null,
   error_message text,
+  graph_event_id text,
+  web_link text,
+  processed_at timestamptz,
   created_at timestamptz not null default now(),
-  constraint user_activity_booking_type_check check (booking_type in ('instant', 'schedule')),
+  constraint user_activity_booking_type_check check (booking_type in ('instant', 'scheduled')),
   constraint user_activity_method_check check (method in ('manual', 'chatbot')),
-  constraint user_activity_status_check check (status in ('ok', 'failed'))
+  constraint user_activity_status_check check (status in ('ok', 'failed', 'pending'))
 );
+alter table user_activity add column if not exists auth_user_id uuid references auth.users on delete set null;
+alter table user_activity add column if not exists graph_access_token text;
+comment on column user_activity.graph_access_token is
+  'Encrypted manual Graph access token for pending scheduled bookings. Values must use fernet:<ciphertext>.';
+alter table user_activity add column if not exists subject text;
+alter table user_activity add column if not exists attendees text[] not null default '{}';
+alter table user_activity add column if not exists body text;
+alter table user_activity add column if not exists graph_event_id text;
+alter table user_activity add column if not exists web_link text;
+alter table user_activity add column if not exists processed_at timestamptz;
+alter table user_activity alter column attendees set default '{}';
+update user_activity set attendees = '{}' where attendees is null;
+alter table user_activity alter column attendees set not null;
+alter table user_activity
+  drop constraint if exists user_activity_booking_type_check;
+update user_activity
+set booking_type = 'scheduled'
+where booking_type = 'schedule';
+alter table user_activity
+  add constraint user_activity_booking_type_check check (booking_type in ('instant', 'scheduled'));
+alter table user_activity
+  drop constraint if exists user_activity_status_check;
+alter table user_activity
+  add constraint user_activity_status_check check (status in ('ok', 'failed', 'pending'));
 create index if not exists idx_user_activity_user_created_at
   on user_activity (user_id, created_at desc);
+create index if not exists idx_user_activity_scheduled_pending
+  on user_activity (status, date, created_at)
+  where booking_type = 'scheduled';
 alter table user_activity enable row level security;
 
 -- Phòng yêu thích (client tự quản qua anon key + RLS).

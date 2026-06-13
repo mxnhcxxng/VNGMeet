@@ -11,6 +11,7 @@ import {
   TextArea,
   TextField,
 } from "@heroui/react";
+import { CircleInfo, Clock } from "@gravity-ui/icons";
 import { api } from "@/lib/api";
 
 export interface BookingSlot {
@@ -76,7 +77,7 @@ export function BookingModal({
         date: slot.date,
         start_time: slot.startTime,
         end_time: endTime,
-        booking_type: slot.schedule ? "schedule" : "instant",
+        booking_type: slot.schedule ? "scheduled" : "instant",
         method: "manual",
         subject: subject.trim(),
         attendees: attendees
@@ -108,7 +109,7 @@ export function BookingModal({
       <div className="flex w-full max-w-[800px] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
         {/* Room thumbnail (meeting_room_metadata.thumbnail_link) */}
         <div className="px-6 pt-6">
-          <div className="h-[120px] w-full overflow-hidden rounded-lg bg-default-100">
+          <div className="relative h-[120px] w-full overflow-hidden rounded-lg bg-default-100">
             {slot.thumbnail ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
@@ -119,6 +120,12 @@ export function BookingModal({
             ) : (
               <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-primary to-secondary text-2xl font-bold text-white">
                 {initials}
+              </div>
+            )}
+            {slot.schedule && (
+              <div className="absolute bottom-2 left-2 inline-flex items-center gap-1 rounded-md bg-[var(--accent)] px-2 py-1 text-sm font-medium leading-5 text-[var(--accent-foreground)] shadow-sm">
+                <Clock width={16} height={16} />
+                <span>Scheduled Booking</span>
               </div>
             )}
           </div>
@@ -189,6 +196,23 @@ export function BookingModal({
               onChange={(event) => setNotes(event.target.value)}
             />
           </TextField>
+
+          {slot.schedule && (
+            <div className="grid gap-3 pt-1">
+              <div className="flex items-start gap-2 text-sm leading-5 text-default-600">
+                <CircleInfo width={16} height={16} className="mt-0.5 shrink-0 text-[var(--accent)]" />
+                <p>
+                  The schedule is not open for booking yet. We&apos;ll automatically book this room for you as soon as booking becomes available.
+                </p>
+              </div>
+              <div className="flex items-start gap-2 text-sm leading-5 text-default-600">
+                <CircleInfo width={16} height={16} className="mt-0.5 shrink-0 text-[var(--accent)]" />
+                <p>
+                  To ensure fairness for everyone, each user can have only one active scheduled booking at a time.
+                </p>
+              </div>
+            </div>
+          )}
 
           {error && <p className="text-sm text-danger">{error}</p>}
         </div>

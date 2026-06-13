@@ -75,7 +75,7 @@ export interface Room {
 
 export interface ScheduleRoom extends Room {
   // Instant days: 0 free, 1 busy, 2 your booking.
-  // Schedule days (room_availability slots still seeded at -1, i.e. beyond the
+  // Scheduled days (room_availability slots still seeded at -1, i.e. beyond the
   // live Graph window): 3 free/schedule-bookable, 4 scheduled by other, 5 your scheduled.
   grid: Array<Array<0 | 1 | 2 | 3 | 4 | 5>>;
 }
@@ -94,7 +94,7 @@ export interface BookingRequest {
   date: string; // "2026-06-11"
   start_time: string; // "09:00"
   end_time: string; // "10:00"
-  booking_type?: "instant" | "schedule";
+  booking_type?: "instant" | "scheduled";
   method?: "manual" | "chatbot";
   subject: string;
   attendees?: string[];

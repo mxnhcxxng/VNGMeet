@@ -52,6 +52,10 @@ class Settings(BaseSettings):
     # Session cookie signing key — used by the manual Graph-token paste flow to
     # key the server-side token store. Override in .env for production.
     session_secret: str = "change-me-in-production-please"
+    # Encrypts manual Graph access tokens saved for pending scheduled bookings.
+    # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    # If unset, the backend derives a stable key from session_secret.
+    scheduled_token_encryption_key: str = ""
 
     # OpenAI-compatible chat provider. Example:
     # LLM_BASE_URL=https://api.openai.com/v1

@@ -7,6 +7,8 @@ or sign in via Supabase's Azure OAuth provider once SUPABASE_* is configured.
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
 import json
 import logging
 from contextlib import asynccontextmanager
@@ -16,6 +18,7 @@ from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
 import httpx
+from cryptography.fernet import Fernet, InvalidToken
 from fastapi import Body, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -55,6 +58,14 @@ async def lifespan(app: FastAPI):
             coalesce=True,
             misfire_grace_time=120,
         )
+        scheduler.add_job(
+            _safe_process_scheduled_bookings,
+            CronTrigger(hour=0, minute=0, second=5, timezone=settings.timezone),
+            id="process_scheduled_bookings",
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=300,
+        )
         # Prime the cache shortly after boot so the grid isn't empty on first load.
         scheduler.add_job(_safe_refresh, "date", run_date=None)
         scheduler.start()
@@ -84,6 +95,14 @@ async def _safe_refresh() -> None:
         await availability.refresh_availability()
     except Exception as e:  # noqa: BLE001
         log.exception("refresh_availability failed: %s", e)
+
+
+async def _safe_process_scheduled_bookings() -> None:
+    """Scheduler entry point for pending schedule bookings."""
+    try:
+        await process_scheduled_bookings()
+    except Exception as e:  # noqa: BLE001
+        log.exception("process_scheduled_bookings failed: %s", e)
 
 
 app = FastAPI(title="VNG Meet — Meeting Room Availability", lifespan=lifespan)
@@ -922,7 +941,7 @@ class BookingRequest(BaseModel):
     date: str  # "2026-06-11"
     start_time: str  # "09:00"
     end_time: str  # "10:00"
-    booking_type: Literal["instant", "schedule"] = "instant"
+    booking_type: Literal["instant", "schedule", "scheduled"] = "instant"
     method: Literal["manual", "chatbot"] = "manual"
     subject: str
     attendees: list[str] = []
@@ -1744,12 +1763,20 @@ async def chat_booking_action(request: Request, payload: ChatBookingActionReques
     payload.booking.method = "chatbot"
     try:
         result = await create_booking(request, payload.booking)
-        content = (
-            "Đặt phòng thành công.\n"
-            f"- Phòng: {payload.booking.room_name or payload.booking.room_email}\n"
-            f"- Ngày: {payload.booking.date}\n"
-            f"- Giờ: {payload.booking.start_time}-{payload.booking.end_time}"
-        )
+        if result.get("status") == "pending":
+            content = (
+                "Đã tạo scheduled booking. Hệ thống sẽ tự đặt phòng khi lịch mở.\n"
+                f"- Phòng: {payload.booking.room_name or payload.booking.room_email}\n"
+                f"- Ngày: {payload.booking.date}\n"
+                f"- Giờ: {payload.booking.start_time}-{payload.booking.end_time}"
+            )
+        else:
+            content = (
+                "Đặt phòng thành công.\n"
+                f"- Phòng: {payload.booking.room_name or payload.booking.room_email}\n"
+                f"- Ngày: {payload.booking.date}\n"
+                f"- Giờ: {payload.booking.start_time}-{payload.booking.end_time}"
+            )
         if result.get("webLink"):
             content += f"\n- Link: {result['webLink']}"
         metadata["booking_action"]["status"] = "ok"
@@ -1780,8 +1807,9 @@ async def chat_booking_action(request: Request, payload: ChatBookingActionReques
 def _log_user_booking_activity(
     user_profile_id: str | None,
     payload: BookingRequest,
-    status: Literal["ok", "failed"],
+    status: Literal["ok", "failed", "pending"],
     error_message: str | None = None,
+    auth_user_id: str | None = None,
 ) -> None:
     if not user_profile_id or not settings.supabase_enabled:
         return
@@ -1791,19 +1819,233 @@ def _log_user_booking_activity(
         get_supabase().table("user_activity").insert(
             {
                 "user_id": user_profile_id,
+                "auth_user_id": auth_user_id,
                 "room_email": payload.room_email,
                 "room_name": payload.room_name,
                 "date": payload.date,
                 "start_time": payload.start_time,
                 "end_time": payload.end_time,
-                "booking_type": payload.booking_type,
+                "booking_type": _booking_type_for_db(payload.booking_type),
                 "method": payload.method,
+                "subject": payload.subject,
+                "attendees": payload.attendees,
+                "body": payload.body,
                 "status": status,
                 "error_message": error_message,
             }
         ).execute()
     except Exception as e:  # noqa: BLE001 - booking log must not block booking flow
         log.warning("could not insert user_activity booking log: %s", e)
+
+
+def _booking_type_for_db(booking_type: str) -> str:
+    return "scheduled" if booking_type in {"schedule", "scheduled"} else "instant"
+
+
+def _payload_is_scheduled(payload: BookingRequest) -> bool:
+    return _booking_type_for_db(payload.booking_type) == "scheduled"
+
+
+def _scheduled_token_fernet() -> Fernet:
+    raw_key = settings.scheduled_token_encryption_key.strip()
+    if raw_key:
+        return Fernet(raw_key.encode())
+    derived = base64.urlsafe_b64encode(
+        hashlib.sha256(settings.session_secret.encode()).digest()
+    )
+    return Fernet(derived)
+
+
+def _encrypt_scheduled_graph_token(token: str | None) -> str | None:
+    if not token:
+        return None
+    encrypted = _scheduled_token_fernet().encrypt(token.encode()).decode()
+    return f"fernet:{encrypted}"
+
+
+def _decrypt_scheduled_graph_token(value: object) -> str:
+    token_value = str(value or "").strip()
+    if not token_value:
+        return ""
+    if not token_value.startswith("fernet:"):
+        raise RuntimeError("scheduled Graph token is not encrypted")
+    try:
+        return _scheduled_token_fernet().decrypt(
+            token_value.removeprefix("fernet:").encode()
+        ).decode()
+    except InvalidToken as e:
+        raise RuntimeError("could not decrypt scheduled Graph token") from e
+
+
+def _set_active_booking(user_profile_id: str | None, active: bool) -> None:
+    if not user_profile_id or not settings.supabase_enabled:
+        return
+    try:
+        from .supabase_client import get_supabase
+
+        get_supabase().table("user_profiles").update(
+            {
+                "active_booking": active,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+        ).eq("id", user_profile_id).execute()
+    except Exception as e:  # noqa: BLE001
+        log.warning("could not update active_booking flag: %s", e)
+
+
+def _user_has_active_booking(user_profile_id: str | None) -> bool:
+    if not user_profile_id or not settings.supabase_enabled:
+        return False
+    try:
+        from .supabase_client import get_supabase
+
+        rows = (
+            get_supabase()
+            .table("user_profiles")
+            .select("active_booking")
+            .eq("id", user_profile_id)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+        return bool(rows and rows[0].get("active_booking"))
+    except Exception as e:  # noqa: BLE001
+        log.warning("could not read active_booking flag: %s", e)
+        return False
+
+
+def _activity_to_booking_request(row: dict) -> BookingRequest:
+    return BookingRequest(
+        room_email=str(row.get("room_email") or "").strip(),
+        room_name=row.get("room_name"),
+        date=str(row.get("date") or "").strip(),
+        start_time=str(row.get("start_time") or "").strip(),
+        end_time=str(row.get("end_time") or "").strip(),
+        booking_type="scheduled",
+        method=row.get("method") or "manual",
+        subject=str(row.get("subject") or "").strip(),
+        attendees=row.get("attendees") or [],
+        body=row.get("body") or None,
+    )
+
+
+def _room_id_for_booking(sb, payload: BookingRequest) -> str | None:
+    room_email = payload.room_email.strip().lower()
+    rows = (
+        sb.table("meeting_room_metadata")
+        .select("id, email")
+        .eq("in_use", True)
+        .execute()
+        .data
+        or []
+    )
+    room = next(
+        (r for r in rows if (r.get("email") or "").strip().lower() == room_email),
+        None,
+    )
+    return str(room["id"]) if room and room.get("id") else None
+
+
+def _scheduled_slot_has_conflict(user_profile_id: str, payload: BookingRequest) -> bool:
+    start = _availability_slot_index(payload.start_time)
+    end = _availability_slot_index(payload.end_time)
+    if start is None or end is None or end <= start or not settings.supabase_enabled:
+        return True
+    try:
+        from .supabase_client import get_supabase
+
+        sb = get_supabase()
+        room_id = _room_id_for_booking(sb, payload)
+        if not room_id:
+            return True
+        rows = (
+            sb.table("room_availability")
+            .select("slots, slot_owner_ids")
+            .eq("room_id", room_id)
+            .eq("date", payload.date)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+        if not rows:
+            return True
+        slots = list(rows[0].get("slots") or [])
+        slot_owner_ids = list(rows[0].get("slot_owner_ids") or [])
+        if len(slots) != availability.SLOTS_PER_DAY:
+            return True
+        if len(slot_owner_ids) != availability.SLOTS_PER_DAY:
+            slot_owner_ids = [None] * availability.SLOTS_PER_DAY
+        for idx in range(start, min(end, availability.SLOTS_PER_DAY)):
+            owner_id = slot_owner_ids[idx]
+            if owner_id and str(owner_id) != user_profile_id:
+                return True
+            if slots[idx] not in (-1, 0):
+                return True
+        return False
+    except Exception as e:  # noqa: BLE001
+        log.warning("could not check scheduled slot conflict: %s", e)
+        return True
+
+
+def _create_pending_scheduled_booking(
+    auth_user_id: str | None,
+    user_profile_id: str | None,
+    graph_access_token: str | None,
+    payload: BookingRequest,
+) -> dict:
+    if not settings.supabase_enabled or not user_profile_id:
+        raise HTTPException(503, "Scheduled booking requires Supabase configuration.")
+    if not auth_user_id and not graph_access_token:
+        raise HTTPException(400, "Scheduled booking requires a Graph access token.")
+    if _user_has_active_booking(user_profile_id):
+        raise HTTPException(
+            409,
+            "Bạn chỉ có thể có một scheduled booking đang active tại một thời điểm.",
+        )
+    if _scheduled_slot_has_conflict(user_profile_id, payload):
+        raise HTTPException(409, "Slot này không còn khả dụng để scheduled booking.")
+
+    try:
+        from .supabase_client import get_supabase
+
+        sb = get_supabase()
+        row = (
+            sb.table("user_activity")
+            .insert(
+                {
+                    "user_id": user_profile_id,
+                    "auth_user_id": auth_user_id,
+                    "graph_access_token": (
+                        _encrypt_scheduled_graph_token(graph_access_token)
+                        if not auth_user_id
+                        else None
+                    ),
+                    "room_email": payload.room_email,
+                    "room_name": payload.room_name,
+                    "date": payload.date,
+                    "start_time": payload.start_time,
+                    "end_time": payload.end_time,
+                    "booking_type": "scheduled",
+                    "method": payload.method,
+                    "subject": payload.subject,
+                    "attendees": payload.attendees,
+                    "body": payload.body,
+                    "status": "pending",
+                }
+            )
+            .execute()
+            .data[0]
+        )
+        _set_active_booking(user_profile_id, True)
+        _mark_room_availability_owner(user_profile_id, payload)
+        return {"ok": True, "id": str(row["id"]), "status": "pending"}
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        _set_active_booking(user_profile_id, False)
+        raise HTTPException(500, f"Could not create scheduled booking: {e}")
 
 
 def _mark_room_availability_owner(
@@ -1893,6 +2135,8 @@ async def create_booking(request: Request, payload: BookingRequest):
     if payload.end_time <= payload.start_time:
         _log_user_booking_activity(user_profile_id, payload, "failed", "invalid_time_range")
         raise HTTPException(400, "Giờ kết thúc phải sau giờ bắt đầu")
+    if _payload_is_scheduled(payload):
+        return _create_pending_scheduled_booking(auth_user_id, user_profile_id, token, payload)
 
     start_iso = f"{payload.date}T{payload.start_time}:00"
     end_iso = f"{payload.date}T{payload.end_time}:00"
@@ -1909,13 +2153,15 @@ async def create_booking(request: Request, payload: BookingRequest):
             payload.body,
         )
     except httpx.HTTPStatusError as e:
-        _log_user_booking_activity(user_profile_id, payload, "failed", e.response.text)
+        _log_user_booking_activity(
+            user_profile_id, payload, "failed", e.response.text, auth_user_id
+        )
         raise HTTPException(e.response.status_code, e.response.text)
     except Exception as e:
-        _log_user_booking_activity(user_profile_id, payload, "failed", str(e))
+        _log_user_booking_activity(user_profile_id, payload, "failed", str(e), auth_user_id)
         raise
 
-    _log_user_booking_activity(user_profile_id, payload, "ok")
+    _log_user_booking_activity(user_profile_id, payload, "ok", auth_user_id=auth_user_id)
     _mark_room_availability_owner(user_profile_id, payload)
 
     # Mirror booking metadata into Supabase when available (Supabase path only).
@@ -1940,6 +2186,104 @@ async def create_booking(request: Request, payload: BookingRequest):
             pass
 
     return {"ok": True, **ev}
+
+
+async def process_scheduled_bookings() -> dict:
+    """Book pending scheduled requests once their target date enters the live window."""
+    if not settings.supabase_enabled:
+        return {"ok": False, "processed": 0, "failed": 0, "reason": "supabase_disabled"}
+
+    from .supabase_client import get_supabase
+
+    tz = ZoneInfo(settings.timezone)
+    today = datetime.now(tz).date()
+    horizon_end = today + timedelta(days=settings.availability_days - 1)
+    sb = get_supabase()
+    rows = (
+        sb.table("user_activity")
+        .select(
+            "id, user_id, auth_user_id, graph_access_token, room_email, room_name, date, start_time, "
+            "end_time, method, subject, attendees, body"
+        )
+        .eq("booking_type", "scheduled")
+        .eq("status", "pending")
+        .lte("date", horizon_end.isoformat())
+        .order("created_at")
+        .execute()
+        .data
+        or []
+    )
+
+    processed = 0
+    failed = 0
+    for row in rows:
+        activity_id = row.get("id")
+        user_profile_id = str(row.get("user_id") or "")
+        auth_user_id = str(row.get("auth_user_id") or "")
+        payload = _activity_to_booking_request(row)
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        try:
+            if not auth_user_id:
+                token = _decrypt_scheduled_graph_token(row.get("graph_access_token"))
+                if not token:
+                    raise RuntimeError("missing graph access token")
+            else:
+                token = await auth.get_graph_token(auth_user_id)
+            start_iso = f"{payload.date}T{payload.start_time}:00"
+            end_iso = f"{payload.date}T{payload.end_time}:00"
+            ev = await graph.create_event(
+                token,
+                payload.subject,
+                start_iso,
+                end_iso,
+                settings.timezone,
+                payload.room_email,
+                payload.room_name,
+                payload.attendees,
+                payload.body,
+            )
+            sb.table("user_activity").update(
+                {
+                    "status": "ok",
+                    "graph_event_id": ev.get("id"),
+                    "web_link": ev.get("webLink"),
+                    "processed_at": now_iso,
+                    "error_message": None,
+                }
+            ).eq("id", activity_id).execute()
+            _set_active_booking(user_profile_id, False)
+            _mark_room_availability_owner(user_profile_id, payload)
+            try:
+                sb.table("bookings").insert(
+                    {
+                        "user_id": auth_user_id,
+                        "room_email": payload.room_email,
+                        "room_name": payload.room_name,
+                        "date": payload.date,
+                        "start_time": payload.start_time,
+                        "end_time": payload.end_time,
+                        "subject": payload.subject,
+                        "graph_event_id": ev.get("id"),
+                        "web_link": ev.get("webLink"),
+                    }
+                ).execute()
+            except Exception as e:  # noqa: BLE001
+                log.warning("could not mirror scheduled booking metadata: %s", e)
+            processed += 1
+        except Exception as e:  # noqa: BLE001 - keep processing the queue
+            failed += 1
+            sb.table("user_activity").update(
+                {
+                    "status": "failed",
+                    "error_message": str(e),
+                    "processed_at": now_iso,
+                }
+            ).eq("id", activity_id).execute()
+            _set_active_booking(user_profile_id, False)
+            log.warning("scheduled booking %s failed: %s", activity_id, e)
+
+    return {"ok": True, "processed": processed, "failed": failed}
 
 
 @app.get("/api/health")
