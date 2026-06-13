@@ -21,7 +21,7 @@ import {
 } from "@gravity-ui/icons";
 import { I18nProvider } from "react-aria-components";
 import { parseDate, parseTime } from "@internationalized/date";
-import type { ScheduleResponse } from "@/lib/api";
+import type { ScheduleResponse, ScheduleRoom } from "@/lib/api";
 import { BookingModal, type BookingSlot } from "./BookingModal";
 
 const SLOT_H = 48; // px per slot row (half hour → 96px per hour)
@@ -61,6 +61,66 @@ const OFFICES = [
   { value: "tnr", label: "TNR" },
 ] as const;
 
+const CAPACITY_RANK: Record<string, number> = {
+  medium: 0,
+  large: 1,
+  small: 2,
+};
+
+function capacityRank(room: ScheduleRoom) {
+  if (room.capacity_size) return CAPACITY_RANK[room.capacity_size] ?? 3;
+  if (typeof room.capacity !== "number") return 3;
+  if (room.capacity <= 4) return CAPACITY_RANK.small;
+  if (room.capacity <= 8) return CAPACITY_RANK.medium;
+  return CAPACITY_RANK.large;
+}
+
+function numericFloor(floor?: string) {
+  if (!floor) return null;
+  const match = String(floor).match(/-?\d+/);
+  return match ? Number(match[0]) : null;
+}
+
+function locationRank(room: ScheduleRoom, userBuilding?: string, userFloor?: string) {
+  const roomBuilding = (room.building || "").trim().toLowerCase();
+  const profileBuilding = (userBuilding || "").trim().toLowerCase();
+  const sameBuilding = Boolean(roomBuilding && profileBuilding && roomBuilding === profileBuilding);
+  const userFloorNumber = numericFloor(userFloor);
+  const roomFloorNumber = numericFloor(room.floor);
+  const hasFloor = userFloorNumber !== null && roomFloorNumber !== null;
+  const sameFloor = hasFloor && roomFloorNumber === userFloorNumber;
+
+  if (sameBuilding && sameFloor) return [0, 0, 0];
+  if (!sameBuilding && sameFloor) return [1, 0, 0];
+  if (sameBuilding && hasFloor) {
+    const gap = Math.abs(roomFloorNumber - userFloorNumber);
+    const aboveCurrentFloor = roomFloorNumber > userFloorNumber ? 1 : 0;
+    return [2, gap, aboveCurrentFloor];
+  }
+  if (!sameBuilding && hasFloor) {
+    const gap = Math.abs(roomFloorNumber - userFloorNumber);
+    const aboveCurrentFloor = roomFloorNumber > userFloorNumber ? 1 : 0;
+    return [3, gap, aboveCurrentFloor];
+  }
+  return [4, Number.MAX_SAFE_INTEGER, 1];
+}
+
+function isFreeStatus(status: number) {
+  return status === 0 || status === 3;
+}
+
+function availabilityRank(
+  room: ScheduleRoom,
+  dayIndex: number,
+  range: { start: number; end: number } | null
+) {
+  if (!range) return 0;
+  for (let index = range.start; index < range.end; index += 1) {
+    if (!isFreeStatus(room.grid[index]?.[dayIndex] ?? 1)) return 1;
+  }
+  return 0;
+}
+
 export function BrowseRooms({
   data,
   dayIndex,
@@ -68,6 +128,9 @@ export function BrowseRooms({
   refreshing,
   onRefresh,
   userOffice,
+  userBuilding,
+  userFloor,
+  preferredRooms = [],
 }: {
   data: ScheduleResponse;
   dayIndex: number;
@@ -75,6 +138,9 @@ export function BrowseRooms({
   refreshing: boolean;
   onRefresh: () => void;
   userOffice?: string;
+  userBuilding?: string;
+  userFloor?: string;
+  preferredRooms?: string[];
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const onOpen = () => setIsOpen(true);
@@ -92,18 +158,8 @@ export function BrowseRooms({
     setOffice(defaultOffice);
   }, [defaultOffice]);
 
-  const rooms = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return data.rooms.filter(
-      (r) =>
-        (!office || r.office === office) &&
-        (!q || r.name.toLowerCase().includes(q))
-    );
-  }, [data.rooms, office, query]);
-
   const times = data.times;
   const slotMinutes = data.slotMinutes;
-  const cols = `${TIME_COL}px repeat(${rooms.length}, minmax(155px, 1fr))`;
   const dayStart = times[0] ?? "08:00";
   const dayEnd = addLabel(times[times.length - 1] ?? "17:30", slotMinutes);
 
@@ -127,6 +183,65 @@ export function BrowseRooms({
     times.forEach((t, i) => map.set(t, i));
     return map;
   }, [times]);
+
+  const now = new Date();
+  const todayIso = now.toISOString().slice(0, 10);
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+  const currentRange = useMemo(() => {
+    if (data.days[dayIndex] !== todayIso) return null;
+    const currentSlotMinutes = Math.floor(nowMinutes / slotMinutes) * slotMinutes;
+    const currentTime = `${String(Math.floor(currentSlotMinutes / 60)).padStart(2, "0")}:${String(
+      currentSlotMinutes % 60
+    ).padStart(2, "0")}`;
+    const start = businessIndexByTime.get(currentTime);
+    return start === undefined ? null : { start, end: start + 1 };
+  }, [businessIndexByTime, data.days, dayIndex, nowMinutes, slotMinutes, todayIso]);
+
+  const rooms = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const favorites = new Set(preferredRooms.map((room) => room.trim().toLowerCase()));
+    return data.rooms
+      .filter(
+        (r) =>
+          (!office || r.office === office) &&
+          (!q || r.name.toLowerCase().includes(q))
+      )
+      .map((room, index) => ({ room, index }))
+      .sort((a, b) => {
+        const availabilityDiff =
+          availabilityRank(a.room, dayIndex, currentRange) -
+          availabilityRank(b.room, dayIndex, currentRange);
+        if (availabilityDiff) return availabilityDiff;
+
+        const favoriteDiff =
+          Number(!favorites.has(a.room.email.toLowerCase())) -
+          Number(!favorites.has(b.room.email.toLowerCase()));
+        if (favoriteDiff) return favoriteDiff;
+
+        const capacityDiff = capacityRank(a.room) - capacityRank(b.room);
+        if (capacityDiff) return capacityDiff;
+
+        const aLocation = locationRank(a.room, userBuilding, userFloor);
+        const bLocation = locationRank(b.room, userBuilding, userFloor);
+        for (let i = 0; i < aLocation.length; i += 1) {
+          const diff = aLocation[i] - bLocation[i];
+          if (diff) return diff;
+        }
+
+        return a.room.name.localeCompare(b.room.name, "vi") || a.index - b.index;
+      })
+      .map(({ room }) => room);
+  }, [
+    currentRange,
+    data.rooms,
+    dayIndex,
+    office,
+    preferredRooms,
+    query,
+    userBuilding,
+    userFloor,
+  ]);
+  const cols = `${TIME_COL}px repeat(${rooms.length}, minmax(155px, 1fr))`;
 
   function endOptionsFor(ti: number): string[] {
     const lastEnd = addLabel(times[times.length - 1], slotMinutes);
@@ -155,9 +270,6 @@ export function BrowseRooms({
 
   // Current-time marker (only when the selected day is today). Offset is measured
   // from midnight since the grid now spans the full day.
-  const now = new Date();
-  const todayIso = now.toISOString().slice(0, 10);
-  const nowMinutes = now.getHours() * 60 + now.getMinutes();
   const nowLabel = `${String(now.getHours()).padStart(2, "0")}:${String(
     now.getMinutes()
   ).padStart(2, "0")}`;

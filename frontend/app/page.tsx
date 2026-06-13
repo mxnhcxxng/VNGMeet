@@ -32,6 +32,8 @@ import { supabase } from "@/lib/supabase";
 import { Sidebar, type View } from "@/components/Sidebar";
 import { BrowseRooms } from "@/components/BrowseRooms";
 import { ChatPanel } from "@/components/ChatPanel";
+import { SettingsScreen } from "@/components/SettingsScreen";
+import { BookingHistory, clearBookingHistoryCache } from "@/components/BookingHistory";
 
 // Keep the browse range aligned with backend availability_days.
 const RANGE_DAYS = 18;
@@ -780,6 +782,7 @@ export default function Home() {
       /* ignore */
     }
     if (supabase) await api.signOut();
+    clearBookingHistoryCache();
     setMe({ authenticated: false });
     setChatThreads([]);
     setActiveThreadId(null);
@@ -829,13 +832,20 @@ export default function Home() {
         )}
 
         <div className="min-h-0 flex-1">
-          {refreshing && !data ? (
+          {view === "bookingHistory" ? (
+            <BookingHistory />
+          ) : refreshing && !data ? (
             <div className="flex h-full flex-col items-center justify-center gap-3">
               <Spinner />
               <span className="text-sm text-default-500">
                 Đang quét phòng họp...
               </span>
             </div>
+          ) : view === "settings" ? (
+            <SettingsScreen
+              me={me}
+              onSaved={setMe}
+            />
           ) : view === "chat" ? (
             <ChatPanel
               threadId={activeThreadId}
@@ -854,6 +864,9 @@ export default function Home() {
               refreshing={refreshing}
               onRefresh={loadSchedule}
               userOffice={me.profile?.office}
+              userBuilding={me.profile?.building}
+              userFloor={me.profile?.floor}
+              preferredRooms={me.profile?.preferred_rooms ?? []}
             />
           )}
         </div>

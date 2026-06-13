@@ -1,15 +1,16 @@
 "use client";
 
-import { Dropdown } from "@heroui/react";
 import {
   PencilToSquare,
   LayoutHeaderCells,
   Gear,
   LayoutSideContentLeft,
+  ArrowRightFromSquare,
+  ClockArrowRotateLeft,
 } from "@gravity-ui/icons";
 import type { ChatThread } from "@/lib/api";
 
-export type View = "browse" | "chat";
+export type View = "browse" | "chat" | "settings" | "bookingHistory";
 
 function initialsOf(name: string) {
   return name
@@ -79,7 +80,7 @@ export function Sidebar({
             onChange("chat");
             onNewChat?.();
           }}
-          className={`${ROW} hover:bg-[#f5f5f5]`}
+          className={`${ROW} ${view === "chat" && !activeThreadId ? "bg-[var(--default)]" : "hover:bg-[#f5f5f5]"}`}
         >
           <PencilToSquare width={16} height={16} />
           New chat
@@ -91,6 +92,14 @@ export function Sidebar({
         >
           <LayoutHeaderCells width={16} height={16} />
           Browse Rooms
+        </button>
+        <button
+          type="button"
+          onClick={() => onChange("bookingHistory")}
+          className={`${ROW} ${view === "bookingHistory" ? "bg-[var(--default)]" : "hover:bg-[#f5f5f5]"}`}
+        >
+          <ClockArrowRotateLeft width={16} height={16} />
+          Booking History
         </button>
       </div>
 
@@ -123,32 +132,38 @@ export function Sidebar({
         </div>
       </div>
 
-      {/* Setting (account menu) + divider + user */}
+      {/* Setting + divider + user (with logout) */}
       <div className="flex flex-col gap-4 px-4 pb-5">
-        <Dropdown>
-          <Dropdown.Trigger className={`${ROW} justify-start !bg-transparent hover:!bg-[#f5f5f5]`}>
-            <Gear width={16} height={16} />
-            Setting
-          </Dropdown.Trigger>
-          <Dropdown.Popover>
-            <Dropdown.Menu>
-              <Dropdown.Item id="logout" onAction={onLogout}>
-                Đăng xuất
-              </Dropdown.Item>
-            </Dropdown.Menu>
-          </Dropdown.Popover>
-        </Dropdown>
+        <button
+          type="button"
+          onClick={() => onChange("settings")}
+          className={`${ROW} ${view === "settings" ? "bg-[var(--default)]" : "hover:bg-[#f5f5f5]"}`}
+        >
+          <Gear width={16} height={16} />
+          Setting
+        </button>
 
         <div className="h-px w-full bg-[#e9eaeb]" />
 
-        <div className="flex items-center gap-3 px-1 py-2">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#a5b4fc] to-[#7c3aed] text-sm font-semibold text-white">
-            {initialsOf(display) || "U"}
+        <div className="flex items-center justify-between gap-3 px-1 py-2">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#a5b4fc] to-[#7c3aed] text-sm font-semibold text-white">
+              {initialsOf(display) || "U"}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium text-[#18181b]">{name}</p>
+              {email && <p className="truncate text-xs text-[#71717a]">{email}</p>}
+            </div>
           </div>
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium text-[#18181b]">{name}</p>
-            {email && <p className="truncate text-xs text-[#71717a]">{email}</p>}
-          </div>
+          <button
+            type="button"
+            onClick={onLogout}
+            aria-label="Đăng xuất"
+            title="Đăng xuất"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[#71717a] transition-colors hover:bg-[#f5f5f5] hover:text-[#18181b]"
+          >
+            <ArrowRightFromSquare width={16} height={16} />
+          </button>
         </div>
       </div>
     </aside>

@@ -108,6 +108,21 @@ export interface BookingResult {
   subject?: string;
 }
 
+export interface Booking {
+  id: string;
+  room_email: string;
+  room_name?: string | null;
+  date: string; // "2026-06-11"
+  start_time: string; // "09:00"
+  end_time: string; // "10:00"
+  booking_type: "instant" | "scheduled";
+  method: "manual" | "chatbot";
+  subject?: string | null;
+  status: "ok" | "failed" | "pending";
+  web_link?: string | null;
+  created_at: string;
+}
+
 export interface ChatThread {
   id: string;
   title?: string;
@@ -181,6 +196,9 @@ export const api = {
     req<ScheduleResponse>(
       `/api/schedule?days=${days}${emails ? `&emails=${encodeURIComponent(emails)}` : ""}`
     ),
+  // Caller's own booking history. The owner id is derived server-side from the
+  // auth token, so this only ever returns the current user's rows.
+  myBookings: () => req<{ bookings: Booking[] }>("/api/bookings"),
   book: (payload: BookingRequest) =>
     req<BookingResult>("/api/bookings", {
       method: "POST",

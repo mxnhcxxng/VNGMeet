@@ -2122,6 +2122,37 @@ def _mark_room_availability_owner(
         log.warning("could not mark room_availability owner: %s", e)
 
 
+@app.get("/api/bookings")
+async def list_my_bookings(request: Request):
+    """Return the caller's own booking history.
+
+    The owner id (user_profiles.id) is derived server-side from the verified
+    auth token via `_booking_auth_context` — the client never supplies it — so a
+    user can only ever read their own rows and cannot peek at someone else's data.
+    """
+    _token, _auth_user_id, user_profile_id, _email = await _booking_auth_context(request)
+    if not user_profile_id or not settings.supabase_enabled:
+        return {"bookings": []}
+
+    from .supabase_client import get_supabase
+
+    rows = (
+        get_supabase()
+        .table("user_activity")
+        .select(
+            "id, room_email, room_name, date, start_time, end_time, "
+            "booking_type, method, subject, status, web_link, created_at"
+        )
+        .eq("user_id", user_profile_id)
+        .order("created_at", desc=True)
+        .limit(200)
+        .execute()
+        .data
+        or []
+    )
+    return {"bookings": rows}
+
+
 @app.post("/api/bookings")
 async def create_booking(request: Request, payload: BookingRequest):
     token, auth_user_id, user_profile_id, _auth_email = await _booking_auth_context(
