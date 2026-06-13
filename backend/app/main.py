@@ -46,7 +46,10 @@ async def lifespan(app: FastAPI):
         scheduler = AsyncIOScheduler(timezone=settings.timezone)
         scheduler.add_job(
             _safe_refresh,
-            CronTrigger(minute=settings.availability_refresh_minutes),
+            CronTrigger(
+                minute=settings.availability_refresh_minutes,
+                timezone=settings.timezone,
+            ),
             id="refresh_availability",
             max_instances=1,
             coalesce=True,

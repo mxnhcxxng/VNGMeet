@@ -162,16 +162,17 @@ export function BrowseRooms({
   const markerOffset = (nowMinutes / slotMinutes) * SLOT_H;
   const showMarker = data.days[dayIndex] === todayIso;
 
-  // Auto-scroll the grid so the "now" marker lands one block from the top —
-  // i.e. the block right before the one holding the green current-time line.
+  // Auto-scroll the grid so it opens on a sensible anchor, one block from the top:
+  // before 13:00 → anchor on the block right before 09:00; from 13:00 on →
+  // anchor on the block right before 13:00.
   const scrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (!showMarker) return;
     const el = scrollRef.current;
     if (!el) return;
-    const nowBlock = Math.floor(nowMinutes / slotMinutes);
-    el.scrollTop = Math.max(0, (nowBlock - 1) * SLOT_H);
-  }, [showMarker, nowMinutes, slotMinutes, rooms.length]);
+    const anchorMinutes = nowMinutes < 13 * 60 ? 9 * 60 : 13 * 60;
+    const anchorBlock = Math.floor(anchorMinutes / slotMinutes);
+    el.scrollTop = Math.max(0, (anchorBlock - 1) * SLOT_H);
+  }, [nowMinutes, slotMinutes, rooms.length]);
 
   return (
     <div className="flex h-full flex-col bg-white">

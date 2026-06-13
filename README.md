@@ -111,6 +111,9 @@ npm run dev
 - Browse grid đọc `/api/availability` từ bảng `room_availability`; nếu cache thiếu hoặc
   `updated_at` cũ hơn 5 phút, backend dùng delegated Graph token của user hiện tại để
   refresh bảng rồi mới trả UI.
+- Supabase cron job `seed_room_availability_midnight_gmt7` chạy mỗi 00:00 GMT+7
+  để tạo các row `room_availability` còn thiếu cho ngày thứ 18 tính từ ngày mới.
+  Row đã tồn tại trong DB sẽ được bỏ qua.
 - Trạng thái map từ Graph `availabilityView`: `0` free, `1` tentative, `2` busy,
   `3` out-of-office, `4` working-elsewhere. Mọi thứ khác `0` đều coi là "đã book" (đỏ).
 ```

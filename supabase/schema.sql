@@ -270,3 +270,89 @@ alter table room_availability enable row level security;
 -- Chỉ user đã đăng nhập đọc được; ghi chỉ qua service_role (backend job).
 create policy "authenticated_can_read_availability" on room_availability
   for select to authenticated using (true);
+
+-- Supabase-native midnight seed job for room_availability.
+-- Runs at 17:00 UTC, which is 00:00 Asia/Ho_Chi_Minh (GMT+7). The function
+-- creates missing rows only, so existing availability data is never overwritten.
+create extension if not exists pg_cron with schema extensions;
+
+create schema if not exists app_private;
+
+create or replace function app_private.seed_room_availability(
+  seed_start_date date default ((now() at time zone 'Asia/Ho_Chi_Minh')::date),
+  seed_days integer default 18
+)
+returns table(
+  start_date date,
+  end_date date,
+  in_use_rooms bigint,
+  target_rows bigint,
+  inserted_rows bigint,
+  missing_rows bigint
+)
+language plpgsql
+set search_path to 'public', 'pg_temp'
+as $function$
+declare
+  v_start_date date := seed_start_date;
+  v_days integer := greatest(seed_days, 0);
+  v_target_date date := seed_start_date + greatest(seed_days, 1) - 1;
+begin
+  if v_days = 0 then
+    return query
+    select v_start_date, v_start_date - 1, 0::bigint, 0::bigint, 0::bigint, 0::bigint;
+    return;
+  end if;
+
+  return query
+  with target_rows as (
+    select
+      m.id as room_id,
+      v_target_date as date
+    from public.meeting_room_metadata m
+    where m.in_use is true
+  ), inserted as (
+    insert into public.room_availability (
+      room_id,
+      date,
+      slots,
+      slot_owner_ids,
+      updated_at
+    )
+    select
+      room_id,
+      date,
+      array_fill((-1)::smallint, array[96]),
+      array_fill(null::uuid, array[96]),
+      now()
+    from target_rows
+    on conflict (room_id, date) do nothing
+    returning room_id, date
+  )
+  select
+    v_start_date,
+    v_target_date,
+    (select count(*) from public.meeting_room_metadata where in_use is true),
+    (select count(*) from target_rows),
+    (select count(*) from inserted),
+    (select count(*) from target_rows t where not exists (
+      select 1
+      from public.room_availability ra
+      where ra.room_id = t.room_id
+        and ra.date = t.date
+    ));
+end;
+$function$;
+
+revoke all on function app_private.seed_room_availability(date, integer)
+  from public, anon, authenticated;
+
+select cron.unschedule(jobid)
+from cron.job
+where jobname = 'seed_room_availability_midnight_gmt7';
+
+select cron.schedule(
+  'seed_room_availability_midnight_gmt7',
+  '0 17 * * *',
+  $$select * from app_private.seed_room_availability();$$
+);
