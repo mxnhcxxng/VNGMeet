@@ -11,3 +11,18 @@ body {
   font-family: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
   color: #181d27;
 }
+
+@keyframes auth-caption-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.auth-caption-in {
+  animation: auth-caption-in 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+}

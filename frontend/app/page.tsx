@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useState } from "react";
 import {
   Autocomplete,
   Button,
@@ -9,7 +9,6 @@ import {
   Input,
   type Key,
   Label,
-  Link,
   ListBox,
   ListBoxItem,
   SearchField,
@@ -28,6 +27,7 @@ import {
   type UserProfileOption,
   type UserProfileOptions,
 } from "@/lib/api";
+import { Check, Copy } from "@gravity-ui/icons";
 import { supabase } from "@/lib/supabase";
 import { Sidebar, type View } from "@/components/Sidebar";
 import { BrowseRooms } from "@/components/BrowseRooms";
@@ -37,24 +37,187 @@ const RANGE_DAYS = 14;
 const GRAPH_EXPLORER_URL =
   "https://developer.microsoft.com/en-us/graph/graph-explorer";
 
-const LOGIN_STEPS = [
+function CopyLinkButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const copy = async () => {
+    let ok = false;
+
+    if (navigator.clipboard && window.isSecureContext) {
+      try {
+        await navigator.clipboard.writeText(text);
+        ok = true;
+      } catch {
+        /* fall through to the execCommand fallback below */
+      }
+    }
+
+    if (!ok) {
+      // Fallback for non-secure contexts (e.g. http over a LAN IP) or when the
+      // async clipboard API rejects.
+      try {
+        const textarea = document.createElement("textarea");
+        textarea.value = text;
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        ok = document.execCommand("copy");
+        document.body.removeChild(textarea);
+      } catch {
+        /* ignore copy failures */
+      }
+    }
+
+    if (ok) {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      aria-label={copied ? "Link copied" : "Copy link"}
+      onClick={copy}
+      className="shrink-0 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+    >
+      <Chip
+        color="default"
+        variant="soft"
+        size="sm"
+        className="inline-flex cursor-pointer items-center gap-1"
+      >
+        {copied ? <Check width={14} /> : <Copy width={14} />}
+        <Chip.Label>{copied ? "Copied" : "Copy"}</Chip.Label>
+      </Chip>
+    </button>
+  );
+}
+
+function ArrowIcon({ direction }: { direction: "left" | "right" }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="size-6"
+      aria-hidden
+    >
+      {direction === "left" ? (
+        <>
+          <path d="M19 12H5" />
+          <path d="m12 19-7-7 7-7" />
+        </>
+      ) : (
+        <>
+          <path d="M5 12h14" />
+          <path d="m12 5 7 7-7 7" />
+        </>
+      )}
+    </svg>
+  );
+}
+
+function CarouselArrow({
+  direction,
+  label,
+  onPress,
+}: {
+  direction: "left" | "right";
+  label: string;
+  onPress: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      onClick={onPress}
+      className="flex size-14 shrink-0 items-center justify-center rounded-full border border-white/50 text-white transition hover:bg-white/10"
+    >
+      <ArrowIcon direction={direction} />
+    </button>
+  );
+}
+
+// Full-bleed slide backgrounds exported from Figma (node 32:4966 / 32:4986 /
+// 32:5113). Each image already bakes in the device mockup and highlight
+// annotations at the design's 3:4 frame ratio, so it just needs to cover the
+// panel with a dark gradient on top for the caption.
+const SLIDE_BACKGROUNDS: Record<LoginStepKey, string> = {
+  graph: "/auth/graph.png",
+  account: "/auth/account.png",
+  token: "/auth/token.png",
+};
+
+function SlideBackground({ stepKey }: { stepKey: LoginStepKey }) {
+  return (
+    // translateZ(0) + isolate promote this container to its own compositing
+    // layer so the rounded clip survives while the <img> layers cross-fade —
+    // otherwise the corner radius flickers off mid-transition.
+    <div className="absolute inset-0 overflow-hidden [isolation:isolate] [transform:translateZ(0)] lg:rounded-l-[80px]">
+      {(Object.keys(SLIDE_BACKGROUNDS) as LoginStepKey[]).map((key) => (
+        <img
+          key={key}
+          src={SLIDE_BACKGROUNDS[key]}
+          alt=""
+          className={`absolute inset-0 h-full w-full object-cover object-center transition-opacity duration-300 ease-out ${
+            key === stepKey ? "opacity-100" : "opacity-0"
+          }`}
+        />
+      ))}
+      <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(0,0,0,0)_0%,rgba(0,0,0,0.4)_79.24%)]" />
+    </div>
+  );
+}
+
+type LoginStepKey = "graph" | "account" | "token";
+
+const LOGIN_STEPS: {
+  key: LoginStepKey;
+  title: ReactNode;
+  description: ReactNode;
+}[] = [
   {
-    title: "Go to Microsoft Graph Explorer",
-    description:
-      "Open Graph Explorer and sign in with your VNG Microsoft work account.",
-    action: "Open Graph Explorer",
+    key: "graph",
+    title: (
+      <>
+        Go to{" "}
+        <a
+          href={GRAPH_EXPLORER_URL}
+          target="_blank"
+          rel="noreferrer"
+          className="underline decoration-2 underline-offset-2 [text-underline-position:from-font] transition hover:text-white/80"
+        >
+          Microsoft Graph Explorer
+        </a>
+      </>
+    ),
+    description: (
+      <div className="flex flex-col gap-0.5">
+        <p>If the link isn&apos;t available, paste this link into your search bar</p>
+        <div className="flex items-center gap-2">
+          <span className="break-all font-semibold">{GRAPH_EXPLORER_URL}</span>
+          <CopyLinkButton text={GRAPH_EXPLORER_URL} />
+        </div>
+      </div>
+    ),
   },
   {
-    title: "Copy the access token",
+    key: "account",
+    title: "Login using your work account",
     description:
-      "Open the Access token panel, copy the full token, then return to VNG Meet.",
-    action: "Find Access token",
+      "Due to development constraints, this is currently the only supported connection method.",
   },
   {
-    title: "Paste and authenticate",
+    key: "token",
+    title: "Get your access token",
     description:
-      "Paste the token into the input on the left and continue to browse meeting rooms.",
-    action: "Authenticate",
+      "Navigate to the Access Token tab, copy the token, and paste it into the field on the left to authenticate.",
   },
 ];
 
@@ -142,80 +305,36 @@ function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
           </div>
         </section>
 
-        <section className="relative min-h-[520px] overflow-hidden bg-white text-default-900 lg:m-0 lg:border-l lg:border-default-200">
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(21,112,239,0.06),transparent_32%),radial-gradient(circle_at_80%_20%,rgba(22,179,100,0.05),transparent_28%)]" />
-          <div className="absolute inset-x-12 top-16 hidden h-px bg-default-200 sm:block" />
-          <div className="absolute right-14 top-16 hidden h-[calc(100%-8rem)] w-px bg-default-200 sm:block" />
-          <div className="absolute left-1/2 top-20 hidden h-72 w-72 -translate-x-1/2 rounded-full border border-default-200 sm:block" />
+        <section className="relative min-h-[520px] overflow-hidden bg-default-100 text-white lg:rounded-l-[80px]">
+          <SlideBackground stepKey={currentStep.key} />
 
-          <div className="relative flex min-h-full flex-col justify-end px-6 py-10 sm:px-12 lg:px-20 lg:py-16">
-            <div className="mb-10 max-w-2xl">
-              <Chip
-                color="accent"
-                variant="soft"
-              >
+          <div className="absolute inset-x-6 bottom-8 flex items-end justify-center gap-3 sm:inset-x-10 lg:inset-x-14 lg:bottom-14">
+            <div
+              key={currentStep.key}
+              className="auth-caption-in flex min-w-0 flex-1 flex-col items-start gap-3"
+            >
+              <span className="inline-flex items-center rounded-full border border-white/40 bg-white/10 px-3 py-1 text-xs font-semibold text-white backdrop-blur-sm">
                 Step {stepIndex + 1} of {LOGIN_STEPS.length}
-              </Chip>
-              <h2 className="text-3xl font-bold leading-tight sm:text-4xl">
+              </span>
+              <h2 className="text-2xl font-semibold leading-8 text-white">
                 {currentStep.title}
               </h2>
-              <p className="mt-5 max-w-xl text-lg leading-8 text-default-500">
+              <div className="text-sm font-medium leading-5 text-white">
                 {currentStep.description}
-              </p>
-
-              <div className="mt-8 flex flex-wrap items-center gap-3">
-                {stepIndex === 0 ? (
-                  <Button
-                    onPress={() => window.open(GRAPH_EXPLORER_URL, "_blank", "noreferrer")}
-                  >
-                    {currentStep.action}
-                  </Button>
-                ) : (
-                  <Button>{currentStep.action}</Button>
-                )}
-                <Link
-                  href={GRAPH_EXPLORER_URL}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  {GRAPH_EXPLORER_URL}
-                </Link>
               </div>
             </div>
 
-            <div className="flex items-center justify-between gap-6">
-              <div className="flex gap-2">
-                {LOGIN_STEPS.map((step, index) => (
-                  <Button
-                    key={step.title}
-                    size="sm"
-                    aria-label={`Go to step ${index + 1}`}
-                    variant={index === stepIndex ? "primary" : "secondary"}
-                    onPress={() => setStepIndex(index)}
-                  >
-                    {index + 1}
-                  </Button>
-                ))}
-              </div>
-
-              <div className="flex gap-4">
-                <Button
-                  isIconOnly
-                  variant="outline"
-                  aria-label="Previous instruction"
-                  onPress={() => goToStep(-1)}
-                >
-                  <span className="text-3xl leading-none">‹</span>
-                </Button>
-                <Button
-                  isIconOnly
-                  variant="outline"
-                  aria-label="Next instruction"
-                  onPress={() => goToStep(1)}
-                >
-                  <span className="text-3xl leading-none">›</span>
-                </Button>
-              </div>
+            <div className="flex shrink-0 items-start gap-4">
+              <CarouselArrow
+                direction="left"
+                label="Previous instruction"
+                onPress={() => goToStep(-1)}
+              />
+              <CarouselArrow
+                direction="right"
+                label="Next instruction"
+                onPress={() => goToStep(1)}
+              />
             </div>
           </div>
         </section>
