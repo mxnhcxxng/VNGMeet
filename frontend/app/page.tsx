@@ -2,23 +2,30 @@
 
 import { useCallback, useEffect, useState } from "react";
 import {
+  Autocomplete,
   Button,
-  Card,
   Chip,
+  EmptyState,
   Input,
+  type Key,
   Label,
   Link,
   ListBox,
   ListBoxItem,
+  SearchField,
   Select,
   Spinner,
+  Tag,
+  TagGroup,
   TextField,
+  useFilter,
 } from "@heroui/react";
 import {
   api,
   type ChatThread,
   type Me,
   type ScheduleResponse,
+  type UserProfileOption,
   type UserProfileOptions,
 } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
@@ -229,20 +236,33 @@ function ProfileInfoScreen({
   const [office, setOffice] = useState(me.profile?.office ?? "");
   const [floor, setFloor] = useState(me.profile?.floor ?? "");
   const [building, setBuilding] = useState(me.profile?.building ?? "");
+  const [preferredRooms, setPreferredRooms] = useState<string[]>(
+    me.profile?.preferred_rooms ?? []
+  );
   const [options, setOptions] = useState<UserProfileOptions | null>(null);
   const [optionsLoading, setOptionsLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  const email = me.profile?.email || me.email || "";
+  const email =
+    [me.profile?.email, me.email, me.username].find((value) =>
+      Boolean(value && value.includes("@"))
+    ) ||
+    me.profile?.email ||
+    me.email ||
+    "";
   const emailUsername =
-    me.profile?.email_username || (email.includes("@") ? email.split("@")[0] : "");
+    me.profile?.email_username ||
+    (email.includes("@") ? email.split("@", 1)[0] : "");
   const isCampus = office === "campus";
   const floorOptions =
     options?.floor.filter((item) => item.parentValue === office) ?? [];
   const buildingOptions =
     options?.building.filter((item) => item.parentValue === office) ?? [];
-  const canSave = Boolean(office && (!isCampus || (floor && building)));
+  const preferredRoomOptions =
+    options?.preferredRooms.filter((item) => item.parentValue === office) ?? [];
+  const canSave = Boolean(office);
+  const { contains } = useFilter({ sensitivity: "base" });
 
   useEffect(() => {
     const loadOptions = async () => {
@@ -266,6 +286,19 @@ function ProfileInfoScreen({
     }
   }, [isCampus]);
 
+  const changeOffice = (key: Key | null) => {
+    setOffice((key as string) ?? "");
+    setPreferredRooms([]);
+  };
+
+  const updatePreferredRooms = (keys: readonly Key[]) => {
+    setPreferredRooms(keys.map(String).slice(0, 3));
+  };
+
+  const removePreferredRoomTags = (keys: Set<Key>) => {
+    setPreferredRooms((current) => current.filter((item) => !keys.has(item)));
+  };
+
   const submitProfile = async () => {
     if (!canSave) return;
     setBusy(true);
@@ -275,6 +308,7 @@ function ProfileInfoScreen({
         office,
         floor: isCampus ? floor : "",
         building: isCampus ? building : "",
+        preferred_rooms: preferredRooms,
       });
       onSaved({
         ...me,
@@ -288,83 +322,68 @@ function ProfileInfoScreen({
     }
   };
 
-  return (
-    <div className="flex min-h-screen items-center justify-center bg-white p-4">
-      <Card className="w-full max-w-xl border border-default-200 shadow-xl">
-        <Card.Content className="gap-6 p-8">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">
-              Hoàn tất thông tin cá nhân
-            </h1>
-            <p className="mt-2 text-sm text-default-500">
-              Thông tin này giúp gợi ý và lọc phòng họp đúng địa điểm làm việc của bạn.
-            </p>
-          </div>
+  const req = <span className="text-danger">*</span>;
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            <TextField fullWidth isDisabled className="sm:col-span-2">
-              <Label>Email</Label>
-              <Input variant="secondary" value={email} />
-            </TextField>
-            <TextField fullWidth isDisabled className="sm:col-span-2">
-              <Label>Email username</Label>
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-default-100 p-4">
+      <div className="flex w-full max-w-[640px] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+        {/* Banner */}
+        <div className="px-6 pt-6">
+          <div className="h-[120px] w-full rounded-lg bg-gradient-to-r from-purple-300 via-pink-300 to-amber-200" />
+        </div>
+
+        {/* Header */}
+        <div className="px-6 pb-5 pt-6">
+          <h2 className="text-base font-semibold text-default-900">
+            Complete your details to get room recommendations
+          </h2>
+        </div>
+
+        {/* Form */}
+        <div className="grid gap-4 px-6">
+          <div className="grid grid-cols-2 gap-4">
+            <TextField fullWidth isDisabled>
+              <Label>Domain {req}</Label>
               <Input variant="secondary" value={emailUsername} />
             </TextField>
+            <TextField fullWidth isDisabled>
+              <Label>Email {req}</Label>
+              <Input variant="secondary" value={email} />
+            </TextField>
+          </div>
+
+          <Select
+            variant="secondary"
+            className="flex flex-col gap-2"
+            placeholder="Choose Office"
+            selectedKey={office || null}
+            onSelectionChange={changeOffice}
+            isRequired
+            isDisabled={optionsLoading}
+          >
+            <Label>Office</Label>
+            <Select.Trigger>
+              <Select.Value />
+              <Select.Indicator />
+            </Select.Trigger>
+            <Select.Popover>
+              <ListBox>
+                {(options?.office ?? []).map((item) => (
+                  <ListBoxItem key={item.value} id={item.value}>
+                    {item.label}
+                  </ListBoxItem>
+                ))}
+              </ListBox>
+            </Select.Popover>
+          </Select>
+
+          <div className="grid grid-cols-2 gap-4">
             <Select
               variant="secondary"
               className="flex flex-col gap-2"
-              placeholder="Chọn office"
-              selectedKey={office || null}
-              onSelectionChange={(key) => setOffice((key as string) ?? "")}
-              isRequired
-              isDisabled={optionsLoading}
-            >
-              <Label>Office</Label>
-              <Select.Trigger>
-                <Select.Value />
-                <Select.Indicator />
-              </Select.Trigger>
-              <Select.Popover>
-                <ListBox>
-                  {(options?.office ?? []).map((item) => (
-                    <ListBoxItem key={item.value} id={item.value}>
-                      {item.label}
-                    </ListBoxItem>
-                  ))}
-                </ListBox>
-              </Select.Popover>
-            </Select>
-            <Select
-              variant="secondary"
-              className="flex flex-col gap-2"
-              placeholder="Chọn floor"
-              selectedKey={floor || null}
-              onSelectionChange={(key) => setFloor((key as string) ?? "")}
-              isRequired={isCampus}
-              isDisabled={!isCampus || optionsLoading}
-            >
-              <Label>Floor</Label>
-              <Select.Trigger>
-                <Select.Value />
-                <Select.Indicator />
-              </Select.Trigger>
-              <Select.Popover>
-                <ListBox>
-                  {floorOptions.map((item) => (
-                    <ListBoxItem key={item.value} id={item.value}>
-                      {item.label}
-                    </ListBoxItem>
-                  ))}
-                </ListBox>
-              </Select.Popover>
-            </Select>
-            <Select
-              variant="secondary"
-              className="flex flex-col gap-2 sm:col-span-2"
-              placeholder="Chọn building"
+              placeholder="Choose Building"
               selectedKey={building || null}
               onSelectionChange={(key) => setBuilding((key as string) ?? "")}
-              isRequired={isCampus}
               isDisabled={!isCampus || optionsLoading}
             >
               <Label>Building</Label>
@@ -382,28 +401,145 @@ function ProfileInfoScreen({
                 </ListBox>
               </Select.Popover>
             </Select>
+            <Select
+              variant="secondary"
+              className="flex flex-col gap-2"
+              placeholder="Choose Floor"
+              selectedKey={floor || null}
+              onSelectionChange={(key) => setFloor((key as string) ?? "")}
+              isDisabled={!isCampus || optionsLoading}
+            >
+              <Label>Floor</Label>
+              <Select.Trigger>
+                <Select.Value />
+                <Select.Indicator />
+              </Select.Trigger>
+              <Select.Popover>
+                <ListBox>
+                  {floorOptions.map((item) => (
+                    <ListBoxItem key={item.value} id={item.value}>
+                      {item.label}
+                    </ListBoxItem>
+                  ))}
+                </ListBox>
+              </Select.Popover>
+            </Select>
           </div>
+
+          <Autocomplete<UserProfileOption, "multiple">
+            variant="secondary"
+            fullWidth
+            className="flex flex-col gap-2 [&_.autocomplete__trigger]:w-full"
+            placeholder="Choose Prefered Rooms (MAX: 3)"
+            selectionMode="multiple"
+            value={preferredRooms}
+            onChange={updatePreferredRooms}
+            isDisabled={!office || optionsLoading}
+          >
+            <Label>Prefered Rooms</Label>
+            <Autocomplete.Trigger>
+              <Autocomplete.Value>
+                {({ defaultChildren, isPlaceholder, state }) => {
+                  if (isPlaceholder || state.selectedItems.length === 0) {
+                    return defaultChildren;
+                  }
+
+                  const selectedItemKeys = state.selectedItems.map((item) => item.key);
+
+                  return (
+                    <TagGroup
+                      size="sm"
+                      variant="surface"
+                      onRemove={removePreferredRoomTags}
+                    >
+                      <TagGroup.List>
+                        {selectedItemKeys.map((selectedItemKey) => {
+                          const item = preferredRoomOptions.find(
+                            (room) => room.value === String(selectedItemKey)
+                          );
+
+                          if (!item) return null;
+
+                          return (
+                            <Tag key={item.value} id={item.value}>
+                              {item.label}
+                            </Tag>
+                          );
+                        })}
+                      </TagGroup.List>
+                    </TagGroup>
+                  );
+                }}
+              </Autocomplete.Value>
+              <Autocomplete.ClearButton />
+              <Autocomplete.Indicator />
+            </Autocomplete.Trigger>
+            <Autocomplete.Popover className="max-h-[248px] w-[var(--trigger-width)] overflow-y-auto">
+              <Autocomplete.Filter filter={contains}>
+                <div className="w-full px-2 py-2">
+                  <SearchField
+                    autoFocus
+                    aria-label="Search prefered rooms"
+                    name="search"
+                    variant="secondary"
+                    fullWidth
+                  >
+                    <SearchField.Group>
+                      <SearchField.SearchIcon />
+                      <SearchField.Input placeholder="Choose Prefered Rooms (MAX: 3)" />
+                      <SearchField.ClearButton />
+                    </SearchField.Group>
+                  </SearchField>
+                </div>
+                <ListBox
+                  className="max-h-[200px] overflow-y-auto"
+                  renderEmptyState={() => <EmptyState>No results found</EmptyState>}
+                >
+                  {preferredRoomOptions.map((item) => (
+                    <ListBoxItem
+                      key={item.value}
+                      id={item.value}
+                      textValue={item.label}
+                      isDisabled={
+                        preferredRooms.length >= 3 && !preferredRooms.includes(item.value)
+                      }
+                    >
+                      {item.label}
+                      <ListBoxItem.Indicator />
+                    </ListBoxItem>
+                  ))}
+                </ListBox>
+              </Autocomplete.Filter>
+            </Autocomplete.Popover>
+          </Autocomplete>
 
           {err && (
             <Chip color="danger" variant="soft" size="sm" className="self-start">
               {err}
             </Chip>
           )}
+        </div>
 
-          <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-            <Button variant="ghost" onPress={onLogout}>
-              Đăng xuất
-            </Button>
-            <Button
-              isDisabled={!canSave || optionsLoading}
-              isPending={busy}
-              onPress={submitProfile}
-            >
-              Tiếp tục đặt phòng
-            </Button>
-          </div>
-        </Card.Content>
-      </Card>
+        {/* Buttons */}
+        <div className="flex items-center justify-center gap-2 px-6 pb-6 pt-8">
+          <Button
+            variant="tertiary"
+            className="flex-1 rounded-full"
+            onPress={onLogout}
+            isDisabled={busy}
+          >
+            Cancel
+          </Button>
+          <Button
+            className="flex-1 rounded-full"
+            isDisabled={!canSave || optionsLoading}
+            isPending={busy}
+            onPress={submitProfile}
+          >
+            Save
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }

@@ -43,6 +43,7 @@ export interface UserProfile {
   office: string;
   floor: string;
   building: string;
+  preferred_rooms: string[];
 }
 
 export interface UserProfileOption {
@@ -56,6 +57,7 @@ export interface UserProfileOptions {
   office: UserProfileOption[];
   floor: UserProfileOption[];
   building: UserProfileOption[];
+  preferredRooms: UserProfileOption[];
 }
 
 export interface Room {
@@ -150,7 +152,9 @@ export const api = {
   logout: () => req<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
   me: () => req<Me>("/api/auth/me"),
   userProfileOptions: () => req<UserProfileOptions>("/api/users/profile-options"),
-  updateUserProfile: (payload: Pick<UserProfile, "office" | "floor" | "building">) =>
+  updateUserProfile: (
+    payload: Pick<UserProfile, "office" | "floor" | "building" | "preferred_rooms">
+  ) =>
     req<{ ok: boolean; profile: UserProfile | null; profileComplete: boolean }>(
       "/api/users/me/profile",
       {

@@ -19,7 +19,7 @@ import httpx
 from fastapi import Body, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from starlette.middleware.sessions import SessionMiddleware
 
 from . import auth, availability, graph
@@ -29,7 +29,6 @@ log = logging.getLogger("vngmeet")
 settings = get_settings()
 AVAILABILITY_CACHE_TTL = timedelta(minutes=5)
 _AVAILABILITY_REFRESH_LOCK = None
-PROFILE_REQUIRED_FIELDS = ("office", "floor", "building")
 
 
 @asynccontextmanager
@@ -100,11 +99,25 @@ app.add_middleware(
 # Auth
 # --------------------------------------------------------------------------- #
 def _profile_email(claims: dict) -> str | None:
-    for key in ("email", "upn", "preferred_username", "unique_name"):
+    for key in ("email", "upn", "preferred_username", "unique_name", "name"):
         value = claims.get(key)
         if isinstance(value, str) and "@" in value:
             return value.strip().lower()
     return None
+
+
+def _profile_display_name(claims: dict) -> str:
+    return (
+        _profile_email(claims)
+        or next(
+            (
+                value.strip()
+                for key in ("name", "preferred_username", "upn", "email", "unique_name")
+                if isinstance((value := claims.get(key)), str) and value.strip()
+            ),
+            "Graph token",
+        )
+    )
 
 
 def _profile_auth_user_id(claims: dict) -> str | None:
@@ -165,13 +178,7 @@ def _profile_is_complete(profile: dict | None) -> bool:
     if not profile:
         return False
     office = str(profile.get("office") or "").strip()
-    if not office:
-        return False
-    if office != "campus":
-        return True
-    return all(
-        bool(str(profile.get(field) or "").strip()) for field in ("floor", "building")
-    )
+    return bool(office)
 
 
 def _profile_field_options() -> dict[str, list[dict]]:
@@ -193,7 +200,7 @@ def _profile_field_options() -> dict[str, list[dict]]:
     except Exception as e:  # noqa: BLE001
         raise HTTPException(500, f"Could not load user profile options: {e}")
 
-    options = {"office": [], "floor": [], "building": []}
+    options = {"office": [], "floor": [], "building": [], "preferredRooms": []}
     for row in rows:
         field = row.get("field")
         if field not in options:
@@ -204,6 +211,35 @@ def _profile_field_options() -> dict[str, list[dict]]:
                 "label": row.get("label") or row.get("value") or "",
                 "parentField": row.get("parent_field"),
                 "parentValue": row.get("parent_value"),
+            }
+        )
+
+    try:
+        from .supabase_client import get_supabase
+
+        room_rows = (
+            get_supabase()
+            .table("meeting_room_metadata")
+            .select("name, email, office")
+            .eq("in_use", True)
+            .order("name")
+            .execute()
+            .data
+            or []
+        )
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"Could not load room options: {e}")
+
+    for row in room_rows:
+        email = (row.get("email") or "").strip().lower()
+        if not email:
+            continue
+        options["preferredRooms"].append(
+            {
+                "value": email,
+                "label": row.get("name") or email,
+                "parentField": "office",
+                "parentValue": row.get("office"),
             }
         )
     return options
@@ -224,18 +260,43 @@ def _validate_profile_selection(values: dict) -> dict:
     office = str(values.get("office") or "").strip()
     floor = str(values.get("floor") or "").strip()
     building = str(values.get("building") or "").strip()
+    preferred_rooms = [
+        str(room or "").strip().lower()
+        for room in (values.get("preferred_rooms") or [])
+        if str(room or "").strip()
+    ]
 
     if not office or not allowed("office", office):
         raise HTTPException(400, "Office không hợp lệ.")
 
-    if office != "campus":
-        return {"office": office, "floor": "", "building": ""}
+    if len(preferred_rooms) > 3:
+        raise HTTPException(400, "Prefered rooms chỉ được chọn tối đa 3 phòng.")
 
-    if not floor or not allowed("floor", floor, office):
+    room_options = options["preferredRooms"]
+    room_values = {room["value"]: room for room in room_options}
+    for room in preferred_rooms:
+        option = room_values.get(room)
+        if not option or option.get("parentValue") != office:
+            raise HTTPException(400, "Prefered room không hợp lệ với office đã chọn.")
+
+    if office != "campus":
+        return {
+            "office": office,
+            "floor": "",
+            "building": "",
+            "preferred_rooms": preferred_rooms,
+        }
+
+    if floor and not allowed("floor", floor, office):
         raise HTTPException(400, "Floor không hợp lệ.")
-    if not building or not allowed("building", building, office):
+    if building and not allowed("building", building, office):
         raise HTTPException(400, "Building không hợp lệ.")
-    return {"office": office, "floor": floor, "building": building}
+    return {
+        "office": office,
+        "floor": floor,
+        "building": building,
+        "preferred_rooms": preferred_rooms,
+    }
 
 
 def _profile_payload(profile: dict | None, email: str | None = None) -> dict | None:
@@ -250,6 +311,7 @@ def _profile_payload(profile: dict | None, email: str | None = None) -> dict | N
         "office": row.get("office") or "",
         "floor": row.get("floor") or "",
         "building": row.get("building") or "",
+        "preferred_rooms": row.get("preferred_rooms") or [],
     }
 
 
@@ -262,7 +324,7 @@ def _read_user_profile(profile_id: str | None, email: str | None = None) -> dict
         query = (
             get_supabase()
             .table("user_profiles")
-            .select("id, email, email_username, office, floor, building")
+            .select("id, email, email_username, office, floor, building, preferred_rooms")
             .limit(1)
         )
         if profile_id:
@@ -342,8 +404,7 @@ def set_token(request: Request, access_token: str = Body(..., embed=True)):
     auth.set_manual_token(sid, access_token)
     claims = auth.decode_jwt_claims(access_token)
     _upsert_user_profile(claims)
-    name = auth._decode_jwt_claim(access_token, "upn", "preferred_username", "name")
-    return JSONResponse({"ok": True, "username": name or "Graph token"})
+    return JSONResponse({"ok": True, "username": _profile_display_name(claims)})
 
 
 @app.post("/api/auth/link")
@@ -368,7 +429,7 @@ def me(request: Request):
         return JSONResponse(
             {
                 "authenticated": True,
-                "username": claims.get("email"),
+                "username": _profile_display_name(claims),
                 "email": _profile_email(claims),
                 "graphLinked": auth.has_refresh_token(claims["sub"]),
                 "profile": profile,
@@ -381,11 +442,10 @@ def me(request: Request):
         return JSONResponse({"authenticated": False})
     claims = auth.decode_jwt_claims(token)
     profile, profile_complete = _me_profile_response(claims)
-    name = auth._decode_jwt_claim(token, "upn", "preferred_username", "name")
     return JSONResponse(
         {
             "authenticated": True,
-            "username": name or "Graph token",
+            "username": _profile_display_name(claims),
             "email": _profile_email(claims),
             "profile": profile,
             "profileComplete": profile_complete,
@@ -866,6 +926,7 @@ class UserProfileUpdateRequest(BaseModel):
     office: str
     floor: str = ""
     building: str = ""
+    preferred_rooms: list[str] = Field(default_factory=list)
 
 
 @app.get("/api/users/profile-options")

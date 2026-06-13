@@ -20,6 +20,7 @@ create table if not exists user_profiles (
   office text,
   floor text,
   building text,
+  preferred_rooms text[] not null default '{}',
   last_seen_at timestamptz not null default now(),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -28,6 +29,7 @@ create table if not exists user_profiles (
 alter table user_profiles add column if not exists office text;
 alter table user_profiles add column if not exists floor text;
 alter table user_profiles add column if not exists building text;
+alter table user_profiles add column if not exists preferred_rooms text[] not null default '{}';
 create unique index if not exists user_profiles_email_lower_key
   on user_profiles (lower(email));
 create unique index if not exists user_profiles_email_key
