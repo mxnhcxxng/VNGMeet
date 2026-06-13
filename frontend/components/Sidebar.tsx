@@ -1,32 +1,15 @@
 "use client";
 
+import { Dropdown } from "@heroui/react";
+import {
+  PencilToSquare,
+  LayoutHeaderCells,
+  Gear,
+  LayoutSideContentLeft,
+} from "@gravity-ui/icons";
 import type { ChatThread } from "@/lib/api";
 
 export type View = "browse" | "chat";
-
-const ITEMS: { key: View; label: string; icon: React.ReactNode }[] = [
-  {
-    key: "browse",
-    label: "Browse rooms",
-    icon: (
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-        <rect x="3" y="3" width="7" height="7" rx="1.5" />
-        <rect x="14" y="3" width="7" height="7" rx="1.5" />
-        <rect x="3" y="14" width="7" height="7" rx="1.5" />
-        <rect x="14" y="14" width="7" height="7" rx="1.5" />
-      </svg>
-    ),
-  },
-  {
-    key: "chat",
-    label: "Chat to book",
-    icon: (
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-      </svg>
-    ),
-  },
-];
 
 function initialsOf(name: string) {
   return name
@@ -36,6 +19,10 @@ function initialsOf(name: string) {
     .map((w) => w[0]?.toUpperCase() ?? "")
     .join("");
 }
+
+// Shared pill-button layout for the nav / setting rows (matches the design).
+const ROW =
+  "flex h-10 w-full items-center gap-2 rounded-full px-4 text-base font-medium text-[#18181b] transition-colors";
 
 export function Sidebar({
   view,
@@ -61,105 +48,108 @@ export function Sidebar({
   const email = display.includes("@") ? display : "";
 
   return (
-    <aside className="flex w-[280px] shrink-0 flex-col border-r border-[#e9eaeb] bg-white px-4 pb-5 pt-6">
-      {/* Brand */}
-      <div className="mb-6 flex items-center gap-2.5 px-2">
-        <div className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-gradient-to-br from-[#1570ef] to-[#6938ef] text-white shadow-sm">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4z" />
-          </svg>
+    <aside className="flex w-[280px] shrink-0 flex-col rounded-2xl bg-white shadow-sm">
+      {/* Brand + collapse */}
+      <div className="flex items-center justify-between px-5 pt-5">
+        <div className="flex items-center gap-[7.5px]">
+          <div
+            className="flex h-6 w-6 items-center justify-center rounded-lg text-white"
+            style={{ backgroundImage: "linear-gradient(225deg, #ff9f81 0%, #f2460e 100%)" }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M5 4v16M12 4v10M19 4v16" />
+            </svg>
+          </div>
+          <span className="text-[18px] font-bold leading-6 text-[#181d27]">VNG MEET</span>
         </div>
-        <span className="text-[17px] font-bold tracking-tight text-[#181d27]">VNG Meet</span>
+        <button
+          type="button"
+          aria-label="Thu gọn"
+          className="flex h-8 w-8 items-center justify-center rounded-2xl text-[#18181b] transition-colors hover:bg-[#f5f5f5]"
+        >
+          <LayoutSideContentLeft width={16} height={16} />
+        </button>
       </div>
 
-      {/* Nav */}
-      <nav className="flex flex-col gap-1">
-        {ITEMS.map((it) => {
-          const active = view === it.key;
-          return (
-            <button
-              key={it.key}
-              onClick={() => onChange(it.key)}
-              className={`flex items-center gap-3 rounded-md px-3 py-2 text-[15px] font-semibold transition-colors ${
-                active
-                  ? "bg-[#fafafa] text-[#252b37]"
-                  : "text-[#535862] hover:bg-[#fafafa] hover:text-[#252b37]"
-              }`}
-            >
-              <span className={active ? "text-[#414651]" : "text-[#717680]"}>{it.icon}</span>
-              {it.label}
-            </button>
-          );
-        })}
-      </nav>
-
-      <div className="mt-6 min-h-0 flex-1 border-t border-[#e9eaeb] pt-4">
+      {/* Primary nav */}
+      <div className="mt-5 flex flex-col gap-0.5 px-4">
         <button
+          type="button"
           onClick={() => {
             onChange("chat");
             onNewChat?.();
           }}
-          className="mb-3 flex w-full items-center gap-3 rounded-md px-3 py-2 text-[14px] font-semibold text-[#252b37] transition-colors hover:bg-[#fafafa]"
+          className={`${ROW} hover:bg-[#f5f5f5]`}
         >
-          <span className="text-[#717680]">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 5v14M5 12h14" />
-            </svg>
-          </span>
+          <PencilToSquare width={16} height={16} />
           New chat
         </button>
+        <button
+          type="button"
+          onClick={() => onChange("browse")}
+          className={`${ROW} ${view === "browse" ? "bg-[var(--default)]" : "hover:bg-[#f5f5f5]"}`}
+        >
+          <LayoutHeaderCells width={16} height={16} />
+          Browse Rooms
+        </button>
+      </div>
 
-        <div className="mb-2 px-3 text-xs font-semibold uppercase tracking-wide text-[#a4a7ae]">
-          Threads
-        </div>
-        <div className="max-h-[calc(100vh-270px)] space-y-1 overflow-y-auto pr-1">
+      {/* Recents (chat threads) */}
+      <div className="mt-3 flex min-h-0 flex-1 flex-col px-4">
+        <div className="px-3 pb-1 pt-3 text-xs font-medium text-[#71717a]">Recents</div>
+        <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto pr-1">
           {(chatThreads ?? []).map((thread) => {
             const active = view === "chat" && activeThreadId === thread.id;
             return (
               <button
                 key={thread.id}
+                type="button"
                 onClick={() => {
                   onChange("chat");
                   onSelectThread?.(thread.id);
                 }}
-                className={`block w-full truncate rounded-md px-3 py-2 text-left text-sm transition-colors ${
-                  active
-                    ? "bg-[#f5f5f5] font-semibold text-[#181d27]"
-                    : "text-[#535862] hover:bg-[#fafafa] hover:text-[#181d27]"
-                }`}
                 title={thread.title || "Chat mới"}
+                className={`flex h-10 w-full items-center rounded-full px-4 text-left text-sm font-medium text-[#18181b] transition-colors ${
+                  active ? "bg-[var(--default)]" : "hover:bg-[#f5f5f5]"
+                }`}
               >
-                {thread.title || "Chat mới"}
+                <span className="truncate">{thread.title || "Chat mới"}</span>
               </button>
             );
           })}
           {!(chatThreads ?? []).length && (
-            <div className="px-3 py-2 text-sm text-[#a4a7ae]">Chưa có thread</div>
+            <div className="px-4 py-2 text-sm text-[#a4a7ae]">Chưa có thread</div>
           )}
         </div>
       </div>
 
-      {/* User */}
-      <div className="mt-auto flex items-center gap-3 border-t border-[#e9eaeb] pt-4">
-        <div className="relative shrink-0">
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#f4f3ff] text-sm font-semibold text-[#5925dc]">
+      {/* Setting (account menu) + divider + user */}
+      <div className="flex flex-col gap-4 px-4 pb-5">
+        <Dropdown>
+          <Dropdown.Trigger className={`${ROW} justify-start !bg-transparent hover:!bg-[#f5f5f5]`}>
+            <Gear width={16} height={16} />
+            Setting
+          </Dropdown.Trigger>
+          <Dropdown.Popover>
+            <Dropdown.Menu>
+              <Dropdown.Item id="logout" onAction={onLogout}>
+                Đăng xuất
+              </Dropdown.Item>
+            </Dropdown.Menu>
+          </Dropdown.Popover>
+        </Dropdown>
+
+        <div className="h-px w-full bg-[#e9eaeb]" />
+
+        <div className="flex items-center gap-3 px-1 py-2">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#a5b4fc] to-[#7c3aed] text-sm font-semibold text-white">
             {initialsOf(display) || "U"}
           </div>
-          <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-white bg-[#17b26a]" />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-medium text-[#18181b]">{name}</p>
+            {email && <p className="truncate text-xs text-[#71717a]">{email}</p>}
+          </div>
         </div>
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold text-[#181d27]">{name}</p>
-          {email && <p className="truncate text-xs text-[#535862]">{email}</p>}
-        </div>
-        <button
-          onClick={onLogout}
-          title="Đăng xuất"
-          className="rounded-md p-2 text-[#717680] transition-colors hover:bg-[#fafafa] hover:text-[#181d27]"
-        >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />
-          </svg>
-        </button>
       </div>
     </aside>
   );

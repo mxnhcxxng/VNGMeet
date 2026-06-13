@@ -68,6 +68,7 @@ export interface Room {
   capacity_size?: "small" | "medium" | "large";
   zone?: string;
   office?: string;
+  thumbnail_link?: string;
 }
 
 export interface ScheduleRoom extends Room {

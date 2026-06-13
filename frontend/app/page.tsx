@@ -135,11 +135,11 @@ function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
           </div>
         </section>
 
-        <section className="relative min-h-[520px] overflow-hidden bg-[#111827] text-white lg:m-0 lg:rounded-bl-[88px]">
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(96,165,250,0.32),transparent_32%),radial-gradient(circle_at_80%_20%,rgba(34,197,94,0.2),transparent_28%),linear-gradient(135deg,#1f2937_0%,#111827_46%,#0f172a_100%)]" />
-          <div className="absolute inset-x-12 top-16 hidden h-px bg-white/20 sm:block" />
-          <div className="absolute right-14 top-16 hidden h-[calc(100%-8rem)] w-px bg-white/15 sm:block" />
-          <div className="absolute left-1/2 top-20 hidden h-72 w-72 -translate-x-1/2 rounded-full border border-white/10 sm:block" />
+        <section className="relative min-h-[520px] overflow-hidden bg-white text-default-900 lg:m-0 lg:border-l lg:border-default-200">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(21,112,239,0.06),transparent_32%),radial-gradient(circle_at_80%_20%,rgba(22,179,100,0.05),transparent_28%)]" />
+          <div className="absolute inset-x-12 top-16 hidden h-px bg-default-200 sm:block" />
+          <div className="absolute right-14 top-16 hidden h-[calc(100%-8rem)] w-px bg-default-200 sm:block" />
+          <div className="absolute left-1/2 top-20 hidden h-72 w-72 -translate-x-1/2 rounded-full border border-default-200 sm:block" />
 
           <div className="relative flex min-h-full flex-col justify-end px-6 py-10 sm:px-12 lg:px-20 lg:py-16">
             <div className="mb-10 max-w-2xl">
@@ -152,7 +152,7 @@ function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
               <h2 className="text-3xl font-bold leading-tight sm:text-4xl">
                 {currentStep.title}
               </h2>
-              <p className="mt-5 max-w-xl text-lg leading-8 text-white/75">
+              <p className="mt-5 max-w-xl text-lg leading-8 text-default-500">
                 {currentStep.description}
               </p>
 
@@ -289,7 +289,7 @@ function ProfileInfoScreen({
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-default-50 p-4">
+    <div className="flex min-h-screen items-center justify-center bg-white p-4">
       <Card className="w-full max-w-xl border border-default-200 shadow-xl">
         <Card.Content className="gap-6 p-8">
           <div>
@@ -311,6 +311,7 @@ function ProfileInfoScreen({
               <Input variant="secondary" value={emailUsername} />
             </TextField>
             <Select
+              variant="secondary"
               className="flex flex-col gap-2"
               placeholder="Chọn office"
               selectedKey={office || null}
@@ -334,6 +335,7 @@ function ProfileInfoScreen({
               </Select.Popover>
             </Select>
             <Select
+              variant="secondary"
               className="flex flex-col gap-2"
               placeholder="Chọn floor"
               selectedKey={floor || null}
@@ -357,6 +359,7 @@ function ProfileInfoScreen({
               </Select.Popover>
             </Select>
             <Select
+              variant="secondary"
               className="flex flex-col gap-2 sm:col-span-2"
               placeholder="Chọn building"
               selectedKey={building || null}
@@ -550,7 +553,7 @@ export default function Home() {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div className="flex h-screen gap-2 overflow-hidden bg-[#f0f0f1] p-2">
       <Sidebar
         view={view}
         onChange={setView}
@@ -562,7 +565,7 @@ export default function Home() {
         onSelectThread={setActiveThreadId}
       />
 
-      <main className="flex min-w-0 flex-1 flex-col bg-white">
+      <main className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-2xl bg-white shadow-sm">
         {error && (
           <div className="border-b border-danger-200 bg-danger-50 px-6 py-2 text-sm text-danger">
             {error}

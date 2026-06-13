@@ -9,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@gravity-ui/icons": "^2.18.0",
     "@heroui/react": "^3.1.0",
     "@supabase/supabase-js": "^2.47.10",
     "@tailwindcss/postcss": "^4.3.0",

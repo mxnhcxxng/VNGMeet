@@ -1,24 +1,31 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Button,
-  ButtonGroup,
+  Calendar,
   Card,
-  Chip,
   DateField,
-  ListBox,
-  ListBoxItem,
-  Select,
+  DatePicker,
+  SearchField,
   Spinner,
   Tabs,
   TimeField,
 } from "@heroui/react";
+import {
+  Calendar as CalendarIcon,
+  ChevronLeft,
+  ChevronRight,
+  ArrowsRotateRight,
+  Magnifier,
+} from "@gravity-ui/icons";
+import { I18nProvider } from "react-aria-components";
 import { parseDate, parseTime } from "@internationalized/date";
-import type { Room, ScheduleResponse } from "@/lib/api";
+import type { ScheduleResponse } from "@/lib/api";
 import { BookingModal, type BookingSlot } from "./BookingModal";
 
-const SLOT_H = 44; // px per slot row
+const SLOT_H = 48; // px per slot row (half hour → 96px per hour)
+const TIME_COL = 72; // px width of the left time-label column
 
 function addLabel(time: string, slotMinutes: number) {
   const [h, m] = time.split(":").map(Number);
@@ -26,76 +33,33 @@ function addLabel(time: string, slotMinutes: number) {
   return `${String(Math.floor(end / 60)).padStart(2, "0")}:${String(end % 60).padStart(2, "0")}`;
 }
 
-function hourLabel(t: string) {
-  const [h] = t.split(":").map(Number);
-  return `${String(h).padStart(2, "0")}:00`;
+/** ISO "2016-06-13" → "13/6/2016" (matches the toolbar date label). */
+function formatDmy(iso: string) {
+  const [y, m, d] = iso.split("-").map(Number);
+  return `${d}/${m}/${y}`;
 }
 
-const IconCalendar = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-    <rect x="3" y="4" width="18" height="18" rx="2" /><path d="M16 2v4M8 2v4M3 10h18" />
-  </svg>
-);
-const CAPACITY_SIZE_OPTIONS = [
-  { value: "small", label: "Nhỏ" },
-  { value: "medium", label: "Vừa" },
-  { value: "large", label: "Lớn" },
+// Event palettes lifted from the design's utility colour ramps.
+const EVENT_BOOKED = {
+  bg: "#fef3f2",
+  border: "#fecdca",
+  title: "#b42318",
+};
+const EVENT_MINE = {
+  bg: "#edfcf2",
+  border: "#aaf0c4",
+  title: "#087443",
+  time: "#099250",
+  dot: "#16b364",
+};
+
+// Fixed office tabs — `value` is the real filter value (matches room.office /
+// meeting_room_metadata), `label` is the display name.
+const OFFICES = [
+  { value: "campus", label: "Campus" },
+  { value: "sala", label: "Sala" },
+  { value: "tnr", label: "TNR" },
 ] as const;
-
-type CapacitySize = (typeof CAPACITY_SIZE_OPTIONS)[number]["value"];
-
-function capacitySizeFor(room: Room): CapacitySize | "" {
-  if (room.capacity_size) return room.capacity_size;
-  const capacity = room.capacity ?? 0;
-  if (capacity <= 0) return "";
-  if (capacity <= 4) return "small";
-  if (capacity >= 6 && capacity <= 8) return "medium";
-  if (capacity > 8) return "large";
-  return "";
-}
-
-/** Sentinel key for the "no filter" entry, since react-aria keys can't be "". */
-const FILTER_ALL_KEY = "__all__";
-
-/** Compact Hero UI dropdown to match the toolbar. */
-function FilterSelect({
-  label,
-  value,
-  onChange,
-  options,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  options: { value: string; label: string }[];
-}) {
-  return (
-    <Select
-      aria-label={label}
-      variant="secondary"
-      placeholder={label}
-      selectedKey={value || FILTER_ALL_KEY}
-      onSelectionChange={(key) =>
-        onChange(key === FILTER_ALL_KEY ? "" : (key as string))
-      }
-    >
-      <Select.Trigger>
-        <Select.Value />
-        <Select.Indicator />
-      </Select.Trigger>
-      <Select.Popover>
-        <ListBox>
-          <ListBoxItem id={FILTER_ALL_KEY}>{label}</ListBoxItem>
-          {options.map((o) => (
-            <ListBoxItem key={o.value} id={o.value}>
-              {o.label}
-            </ListBoxItem>
-          ))}
-        </ListBox>
-      </Select.Popover>
-    </Select>
-  );
-}
 
 export function BrowseRooms({
   data,
@@ -118,48 +82,28 @@ export function BrowseRooms({
   const [selectedSlot, setSelectedSlot] = useState<BookingSlot | null>(null);
   const [endOptions, setEndOptions] = useState<string[]>([]);
 
-  // Room metadata filters (sourced from meeting_room_metadata via the API).
-  const defaultOffice = userOffice ?? "";
+  // Office is picked via the tabs; rooms are further narrowed by a name search.
+  // Default to the user's work location, falling back to Campus.
+  const defaultOffice = userOffice || "campus";
   const [office, setOffice] = useState(defaultOffice);
-  const [capacitySize, setCapacitySize] = useState("");
+  const [query, setQuery] = useState("");
 
   useEffect(() => {
     setOffice(defaultOffice);
   }, [defaultOffice]);
 
-  // Distinct, sorted option lists derived from the rooms' metadata.
-  const opts = useMemo(() => {
-    const uniq = (vals: (string | undefined)[]) =>
-      [...new Set(vals.filter((v): v is string => !!v))].sort((a, b) =>
-        a.localeCompare(b)
-      );
-    const capacitySizes = new Set(
-      data.rooms.map(capacitySizeFor).filter((size): size is CapacitySize => !!size)
-    );
-    return {
-      offices: uniq(data.rooms.map((r) => r.office)),
-      capacitySizes: CAPACITY_SIZE_OPTIONS.filter((option) => capacitySizes.has(option.value)),
-    };
-  }, [data.rooms]);
-
-  const filtersActive = office !== defaultOffice || !!capacitySize;
-
   const rooms = useMemo(() => {
+    const q = query.trim().toLowerCase();
     return data.rooms.filter(
       (r) =>
         (!office || r.office === office) &&
-        (!capacitySize || capacitySizeFor(r) === capacitySize)
+        (!q || r.name.toLowerCase().includes(q))
     );
-  }, [data.rooms, office, capacitySize]);
-
-  const clearFilters = () => {
-    setOffice(defaultOffice);
-    setCapacitySize("");
-  };
+  }, [data.rooms, office, query]);
 
   const times = data.times;
   const slotMinutes = data.slotMinutes;
-  const cols = `64px repeat(${rooms.length}, minmax(160px, 1fr))`;
+  const cols = `${TIME_COL}px repeat(${rooms.length}, minmax(155px, 1fr))`;
   const dayStart = times[0] ?? "08:00";
   const dayEnd = addLabel(times[times.length - 1] ?? "17:30", slotMinutes);
 
@@ -189,8 +133,20 @@ export function BrowseRooms({
     return [...times.slice(ti + 1), lastEnd];
   }
 
-  function openBooking(roomEmail: string, roomName: string, t: string, ti: number) {
-    setSelectedSlot({ roomEmail, roomName, date: data.days[dayIndex], startTime: t });
+  function openBooking(
+    roomEmail: string,
+    roomName: string,
+    t: string,
+    ti: number,
+    thumbnail?: string
+  ) {
+    setSelectedSlot({
+      roomEmail,
+      roomName,
+      date: data.days[dayIndex],
+      startTime: t,
+      thumbnail,
+    });
     setEndOptions(endOptionsFor(ti));
     onOpen();
   }
@@ -200,160 +156,181 @@ export function BrowseRooms({
   const now = new Date();
   const todayIso = now.toISOString().slice(0, 10);
   const nowMinutes = now.getHours() * 60 + now.getMinutes();
+  const nowLabel = `${String(now.getHours()).padStart(2, "0")}:${String(
+    now.getMinutes()
+  ).padStart(2, "0")}`;
   const markerOffset = (nowMinutes / slotMinutes) * SLOT_H;
   const showMarker = data.days[dayIndex] === todayIso;
 
+  // Auto-scroll the grid so the "now" marker lands one block from the top —
+  // i.e. the block right before the one holding the green current-time line.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!showMarker) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    const nowBlock = Math.floor(nowMinutes / slotMinutes);
+    el.scrollTop = Math.max(0, (nowBlock - 1) * SLOT_H);
+  }, [showMarker, nowMinutes, slotMinutes, rooms.length]);
+
   return (
-    <div className="flex h-full flex-col bg-default-50">
+    <div className="flex h-full flex-col bg-white">
       {/* Office tabs */}
-      {opts.offices.length > 0 && (
-        <div className="border-b border-default-200 bg-white px-6 pt-3">
-          <Tabs
-            variant="secondary"
-            selectedKey={office || undefined}
-            onSelectionChange={(key) => setOffice(key as string)}
-          >
-            <Tabs.ListContainer>
-              <Tabs.List>
-                {opts.offices.map((o) => (
-                  <Tabs.Tab key={o} id={o} className="w-auto min-w-fit">
-                    {o}
-                    <Tabs.Indicator />
-                  </Tabs.Tab>
-                ))}
-              </Tabs.List>
-            </Tabs.ListContainer>
-          </Tabs>
-        </div>
-      )}
+      <div className="border-b border-[color:var(--separator)] bg-white px-6 pt-3">
+        <Tabs
+          variant="secondary"
+          selectedKey={office || undefined}
+          onSelectionChange={(key) => setOffice(key as string)}
+        >
+          <Tabs.ListContainer>
+            <Tabs.List>
+              {OFFICES.map((o) => (
+                <Tabs.Tab key={o.value} id={o.value} className="w-auto min-w-fit">
+                  {o.label}
+                  <Tabs.Indicator />
+                </Tabs.Tab>
+              ))}
+            </Tabs.List>
+          </Tabs.ListContainer>
+        </Tabs>
+      </div>
 
       {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-default-200 bg-white px-6 py-4">
-        <Button
-          variant={dayIndex === 0 ? "primary" : "secondary"}
-          onPress={() => setDayIndex(() => 0)}
-        >
+      <div className="flex flex-wrap items-center gap-3 border-b border-[color:var(--separator)] bg-white px-6 py-4">
+        <Button variant="tertiary" className="rounded-full" onPress={() => setDayIndex(() => 0)}>
           Today
         </Button>
 
-        <ButtonGroup variant="secondary">
-          <Button
-            isIconOnly
-            aria-label="Ngày trước"
-            isDisabled={dayIndex <= 0}
-            onPress={() => setDayIndex((n) => Math.max(0, n - 1))}
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M15 18l-6-6 6-6" />
-            </svg>
-          </Button>
-          <Button
-            isIconOnly
-            aria-label="Ngày sau"
-            isDisabled={dayIndex >= data.days.length - 1}
-            onPress={() => setDayIndex((n) => Math.min(data.days.length - 1, n + 1))}
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M9 18l6-6-6-6" />
-            </svg>
-          </Button>
-        </ButtonGroup>
+        {/* Day navigation + date picker, grouped into a single pill. */}
+        <I18nProvider locale="vi-VN">
+          <div className="inline-flex h-9 items-center overflow-hidden rounded-full bg-[var(--default)] text-[var(--foreground)]">
+            <button
+              type="button"
+              aria-label="Ngày trước"
+              disabled={dayIndex <= 0}
+              onClick={() => setDayIndex((n) => Math.max(0, n - 1))}
+              className="flex h-full w-9 items-center justify-center transition-colors hover:bg-[var(--default-hover)] disabled:opacity-40 disabled:hover:bg-transparent"
+            >
+              <ChevronLeft width={16} height={16} />
+            </button>
+            <span className="h-5 w-px bg-[var(--separator)]" />
+            <DatePicker
+              aria-label="Ngày"
+              value={parseDate(data.days[dayIndex])}
+              minValue={parseDate(data.days[0])}
+              maxValue={parseDate(data.days[data.days.length - 1])}
+              onChange={(date) => {
+                if (!date) return;
+                const idx = data.days.indexOf(date.toString());
+                if (idx >= 0) setDayIndex(() => idx);
+              }}
+            >
+              <DatePicker.Trigger className="flex h-9 items-center gap-2 px-4 text-sm font-medium outline-none transition-colors hover:bg-[var(--default-hover)]">
+                <CalendarIcon width={16} height={16} />
+                <span className="whitespace-nowrap">{formatDmy(data.days[dayIndex])}</span>
+              </DatePicker.Trigger>
+              <DatePicker.Popover className="!max-w-none w-fit">
+                <Calendar>
+                  <Calendar.Header>
+                    <Calendar.NavButton slot="previous" />
+                    <Calendar.Heading />
+                    <Calendar.NavButton slot="next" />
+                  </Calendar.Header>
+                  <Calendar.Grid>
+                    <Calendar.GridHeader>
+                      {(day) => <Calendar.HeaderCell>{day}</Calendar.HeaderCell>}
+                    </Calendar.GridHeader>
+                    <Calendar.GridBody>
+                      {(date) => <Calendar.Cell date={date} />}
+                    </Calendar.GridBody>
+                  </Calendar.Grid>
+                </Calendar>
+              </DatePicker.Popover>
+            </DatePicker>
+            <span className="h-5 w-px bg-[var(--separator)]" />
+            <button
+              type="button"
+              aria-label="Ngày sau"
+              disabled={dayIndex >= data.days.length - 1}
+              onClick={() => setDayIndex((n) => Math.min(data.days.length - 1, n + 1))}
+              className="flex h-full w-9 items-center justify-center transition-colors hover:bg-[var(--default-hover)] disabled:opacity-40 disabled:hover:bg-transparent"
+            >
+              <ChevronRight width={16} height={16} />
+            </button>
+          </div>
 
-        {/* Date field — navigates within the available schedule range */}
-        <DateField
-          aria-label="Ngày"
-          value={parseDate(data.days[dayIndex])}
-          minValue={parseDate(data.days[0])}
-          maxValue={parseDate(data.days[data.days.length - 1])}
-          onChange={(date) => {
-            if (!date) return;
-            const idx = data.days.indexOf(date.toString());
-            if (idx >= 0) setDayIndex(() => idx);
-          }}
-        >
-          <DateField.Group variant="secondary">
-            <DateField.Prefix>
-              <span className="text-default-500">
-                <IconCalendar />
-              </span>
-            </DateField.Prefix>
-            <DateField.Input>
-              {(segment) => <DateField.Segment segment={segment} />}
-            </DateField.Input>
-          </DateField.Group>
-        </DateField>
-
-        {/* Business-hours window */}
-        <TimeField aria-label="Giờ bắt đầu" value={parseTime(dayStart)} hourCycle={24} isReadOnly>
-          <TimeField.Group variant="secondary">
-            <TimeField.Input>
-              {(segment) => <TimeField.Segment segment={segment} />}
-            </TimeField.Input>
-          </TimeField.Group>
-        </TimeField>
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-default-400">
-          <path d="M5 12h14M13 6l6 6-6 6" />
-        </svg>
-        <TimeField aria-label="Giờ kết thúc" value={parseTime(dayEnd)} hourCycle={24} isReadOnly>
-          <TimeField.Group variant="secondary">
-            <TimeField.Input>
-              {(segment) => <TimeField.Segment segment={segment} />}
-            </TimeField.Input>
-          </TimeField.Group>
-        </TimeField>
-
-        {/* Capacity filter (office is selected via the tabs above) */}
-        {opts.capacitySizes.length > 0 && (
-          <FilterSelect
-            label="Sức chứa"
-            value={capacitySize}
-            onChange={setCapacitySize}
-            options={opts.capacitySizes}
-          />
-        )}
-        {filtersActive && (
-          <Button variant="ghost" onPress={clearFilters}>
-            Xóa lọc
-          </Button>
-        )}
+          {/* Business-hours window (read-only) */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-default-600">From</span>
+            <TimeField aria-label="Giờ bắt đầu" value={parseTime(dayStart)} hourCycle={24} isReadOnly>
+              <TimeField.Group variant="secondary">
+                <TimeField.Input>
+                  {(segment) => <TimeField.Segment segment={segment} />}
+                </TimeField.Input>
+              </TimeField.Group>
+            </TimeField>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-default-600">To</span>
+            <TimeField aria-label="Giờ kết thúc" value={parseTime(dayEnd)} hourCycle={24} isReadOnly>
+              <TimeField.Group variant="secondary">
+                <TimeField.Input>
+                  {(segment) => <TimeField.Segment segment={segment} />}
+                </TimeField.Input>
+              </TimeField.Group>
+            </TimeField>
+          </div>
+        </I18nProvider>
 
         <Button
-          variant="secondary"
+          isIconOnly
+          variant="tertiary"
+          aria-label="Làm mới"
+          className="rounded-full"
           onPress={onRefresh}
           isDisabled={refreshing}
-          className="ml-auto"
         >
-          {refreshing ? (
-            <Spinner size="sm" />
-          ) : (
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M23 4v6h-6M1 20v-6h6" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-            </svg>
-          )}
-          Làm mới
+          {refreshing ? <Spinner size="sm" /> : <ArrowsRotateRight width={16} height={16} />}
         </Button>
+
+        {/* Search rooms by name */}
+        <SearchField
+          aria-label="Tìm phòng"
+          variant="secondary"
+          value={query}
+          onChange={setQuery}
+          className="ml-auto w-[280px]"
+        >
+          <SearchField.Group>
+            <SearchField.SearchIcon>
+              <Magnifier width={16} height={16} />
+            </SearchField.SearchIcon>
+            <SearchField.Input placeholder="Search for rooms" />
+            <SearchField.ClearButton />
+          </SearchField.Group>
+        </SearchField>
       </div>
 
       {/* Calendar */}
-      <div className="flex-1 overflow-auto">
+      <div ref={scrollRef} className="flex-1 overflow-auto">
         {rooms.length === 0 ? (
           <div className="flex h-full items-center justify-center p-6">
-            <Card className="w-full max-w-md border border-default-200 bg-white text-center shadow-sm">
+            <Card className="w-full max-w-md border border-[color:var(--separator)] bg-white text-center shadow-sm">
               <Card.Content className="items-center gap-4 p-8">
                 <div className="flex h-12 w-12 items-center justify-center rounded-full bg-default-100 text-default-500">
-                  <IconCalendar />
+                  <CalendarIcon width={20} height={20} />
                 </div>
                 <div>
                   <h2 className="text-base font-semibold text-default-900">
                     Không có phòng phù hợp
                   </h2>
                   <p className="mt-1 text-sm text-default-500">
-                    Thử đổi văn phòng, sức chứa hoặc quay lại bộ lọc mặc định.
+                    Thử đổi văn phòng hoặc xóa từ khóa tìm kiếm.
                   </p>
                 </div>
-                {filtersActive && (
-                  <Button variant="secondary" onPress={clearFilters}>
-                    Xóa bộ lọc
+                {query && (
+                  <Button variant="secondary" onPress={() => setQuery("")}>
+                    Xóa tìm kiếm
                   </Button>
                 )}
               </Card.Content>
@@ -363,27 +340,21 @@ export function BrowseRooms({
           <div className="min-w-fit">
             {/* Room header */}
             <div
-              className="sticky top-0 z-20 grid border-b border-default-200 bg-white shadow-sm"
+              className="sticky top-0 z-20 grid border-b border-[color:var(--separator)] bg-white shadow-sm"
               style={{ gridTemplateColumns: cols }}
             >
-              <div className="sticky left-0 z-30 border-r border-default-200 bg-white" />
+              <div className="sticky left-0 z-30 border-r border-[color:var(--separator)] bg-white" />
               {rooms.map((r) => (
                 <div
                   key={r.email}
-                  className="border-r border-default-200 px-3 py-3 text-center"
+                  className="flex items-center justify-center border-r border-[color:var(--separator)] p-2"
                 >
-                  <p className="truncate text-sm font-semibold text-default-800" title={r.name}>
+                  <p
+                    className="truncate text-xs font-semibold text-default-700"
+                    title={r.name}
+                  >
                     {r.name}
                   </p>
-                  <div className="mt-1 flex justify-center">
-                    {r.capacity ? (
-                      <Chip size="sm" variant="soft">
-                        {r.capacity} người
-                      </Chip>
-                    ) : (
-                      <span className="h-6" />
-                    )}
-                  </div>
                 </div>
               ))}
             </div>
@@ -397,12 +368,12 @@ export function BrowseRooms({
                   <div key={t} className="grid" style={{ gridTemplateColumns: cols }}>
                     {/* time label (sticky to the left while scrolling) */}
                     <div
-                      className="sticky left-0 z-10 border-r border-default-200 bg-white"
+                      className="sticky left-0 z-10 border-r border-[color:var(--separator)] bg-white"
                       style={{ height: SLOT_H }}
                     >
                       {onHour && (
-                        <span className="absolute right-2 top-1 text-xs font-medium text-default-500">
-                          {hourLabel(t)}
+                        <span className="absolute right-2 top-1.5 text-xs font-medium text-default-500">
+                          {t}
                         </span>
                       )}
                     </div>
@@ -414,13 +385,10 @@ export function BrowseRooms({
                         <div
                           key={r.email}
                           aria-disabled
-                          className={`border-r border-default-200 ${
-                            onHour ? "border-t border-t-default-200" : "border-t border-t-default-100"
-                          }`}
+                          className="border-r border-t border-[color:var(--separator)]"
                           style={{
                             height: SLOT_H,
-                            backgroundColor: "var(--default)",
-                            opacity: 0.6,
+                            backgroundColor: "var(--background-secondary)",
                           }}
                         />
                       );
@@ -441,16 +409,14 @@ export function BrowseRooms({
                           key={r.email}
                           role="button"
                           tabIndex={0}
-                          onClick={() => openBooking(r.email, r.name, t, bi)}
+                          onClick={() => openBooking(r.email, r.name, t, bi, r.thumbnail_link)}
                           onKeyDown={(event) => {
                             if (event.key === "Enter" || event.key === " ") {
                               event.preventDefault();
-                              openBooking(r.email, r.name, t, bi);
+                              openBooking(r.email, r.name, t, bi, r.thumbnail_link);
                             }
                           }}
-                          className={`group cursor-pointer border-r border-default-200 bg-white px-1 outline-none transition-colors hover:bg-[var(--accent-soft)] hover:shadow-[inset_0_0_0_1px_var(--accent)] focus:bg-[var(--accent-soft)] focus:shadow-[inset_0_0_0_1px_var(--accent)] ${
-                            onHour ? "border-t border-t-default-200" : "border-t border-t-default-100"
-                          }`}
+                          className="group cursor-pointer border-r border-t border-[color:var(--separator)] bg-white px-1 outline-none transition-colors hover:bg-[var(--accent-soft)] hover:shadow-[inset_0_0_0_1px_var(--accent)] focus:bg-[var(--accent-soft)] focus:shadow-[inset_0_0_0_1px_var(--accent)]"
                           style={{ height: SLOT_H }}
                         >
                           <div className="flex h-full items-center justify-center">
@@ -462,39 +428,58 @@ export function BrowseRooms({
                       );
                     }
 
-                    // busy block (merged look across consecutive slots)
+                    // Busy block — styled as the design's event card, merged across
+                    // consecutive slots of the same status.
+                    const palette = myBooking ? EVENT_MINE : EVENT_BOOKED;
                     return (
                       <div
                         key={r.email}
-                        className={`border-r border-default-200 bg-white ${onHour && !prevBusy ? "border-t border-t-default-200" : ""}`}
+                        className="border-r border-t border-[color:var(--separator)] bg-white"
                         style={{ height: SLOT_H }}
                       >
                         <div
-                          className="h-full px-2"
-                          style={{
-                            backgroundColor: myBooking
-                              ? "var(--success-soft)"
-                              : "var(--danger-soft)",
-                            borderTopLeftRadius: prevBusy ? 0 : 8,
-                            borderTopRightRadius: prevBusy ? 0 : 8,
-                            borderBottomLeftRadius: nextBusy ? 0 : 8,
-                            borderBottomRightRadius: nextBusy ? 0 : 8,
-                          }}
+                          className="h-full px-1.5"
+                          style={{ paddingTop: prevBusy ? 0 : 6, paddingBottom: nextBusy ? 0 : 6 }}
                         >
-                          {!prevBusy && (
-                            <div className="pt-1.5">
-                              <p
-                                className="truncate text-xs font-semibold"
-                                style={{
-                                  color: myBooking
-                                    ? "var(--success-soft-foreground)"
-                                    : "var(--danger-soft-foreground)",
-                                }}
-                              >
-                                {myBooking ? "My booking" : "Booked"}
-                              </p>
-                            </div>
-                          )}
+                          <div
+                            className="h-full overflow-hidden px-2"
+                            style={{
+                              backgroundColor: palette.bg,
+                              borderLeft: `1px solid ${palette.border}`,
+                              borderRight: `1px solid ${palette.border}`,
+                              borderTop: prevBusy ? "none" : `1px solid ${palette.border}`,
+                              borderBottom: nextBusy ? "none" : `1px solid ${palette.border}`,
+                              borderTopLeftRadius: prevBusy ? 0 : 6,
+                              borderTopRightRadius: prevBusy ? 0 : 6,
+                              borderBottomLeftRadius: nextBusy ? 0 : 6,
+                              borderBottomRightRadius: nextBusy ? 0 : 6,
+                              paddingTop: prevBusy ? 0 : 6,
+                            }}
+                          >
+                            {!prevBusy && (
+                              <>
+                                <div className="flex items-start gap-1">
+                                  <p
+                                    className="flex-1 truncate text-xs font-semibold"
+                                    style={{ color: palette.title }}
+                                  >
+                                    {myBooking ? "My booking" : "Booked"}
+                                  </p>
+                                  {myBooking && (
+                                    <span
+                                      className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full"
+                                      style={{ backgroundColor: EVENT_MINE.dot }}
+                                    />
+                                  )}
+                                </div>
+                                {myBooking && (
+                                  <p className="truncate text-xs" style={{ color: EVENT_MINE.time }}>
+                                    {t}
+                                  </p>
+                                )}
+                              </>
+                            )}
+                          </div>
                         </div>
                       </div>
                     );
@@ -506,14 +491,31 @@ export function BrowseRooms({
             {/* Current-time marker */}
             {showMarker && (
               <div
-                className="pointer-events-none absolute left-0 right-0 z-20 flex items-center"
+                className="pointer-events-none absolute left-0 right-0 z-10 flex -translate-y-1/2 items-center"
                 style={{ top: markerOffset }}
               >
                 <span
-                  className="ml-[56px] h-2.5 w-2.5 -translate-y-1/2 rounded-full"
-                  style={{ backgroundColor: "var(--success)" }}
+                  className="flex shrink-0 justify-end pr-1.5"
+                  style={{ width: TIME_COL }}
+                >
+                  <span
+                    className="rounded-full px-2 py-0.5 text-xs font-semibold shadow-sm"
+                    style={{
+                      backgroundColor: "var(--accent)",
+                      color: "var(--accent-foreground)",
+                    }}
+                  >
+                    {nowLabel}
+                  </span>
+                </span>
+                <span
+                  className="-ml-1 h-2 w-2 shrink-0 rounded-full"
+                  style={{ backgroundColor: "var(--accent)" }}
                 />
-                <span className="h-0.5 flex-1" style={{ backgroundColor: "var(--success)" }} />
+                <span
+                  className="-ml-1 h-px flex-1"
+                  style={{ backgroundColor: "var(--accent)" }}
+                />
               </div>
             )}
           </div>

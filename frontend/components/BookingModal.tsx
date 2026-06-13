@@ -10,7 +10,6 @@ import {
   Select,
   TextArea,
   TextField,
-  Chip,
 } from "@heroui/react";
 import { api } from "@/lib/api";
 
@@ -19,38 +18,8 @@ export interface BookingSlot {
   roomName: string;
   date: string; // ISO "2026-06-11"
   startTime: string; // "09:00"
+  thumbnail?: string; // meeting_room_metadata.thumbnail_link
 }
-
-function fmtDate(iso: string) {
-  const d = new Date(iso + "T00:00:00");
-  return d.toLocaleDateString("vi-VN", {
-    weekday: "long",
-    day: "2-digit",
-    month: "long",
-    year: "numeric",
-  });
-}
-
-const IconCalendar = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-    <rect x="3" y="4" width="18" height="18" rx="2" /><path d="M16 2v4M8 2v4M3 10h18" />
-  </svg>
-);
-const IconClock = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-    <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" />
-  </svg>
-);
-const IconTitle = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-    <path d="M4 7V5h16v2M9 19h6M12 5v14" />
-  </svg>
-);
-const IconUsers = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-    <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
-  </svg>
-);
 
 export function BookingModal({
   isOpen,
@@ -131,105 +100,110 @@ export function BookingModal({
     }
   };
 
+  const req = <span className="text-danger">*</span>;
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-2xl overflow-hidden rounded-2xl bg-white shadow-2xl">
-        {/* Gradient header */}
-        <div className="bg-gradient-to-br from-primary to-secondary px-6 py-5">
-          <div className="flex items-center gap-4">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-white/20 text-lg font-bold text-default-900 backdrop-blur">
-              {initials}
-            </div>
-            <div className="min-w-0">
-              <p className="text-xs uppercase tracking-wide text-default-500">Đặt phòng</p>
-              <h2 className="truncate text-lg font-bold text-default-900">{slot.roomName}</h2>
-              <p className="truncate text-xs text-default-500">{slot.roomEmail}</p>
-            </div>
-          </div>
-          <div className="mt-4 flex flex-wrap gap-2">
-            <Chip
-              size="sm"
-              variant="soft"
-            >
-              {fmtDate(slot.date)}
-            </Chip>
-            <Chip
-              size="sm"
-              variant="soft"
-            >
-              {slot.startTime} – {endTime || "…"}
-            </Chip>
+      <div className="flex w-full max-w-[800px] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+        {/* Room thumbnail (meeting_room_metadata.thumbnail_link) */}
+        <div className="px-6 pt-6">
+          <div className="h-[120px] w-full overflow-hidden rounded-lg bg-default-100">
+            {slot.thumbnail ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={slot.thumbnail}
+                alt={slot.roomName}
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-primary to-secondary text-2xl font-bold text-white">
+                {initials}
+              </div>
+            )}
           </div>
         </div>
 
-        <div className="grid gap-4 px-6 py-5">
-          <TextField fullWidth>
-            <Label>Tiêu đề cuộc họp</Label>
+        {/* Room name + email */}
+        <div className="px-6 pb-5 pt-6">
+          <h2 className="text-base font-semibold text-default-900">{slot.roomName}</h2>
+          <p className="text-sm text-default-500">{slot.roomEmail}</p>
+        </div>
+
+        {/* Form */}
+        <div className="grid gap-4 px-6">
+          <TextField fullWidth isRequired>
+            <Label>Meeting Title</Label>
             <Input
               variant="secondary"
-              placeholder="VD: Họp team sprint planning"
+              placeholder="Meeting title"
               value={subject}
               onChange={(event) => setSubject(event.target.value)}
             />
           </TextField>
 
-          <Select
-            variant="secondary"
-            selectedKey={endTime || null}
-            onSelectionChange={(key) => setEndTime((key as string) ?? "")}
-          >
-            <Label>Giờ kết thúc</Label>
-            <Select.Trigger>
-              <Select.Value />
-              <Select.Indicator />
-            </Select.Trigger>
-            <Select.Popover>
-              <ListBox>
-                {endOptions.map((t) => (
-                  <ListBoxItem key={t} id={t}>
-                    {t}
-                  </ListBoxItem>
-                ))}
-              </ListBox>
-            </Select.Popover>
-          </Select>
+          <div className="grid grid-cols-2 gap-4">
+            <TextField fullWidth isDisabled>
+              <Label>Start time {req}</Label>
+              <Input variant="secondary" value={slot.startTime} readOnly />
+            </TextField>
+
+            <Select
+              variant="secondary"
+              selectedKey={endTime || null}
+              onSelectionChange={(key) => setEndTime((key as string) ?? "")}
+            >
+              <Label>End time {req}</Label>
+              <Select.Trigger>
+                <Select.Value />
+                <Select.Indicator />
+              </Select.Trigger>
+              <Select.Popover>
+                <ListBox>
+                  {endOptions.map((t) => (
+                    <ListBoxItem key={t} id={t}>
+                      {t}
+                    </ListBoxItem>
+                  ))}
+                </ListBox>
+              </Select.Popover>
+            </Select>
+          </div>
 
           <TextField fullWidth>
-            <Label>Người tham dự</Label>
+            <Label>Attendees</Label>
             <Input
               variant="secondary"
-              placeholder="email1@vng.com, email2@vng.com"
+              placeholder='Invite required attendees, separate by a comma ","'
               value={attendees}
               onChange={(event) => setAttendees(event.target.value)}
             />
           </TextField>
 
           <TextField fullWidth>
-            <Label>Nội dung cuộc họp</Label>
+            <Label>Description</Label>
             <TextArea
               variant="secondary"
-              placeholder="Nội dung cuộc họp (tùy chọn)"
+              placeholder="Meeting description"
               value={notes}
               onChange={(event) => setNotes(event.target.value)}
             />
           </TextField>
 
-          {error && (
-            <Chip color="danger" variant="soft" size="sm">
-              {error}
-            </Chip>
-          )}
+          {error && <p className="text-sm text-danger">{error}</p>}
         </div>
 
-        <div className="flex justify-end gap-3 border-t border-default-100 px-6 py-4">
-          <Button variant="ghost" onPress={onClose} isDisabled={loading}>
-            Hủy
-          </Button>
+        {/* Buttons */}
+        <div className="flex items-center justify-center gap-2 px-6 pb-6 pt-8">
           <Button
-            onPress={submit}
-            isPending={loading}
+            variant="tertiary"
+            className="flex-1 rounded-full"
+            onPress={onClose}
+            isDisabled={loading}
           >
-            Đặt phòng
+            Cancel
+          </Button>
+          <Button className="flex-1 rounded-full" onPress={submit} isPending={loading}>
+            Book
           </Button>
         </div>
       </div>
