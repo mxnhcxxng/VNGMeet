@@ -686,21 +686,28 @@ export function ChatPanel({
             placeholder="Describe your meeting requirements..."
             className="block max-h-[200px] min-h-[52px] w-full flex-1 resize-none bg-transparent px-1 py-1.5 text-sm leading-6 text-[#181d27] outline-none placeholder:text-[#a4a7ae]"
             onKeyDown={(e) => {
+              // Ignore Enter while an IME composition is active (Vietnamese / CJK
+              // input methods on macOS, etc.). The Enter that commits the
+              // composition would otherwise send the message early and leave the
+              // just-committed syllable (e.g. "không") behind in the input.
+              if (e.nativeEvent.isComposing || e.keyCode === 229) return;
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
                 send();
               }
             }}
           />
-          <button
-            type="button"
+          <Button
+            isIconOnly
+            variant="primary"
             aria-label="Send"
-            disabled={!input.trim() || sending}
-            onClick={() => send()}
-            className="flex size-10 shrink-0 items-center justify-center rounded-full bg-[#f5f5f5] text-[#252b37] transition hover:bg-[#ebebed] disabled:cursor-not-allowed disabled:opacity-40"
+            className="size-10 shrink-0 rounded-full"
+            isDisabled={!input.trim()}
+            isPending={sending}
+            onPress={() => send()}
           >
-            {sending ? <Spinner size="sm" /> : <PaperPlane width={18} />}
-          </button>
+            <PaperPlane width={18} />
+          </Button>
         </div>
       </div>
     </div>
