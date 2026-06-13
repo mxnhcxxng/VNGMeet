@@ -34,7 +34,7 @@ import { BrowseRooms } from "@/components/BrowseRooms";
 import { ChatPanel } from "@/components/ChatPanel";
 
 // Keep the browse range aligned with backend availability_days.
-const RANGE_DAYS = 15;
+const RANGE_DAYS = 18;
 const GRAPH_EXPLORER_URL =
   "https://developer.microsoft.com/en-us/graph/graph-explorer";
 

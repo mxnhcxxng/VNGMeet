@@ -138,7 +138,8 @@ export function BrowseRooms({
     roomName: string,
     t: string,
     ti: number,
-    thumbnail?: string
+    thumbnail?: string,
+    schedule?: boolean
   ) {
     setSelectedSlot({
       roomEmail,
@@ -146,6 +147,7 @@ export function BrowseRooms({
       date: data.days[dayIndex],
       startTime: t,
       thumbnail,
+      schedule,
     });
     setEndOptions(endOptionsFor(ti));
     onOpen();
@@ -396,8 +398,11 @@ export function BrowseRooms({
                     }
 
                     const status = r.grid[bi]?.[dayIndex] ?? 0;
-                    const free = status === 0;
-                    const myBooking = status === 2;
+                    // Schedule days (status 3/4/5) sit beyond the live Graph
+                    // window — bookings there are "schedule" bookings.
+                    const schedule = status >= 3;
+                    const free = status === 0 || status === 3;
+                    const myBooking = status === 2 || status === 5;
                     const prevBusy =
                       bi > 0 && (r.grid[bi - 1]?.[dayIndex] ?? 0) === status;
                     const nextBusy =
@@ -410,11 +415,11 @@ export function BrowseRooms({
                           key={r.email}
                           role="button"
                           tabIndex={0}
-                          onClick={() => openBooking(r.email, r.name, t, bi, r.thumbnail_link)}
+                          onClick={() => openBooking(r.email, r.name, t, bi, r.thumbnail_link, schedule)}
                           onKeyDown={(event) => {
                             if (event.key === "Enter" || event.key === " ") {
                               event.preventDefault();
-                              openBooking(r.email, r.name, t, bi, r.thumbnail_link);
+                              openBooking(r.email, r.name, t, bi, r.thumbnail_link, schedule);
                             }
                           }}
                           className="group cursor-pointer border-r border-t border-[color:var(--separator)] bg-white px-1 outline-none transition-colors hover:bg-[var(--accent-soft)] hover:shadow-[inset_0_0_0_1px_var(--accent)] focus:bg-[var(--accent-soft)] focus:shadow-[inset_0_0_0_1px_var(--accent)]"
@@ -422,7 +427,7 @@ export function BrowseRooms({
                         >
                           <div className="flex h-full items-center justify-center">
                             <span className="rounded-md px-2 py-0.5 text-xs font-semibold text-transparent transition-colors group-hover:bg-[var(--accent)] group-hover:text-[var(--accent-foreground)] group-focus:bg-[var(--accent)] group-focus:text-[var(--accent-foreground)]">
-                              + Book
+                              {schedule ? "+ Schedule Book" : "+ Book"}
                             </span>
                           </div>
                         </div>
@@ -464,7 +469,13 @@ export function BrowseRooms({
                                     className="flex-1 truncate text-xs font-semibold"
                                     style={{ color: palette.title }}
                                   >
-                                    {myBooking ? "My booking" : "Booked"}
+                                    {myBooking
+                                      ? schedule
+                                        ? "Your schedule"
+                                        : "My booking"
+                                      : schedule
+                                        ? "Scheduled"
+                                        : "Booked"}
                                   </p>
                                   {myBooking && (
                                     <span

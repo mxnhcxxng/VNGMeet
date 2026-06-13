@@ -74,7 +74,10 @@ export interface Room {
 }
 
 export interface ScheduleRoom extends Room {
-  grid: Array<Array<0 | 1 | 2>>; // 0 free, 1 busy, 2 your booking
+  // Instant days: 0 free, 1 busy, 2 your booking.
+  // Schedule days (room_availability slots still seeded at -1, i.e. beyond the
+  // live Graph window): 3 free/schedule-bookable, 4 scheduled by other, 5 your scheduled.
+  grid: Array<Array<0 | 1 | 2 | 3 | 4 | 5>>;
 }
 
 export interface ScheduleResponse {

@@ -19,6 +19,7 @@ export interface BookingSlot {
   date: string; // ISO "2026-06-11"
   startTime: string; // "09:00"
   thumbnail?: string; // meeting_room_metadata.thumbnail_link
+  schedule?: boolean; // day is beyond the live window → a schedule booking, not instant
 }
 
 export function BookingModal({
@@ -75,7 +76,7 @@ export function BookingModal({
         date: slot.date,
         start_time: slot.startTime,
         end_time: endTime,
-        booking_type: "instant",
+        booking_type: slot.schedule ? "schedule" : "instant",
         method: "manual",
         subject: subject.trim(),
         attendees: attendees

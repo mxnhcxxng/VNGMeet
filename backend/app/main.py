@@ -841,6 +841,12 @@ async def availability_grid(
             row = cache.get((r["id"], day))
             slots = row.get("slots") if row else []
             slot_owner_ids = row.get("slot_owner_ids") if row else []
+            # A day still holding seeded -1 slots hasn't been refreshed from Graph
+            # yet (it's beyond the live-availability window). Bookings made there
+            # are "schedule" bookings, so the grid uses a distinct status band:
+            #   3 = free / schedule-bookable, 4 = scheduled by someone else,
+            #   5 = your scheduled. Instant days keep 0/1/2.
+            schedule_day = any(s == -1 for s in slots)
             for ti, start in enumerate(base_idx):
                 owner_profile_id = next(
                     (
@@ -856,12 +862,22 @@ async def availability_grid(
                     if owner_profile_id
                     else None
                 )
-                busy = any(
-                    start + k < len(slots) and slots[start + k] != 0
-                    for k in range(sub_per_slot)
-                )
                 is_your_booking = bool(owner_email and owner_email == current_user_email)
-                final_value = 2 if is_your_booking else (1 if owner_profile_id or busy else 0)
+                if schedule_day:
+                    # No Graph busy data here; only app schedule bookings (tracked
+                    # via slot_owner_ids) occupy slots. Everything else is bookable.
+                    if is_your_booking:
+                        final_value = 5
+                    elif owner_profile_id:
+                        final_value = 4
+                    else:
+                        final_value = 3
+                else:
+                    busy = any(
+                        start + k < len(slots) and slots[start + k] != 0
+                        for k in range(sub_per_slot)
+                    )
+                    final_value = 2 if is_your_booking else (1 if owner_profile_id or busy else 0)
                 api_grid[ti][di] = final_value
         out_rooms.append({**r, "grid": api_grid})
 
