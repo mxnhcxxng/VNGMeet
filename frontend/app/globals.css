@@ -26,3 +26,24 @@ body {
 .auth-caption-in {
   animation: auth-caption-in 0.5s cubic-bezier(0.16, 1, 0.3, 1);
 }
+
+@keyframes typing-dot {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.35;
+  }
+  30% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
+}
+
+.typing-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background-color: #717680;
+  animation: typing-dot 1.2s infinite ease-in-out both;
+}

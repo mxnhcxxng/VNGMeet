@@ -1,21 +1,127 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import remarkBreaks from "remark-breaks";
 import {
+  Avatar,
   Button,
   Chip,
   Input,
   Label,
+  ScrollShadow,
   Spinner,
   TextArea,
   TextField,
+  Tooltip,
 } from "@heroui/react";
+import {
+  ArrowDown,
+  Check,
+  Copy,
+  PaperPlane,
+  Sparkles,
+  ThumbsDown,
+  ThumbsUp,
+} from "@gravity-ui/icons";
 import { api, type BookingRequest, type ChatMessage, type ChatThread } from "@/lib/api";
 
-function bubbleClass(role: ChatMessage["role"]) {
-  return role === "user"
-    ? "bg-[#181d27] text-white"
-    : "bg-[#f5f5f5] text-[#181d27]";
+const SUGGESTIONS = [
+  "I need a room for 6 people from 2 to 4 this afternoon",
+  "Book a room for tomorrow's team meeting",
+  "Show available rooms close to my location",
+  "Find a room for a 10-person review session next week",
+];
+
+function TypingDots() {
+  return (
+    <div className="flex items-center gap-1 py-1.5" aria-label="Đang soạn trả lời">
+      <span className="typing-dot" style={{ animationDelay: "0ms" }} />
+      <span className="typing-dot" style={{ animationDelay: "150ms" }} />
+      <span className="typing-dot" style={{ animationDelay: "300ms" }} />
+    </div>
+  );
+}
+
+function MarkdownMessage({ content }: { content: string }) {
+  return (
+    <div className="text-sm leading-7 text-[#252b37]">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm, remarkBreaks]}
+        components={{
+          p: ({ children }) => <p className="mb-3 last:mb-0">{children}</p>,
+          strong: ({ children }) => (
+            <strong className="font-semibold text-[#181d27]">{children}</strong>
+          ),
+          em: ({ children }) => <em className="italic">{children}</em>,
+          a: ({ children, href }) => (
+            <a
+              href={href}
+              target="_blank"
+              rel="noreferrer"
+              className="font-medium text-[#175cd3] underline underline-offset-2 hover:text-[#1449a3]"
+            >
+              {children}
+            </a>
+          ),
+          ul: ({ children }) => (
+            <ul className="mb-3 list-disc space-y-1 pl-5 last:mb-0">{children}</ul>
+          ),
+          ol: ({ children }) => (
+            <ol className="mb-3 list-decimal space-y-1 pl-5 last:mb-0">{children}</ol>
+          ),
+          li: ({ children }) => <li className="leading-7">{children}</li>,
+          h1: ({ children }) => (
+            <h1 className="mb-2 mt-1 text-lg font-semibold text-[#181d27]">{children}</h1>
+          ),
+          h2: ({ children }) => (
+            <h2 className="mb-2 mt-1 text-base font-semibold text-[#181d27]">{children}</h2>
+          ),
+          h3: ({ children }) => (
+            <h3 className="mb-1 mt-1 text-sm font-semibold text-[#181d27]">{children}</h3>
+          ),
+          blockquote: ({ children }) => (
+            <blockquote className="mb-3 border-l-2 border-[#e9eaeb] pl-3 text-[#535862] last:mb-0">
+              {children}
+            </blockquote>
+          ),
+          code: ({ className, children }) => {
+            const text = String(children);
+            const isBlock = /language-/.test(className ?? "") || text.includes("\n");
+            return isBlock ? (
+              <code className="font-mono text-[13px]">{children}</code>
+            ) : (
+              <code className="rounded bg-[#f0f0f1] px-1.5 py-0.5 font-mono text-[13px] text-[#181d27]">
+                {children}
+              </code>
+            );
+          },
+          pre: ({ children }) => (
+            <pre className="mb-3 overflow-x-auto rounded-lg bg-[#f5f5f5] p-3 leading-6 last:mb-0">
+              {children}
+            </pre>
+          ),
+          hr: () => <hr className="my-3 border-[#e9eaeb]" />,
+          table: ({ children }) => (
+            <div className="mb-3 overflow-x-auto last:mb-0">
+              <table className="w-full border-collapse text-sm">{children}</table>
+            </div>
+          ),
+          th: ({ children }) => (
+            <th className="border border-[#e9eaeb] bg-[#f9f9fa] px-3 py-1.5 text-left font-semibold">
+              {children}
+            </th>
+          ),
+          td: ({ children }) => (
+            <td className="border border-[#e9eaeb] px-3 py-1.5">{children}</td>
+          ),
+        }}
+      >
+        {content}
+      </ReactMarkdown>
+    </div>
+  );
 }
 
 type PendingBooking = {
@@ -153,20 +259,22 @@ function BookingConfirmationCard({
   };
 
   return (
-    <div className="mt-3 w-full rounded-lg border border-[#b2ddff] bg-white p-3 text-[#181d27] shadow-sm">
+    <div className="mt-3 w-full max-w-md rounded-2xl border border-[#e9eaeb] bg-white p-4 shadow-sm">
       <div className="mb-3 flex items-center justify-between gap-3">
         <div>
-          <div className="text-sm font-semibold">Xác nhận đặt phòng</div>
-          <div className="text-xs text-[#535862]">Kiểm tra và chỉnh thông tin trước khi book.</div>
+          <div className="text-sm font-semibold text-[#181d27]">Xác nhận đặt phòng</div>
+          <div className="text-xs text-[#535862]">
+            Kiểm tra và chỉnh thông tin trước khi book.
+          </div>
         </div>
         {actioned && (
-          <Chip size="sm" color="success" variant="secondary">
+          <Chip size="sm" color="success" variant="soft">
             Đã xử lý
           </Chip>
         )}
       </div>
       {localError && (
-        <Chip size="sm" color="danger" variant="secondary" className="mb-3">
+        <Chip size="sm" color="danger" variant="soft" className="mb-3">
           {localError}
         </Chip>
       )}
@@ -255,6 +363,85 @@ function BookingConfirmationCard({
   );
 }
 
+function ActionIconButton({
+  label,
+  onPress,
+  isActive,
+  children,
+}: {
+  label: string;
+  onPress: () => void;
+  isActive?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <Tooltip>
+      <Tooltip.Trigger>
+        <Button
+          isIconOnly
+          size="sm"
+          variant="ghost"
+          aria-label={label}
+          onPress={onPress}
+          className={`size-7 rounded-lg ${
+            isActive ? "text-[#175cd3]" : "text-[#a4a7ae] hover:text-[#414651]"
+          }`}
+        >
+          {children}
+        </Button>
+      </Tooltip.Trigger>
+      <Tooltip.Content>{label}</Tooltip.Content>
+    </Tooltip>
+  );
+}
+
+function AssistantActions({ content }: { content: string }) {
+  const [copied, setCopied] = useState(false);
+  const [vote, setVote] = useState<"up" | "down" | null>(null);
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard unavailable */
+    }
+  };
+
+  return (
+    <div className="mt-1 flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+      <ActionIconButton label={copied ? "Đã copy" : "Copy"} onPress={copy}>
+        {copied ? <Check width={15} /> : <Copy width={15} />}
+      </ActionIconButton>
+      <ActionIconButton
+        label="Hữu ích"
+        onPress={() => setVote((v) => (v === "up" ? null : "up"))}
+        isActive={vote === "up"}
+      >
+        <ThumbsUp width={15} />
+      </ActionIconButton>
+      <ActionIconButton
+        label="Chưa tốt"
+        onPress={() => setVote((v) => (v === "down" ? null : "down"))}
+        isActive={vote === "down"}
+      >
+        <ThumbsDown width={15} />
+      </ActionIconButton>
+    </div>
+  );
+}
+
+function AssistantAvatar() {
+  return (
+    <Avatar size="sm" color="accent" className="mt-0.5 shrink-0">
+      <Avatar.Fallback color="accent">
+        <Sparkles width={16} />
+      </Avatar.Fallback>
+    </Avatar>
+  );
+}
+
 export function ChatPanel({
   threadId,
   onThreadSelected,
@@ -269,7 +456,10 @@ export function ChatPanel({
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showScrollDown, setShowScrollDown] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     let alive = true;
@@ -300,6 +490,17 @@ export function ChatPanel({
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length, sending]);
 
+  const onScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    setShowScrollDown(distanceFromBottom > 160);
+  };
+
+  const scrollToBottom = () => {
+    endRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
   const refreshThreads = async () => {
     try {
       const res = await api.chatThreads();
@@ -316,10 +517,15 @@ export function ChatPanel({
     refreshThreads();
   };
 
-  const send = async () => {
-    const content = input.trim();
+  const resetTextareaHeight = () => {
+    if (textareaRef.current) textareaRef.current.style.height = "auto";
+  };
+
+  const send = async (override?: string) => {
+    const content = (override ?? input).trim();
     if (!content || sending) return;
     setInput("");
+    resetTextareaHeight();
     setError(null);
     setSending(true);
     const optimistic: ChatMessage = {
@@ -346,117 +552,155 @@ export function ChatPanel({
     }
   };
 
+  const pickSuggestion = (text: string) => {
+    setInput(text);
+    textareaRef.current?.focus();
+  };
+
   const empty = !threadId && messages.length === 0 && !sending;
 
   return (
-    <div className="mx-auto flex h-full w-full max-w-3xl flex-col px-5 py-6">
-      {error && (
-        <Chip color="danger" variant="secondary" size="sm" className="mb-3 self-start">
-          {error}
-        </Chip>
-      )}
+    <div className="flex h-full w-full flex-col">
+      <ScrollShadow
+        ref={scrollRef}
+        onScroll={onScroll}
+        hideScrollBar
+        className="min-h-0 flex-1 overflow-y-auto"
+      >
+        <div className="mx-auto w-full max-w-3xl px-5 py-6">
+          {error && (
+            <Chip color="danger" variant="soft" size="sm" className="mb-4 self-start">
+              {error}
+            </Chip>
+          )}
 
-      <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-        {loading ? (
-          <div className="flex h-full flex-col items-center justify-center gap-3">
-            <Spinner />
-            <span className="text-sm text-[#535862]">Đang tải chat...</span>
-          </div>
-        ) : empty ? (
-          <div className="flex h-full flex-col items-center justify-center text-center">
-            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-[#eff8ff] text-[#175cd3]">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 15a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-              </svg>
+          {loading ? (
+            <div className="flex h-[60vh] flex-col items-center justify-center gap-3">
+              <Spinner />
+              <span className="text-sm text-[#535862]">Đang tải chat...</span>
             </div>
-            <h1 className="text-2xl font-semibold tracking-tight text-[#181d27]">
-              Bạn muốn đặt phòng lúc nào?
-            </h1>
-            <p className="mt-2 max-w-md text-sm text-[#535862]">
-              Nói ngày, giờ, số người và khu vực. Mình sẽ kiểm tra phòng trống trước khi đặt.
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-5 pb-4">
-            {messages.map((message) => {
-              const pending = pendingBookingFromMessage(message);
-              const action = pending
-                ? actionStatusByConfirmation(messages, pending.confirmationId)
-                : null;
-              const actioned = Boolean(
-                action && (action.action === "reject" || action.status === "ok")
-              );
-              return (
-                <div
-                  key={message.id}
-                  className={`flex gap-3 ${message.role === "user" ? "flex-row-reverse" : ""}`}
-                >
-                  <div
-                    className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${
-                      message.role === "assistant"
-                        ? "bg-[#175cd3] text-white"
-                        : "bg-[#f5f5f5] text-[#414651]"
-                    }`}
+          ) : empty ? (
+            <div className="flex h-[60vh] flex-col items-center justify-center text-center">
+              <Avatar size="lg" color="accent" className="mb-5">
+                <Avatar.Fallback color="accent">
+                  <Sparkles width={24} />
+                </Avatar.Fallback>
+              </Avatar>
+              <h1 className="text-2xl font-semibold tracking-tight text-[#181d27]">
+                When would you like to book a room?
+              </h1>
+              <p className="mt-2 max-w-md text-sm text-[#535862]">
+                Describe your meeting and I&apos;ll suggest the best available rooms.
+              </p>
+              <div className="mt-8 grid w-full max-w-xl gap-2 sm:grid-cols-2">
+                {SUGGESTIONS.map((text) => (
+                  <button
+                    key={text}
+                    type="button"
+                    onClick={() => pickSuggestion(text)}
+                    className="rounded-xl border border-[#e9eaeb] bg-white px-4 py-3 text-left text-sm text-[#414651] transition hover:border-[#d5d7da] hover:bg-[#f9f9fa]"
                   >
-                    {message.role === "user" ? "Bạn" : "AI"}
-                  </div>
-                  <div className="max-w-[82%]">
-                    <div
-                      className={`whitespace-pre-line rounded-lg px-4 py-3 text-sm leading-6 ${bubbleClass(message.role)}`}
-                    >
-                      {message.content}
-                    </div>
-                    {pending && (
-                      <BookingConfirmationCard
-                        pending={pending}
-                        threadId={threadId}
-                        actioned={actioned}
-                        onActionMessage={appendActionMessage}
-                      />
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-            {sending && (
-              <div className="flex gap-3">
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#175cd3] text-xs font-semibold text-white">
-                  AI
-                </div>
-                <div className="rounded-lg bg-[#f5f5f5] px-4 py-3 text-sm text-[#535862]">
-                  Đang kiểm tra...
-                </div>
+                    {text}
+                  </button>
+                ))}
               </div>
-            )}
-            <div ref={endRef} />
+            </div>
+          ) : (
+            <div className="space-y-6 pb-4">
+              {messages.map((message) => {
+                const pending = pendingBookingFromMessage(message);
+                const action = pending
+                  ? actionStatusByConfirmation(messages, pending.confirmationId)
+                  : null;
+                const actioned = Boolean(
+                  action && (action.action === "reject" || action.status === "ok")
+                );
+
+                if (message.role === "user") {
+                  return (
+                    <div key={message.id} className="flex justify-end">
+                      <div className="max-w-[80%] whitespace-pre-line rounded-2xl rounded-br-md bg-[#f5f5f5] px-4 py-2.5 text-sm leading-6 text-[#181d27]">
+                        {message.content}
+                      </div>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div key={message.id} className="group flex gap-3">
+                    <AssistantAvatar />
+                    <div className="min-w-0 flex-1">
+                      {message.content.trim() && <MarkdownMessage content={message.content} />}
+                      {pending && (
+                        <BookingConfirmationCard
+                          pending={pending}
+                          threadId={threadId}
+                          actioned={actioned}
+                          onActionMessage={appendActionMessage}
+                        />
+                      )}
+                      {message.content.trim() && <AssistantActions content={message.content} />}
+                    </div>
+                  </div>
+                );
+              })}
+              {sending && (
+                <div className="flex gap-3">
+                  <AssistantAvatar />
+                  <TypingDots />
+                </div>
+              )}
+              <div ref={endRef} />
+            </div>
+          )}
+        </div>
+      </ScrollShadow>
+
+      <div className="relative mx-auto w-full max-w-3xl px-5 pb-6">
+        {showScrollDown && !empty && (
+          <div className="pointer-events-none absolute -top-2 left-0 right-0 flex justify-center">
+            <Button
+              isIconOnly
+              size="sm"
+              variant="secondary"
+              aria-label="Cuộn xuống cuối"
+              onPress={scrollToBottom}
+              className="pointer-events-auto size-9 rounded-full shadow-md"
+            >
+              <ArrowDown width={16} />
+            </Button>
           </div>
         )}
-      </div>
 
-      <div className="mt-4 rounded-xl border border-[#d5d7da] bg-white p-2 shadow-sm">
-        <TextArea
-          rows={2}
-          value={input}
-          onChange={(event) => setInput(event.target.value)}
-          placeholder="Ví dụ: Tìm phòng cho 6 người ở V1 lúc 14:00-15:00 hôm nay"
-          variant="secondary"
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              send();
-            }
-          }}
-        />
-        <div className="flex justify-end px-1 pb-1">
-          <Button
-            variant="primary"
-            size="sm"
-            isDisabled={!input.trim()}
-            isPending={sending}
-            onPress={send}
+        <div className="flex items-end gap-2 rounded-2xl border border-[#e9eaeb] bg-white p-3 shadow-sm transition focus-within:border-[#d5d7da]">
+          <textarea
+            ref={textareaRef}
+            rows={2}
+            value={input}
+            onChange={(event) => {
+              setInput(event.target.value);
+              const el = event.target;
+              el.style.height = "auto";
+              el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+            }}
+            placeholder="Describe your meeting requirements..."
+            className="block max-h-[200px] min-h-[52px] w-full flex-1 resize-none bg-transparent px-1 py-1.5 text-sm leading-6 text-[#181d27] outline-none placeholder:text-[#a4a7ae]"
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                send();
+              }
+            }}
+          />
+          <button
+            type="button"
+            aria-label="Send"
+            disabled={!input.trim() || sending}
+            onClick={() => send()}
+            className="flex size-10 shrink-0 items-center justify-center rounded-full bg-[#f5f5f5] text-[#252b37] transition hover:bg-[#ebebed] disabled:cursor-not-allowed disabled:opacity-40"
           >
-            Gửi
-          </Button>
+            {sending ? <Spinner size="sm" /> : <PaperPlane width={18} />}
+          </button>
         </div>
       </div>
     </div>

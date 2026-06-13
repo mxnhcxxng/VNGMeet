@@ -283,6 +283,9 @@ alter table meeting_room_metadata
       else null
     end
   ) stored;
+alter table meeting_room_metadata add column if not exists thumbnail_link text;
+alter table meeting_room_metadata add column if not exists map_link text;
+comment on column meeting_room_metadata.map_link is 'Link bản đồ / vị trí phòng họp.';
 
 -- Cache availability phòng họp. Một background job (app-only Graph) refresh mỗi
 -- 15 phút; frontend đọc grid từ đây thay vì gọi Graph trực tiếp.
