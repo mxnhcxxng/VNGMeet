@@ -1,13 +1,18 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import {
+  EllipsisVertical,
+  Pencil,
   PencilToSquare,
   LayoutHeaderCells,
   Gear,
   LayoutSideContentLeft,
   ArrowRightFromSquare,
   ClockArrowRotateLeft,
+  TrashBin,
 } from "@gravity-ui/icons";
+import { Button, Dropdown, Label } from "@heroui/react";
 import type { ChatThread } from "@/lib/api";
 
 export type View = "browse" | "chat" | "settings" | "bookingHistory";
@@ -25,6 +30,143 @@ function initialsOf(name: string) {
 const ROW =
   "flex h-10 w-full items-center gap-2 rounded-full px-4 text-base font-medium text-[#18181b] transition-colors";
 
+function ChatThreadRow({
+  thread,
+  active,
+  onClick,
+  onRename,
+  onDelete,
+}: {
+  thread: ChatThread;
+  active: boolean;
+  onClick: () => void;
+  onRename?: (threadId: string, title: string) => Promise<void>;
+  onDelete?: (threadId: string) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draftTitle, setDraftTitle] = useState(thread.title || "Chat mới");
+  const [busy, setBusy] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!editing) setDraftTitle(thread.title || "Chat mới");
+  }, [editing, thread.title]);
+
+  useEffect(() => {
+    if (editing) {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    }
+  }, [editing]);
+
+  const startRename = () => {
+    if (!onRename || busy) return;
+    setDraftTitle(thread.title || "Chat mới");
+    setEditing(true);
+  };
+
+  const cancelRename = () => {
+    setDraftTitle(thread.title || "Chat mới");
+    setEditing(false);
+  };
+
+  const saveRename = async () => {
+    const nextTitle = draftTitle.trim();
+    if (!nextTitle) {
+      cancelRename();
+      return;
+    }
+    if (nextTitle === (thread.title || "Chat mới")) {
+      setEditing(false);
+      return;
+    }
+    setBusy(true);
+    try {
+      await onRename?.(thread.id, nextTitle);
+      setEditing(false);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const deleteThread = async () => {
+    if (!onDelete || busy) return;
+    const ok = window.confirm("Xoá chat này?");
+    if (!ok) return;
+    setBusy(true);
+    try {
+      await onDelete(thread.id);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div
+      className={`group/thread flex h-10 w-full items-center rounded-full pl-4 pr-1 text-sm font-medium text-[#18181b] transition-colors ${
+        active ? "bg-[var(--default)]" : "hover:bg-[#f5f5f5]"
+      }`}
+      title={thread.title || "Chat mới"}
+    >
+      {editing ? (
+        <input
+          ref={inputRef}
+          value={draftTitle}
+          disabled={busy}
+          onChange={(event) => setDraftTitle(event.target.value)}
+          onBlur={saveRename}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") saveRename();
+            if (event.key === "Escape") cancelRename();
+          }}
+          className="min-w-0 flex-1 bg-transparent text-sm font-medium text-[#18181b] outline-none"
+        />
+      ) : (
+        <button
+          type="button"
+          onClick={onClick}
+          className="min-w-0 flex-1 truncate text-left outline-none"
+        >
+          {thread.title || "Chat mới"}
+        </button>
+      )}
+
+      {!editing && (
+        <Dropdown>
+          <Button
+            isIconOnly
+            aria-label="Chat menu"
+            variant="ghost"
+            size="sm"
+            isDisabled={busy}
+            className="size-8 shrink-0 rounded-full opacity-0 transition-opacity group-hover/thread:opacity-100 group-focus-within/thread:opacity-100 data-[open=true]:opacity-100"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <EllipsisVertical className="outline-none" />
+          </Button>
+          <Dropdown.Popover>
+            <Dropdown.Menu
+              onAction={(key) => {
+                if (key === "rename-chat") startRename();
+                if (key === "delete-chat") deleteThread();
+              }}
+            >
+              <Dropdown.Item id="rename-chat" textValue="Rename">
+                <Pencil className="size-4 shrink-0 text-muted" />
+                <Label>Rename</Label>
+              </Dropdown.Item>
+              <Dropdown.Item id="delete-chat" textValue="Delete" variant="danger">
+                <TrashBin className="size-4 shrink-0 text-danger" />
+                <Label>Delete</Label>
+              </Dropdown.Item>
+            </Dropdown.Menu>
+          </Dropdown.Popover>
+        </Dropdown>
+      )}
+    </div>
+  );
+}
+
 export function Sidebar({
   view,
   onChange,
@@ -34,6 +176,8 @@ export function Sidebar({
   activeThreadId,
   onNewChat,
   onSelectThread,
+  onRenameThread,
+  onDeleteThread,
 }: {
   view: View;
   onChange: (v: View) => void;
@@ -43,6 +187,8 @@ export function Sidebar({
   activeThreadId?: string | null;
   onNewChat?: () => void;
   onSelectThread?: (threadId: string) => void;
+  onRenameThread?: (threadId: string, title: string) => Promise<void>;
+  onDeleteThread?: (threadId: string) => Promise<void>;
 }) {
   const display = username || "Người dùng";
   const name = display.replace(/@.*/, "");
@@ -110,20 +256,17 @@ export function Sidebar({
           {(chatThreads ?? []).map((thread) => {
             const active = view === "chat" && activeThreadId === thread.id;
             return (
-              <button
+              <ChatThreadRow
                 key={thread.id}
-                type="button"
+                thread={thread}
+                active={active}
                 onClick={() => {
                   onChange("chat");
                   onSelectThread?.(thread.id);
                 }}
-                title={thread.title || "Chat mới"}
-                className={`flex h-10 w-full items-center rounded-full px-4 text-left text-sm font-medium text-[#18181b] transition-colors ${
-                  active ? "bg-[var(--default)]" : "hover:bg-[#f5f5f5]"
-                }`}
-              >
-                <span className="truncate">{thread.title || "Chat mới"}</span>
-              </button>
+                onRename={onRenameThread}
+                onDelete={onDeleteThread}
+              />
             );
           })}
           {!(chatThreads ?? []).length && (

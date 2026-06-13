@@ -26,11 +26,30 @@ import { BookingModal, type BookingSlot } from "./BookingModal";
 
 const SLOT_H = 48; // px per slot row (half hour → 96px per hour)
 const TIME_COL = 72; // px width of the left time-label column
+const DEFAULT_DAY_START = "09:00";
+const DEFAULT_DAY_END = "18:00";
 
 function addLabel(time: string, slotMinutes: number) {
   const [h, m] = time.split(":").map(Number);
   const end = h * 60 + m + slotMinutes;
   return `${String(Math.floor(end / 60)).padStart(2, "0")}:${String(end % 60).padStart(2, "0")}`;
+}
+
+function timeToMinutes(time: string) {
+  const [h, m] = time.split(":").map(Number);
+  return h * 60 + m;
+}
+
+function timeValueToLabel(value: { hour: number; minute: number } | null) {
+  if (!value) return null;
+  return `${String(value.hour).padStart(2, "0")}:${String(value.minute).padStart(2, "0")}`;
+}
+
+function formatLocalIsoDate(date: Date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
 }
 
 /** ISO "2016-06-13" → "13/6/2016" (matches the toolbar date label). */
@@ -155,15 +174,34 @@ export function BrowseRooms({
   const defaultOffice = userOffice || "campus";
   const [office, setOffice] = useState(defaultOffice);
   const [query, setQuery] = useState("");
+  const [now, setNow] = useState(() => new Date());
 
   useEffect(() => {
     setOffice(defaultOffice);
   }, [defaultOffice]);
 
+  useEffect(() => {
+    const interval = window.setInterval(() => setNow(new Date()), 30_000);
+    return () => window.clearInterval(interval);
+  }, []);
+
   const times = data.times;
   const slotMinutes = data.slotMinutes;
-  const dayStart = times[0] ?? "08:00";
-  const dayEnd = addLabel(times[times.length - 1] ?? "17:30", slotMinutes);
+  const dayStart = times[0] ?? DEFAULT_DAY_START;
+  const dayEnd = times.length
+    ? addLabel(times[times.length - 1], slotMinutes)
+    : DEFAULT_DAY_END;
+  const [windowStart, setWindowStart] = useState(dayStart);
+  const [windowEnd, setWindowEnd] = useState(dayEnd);
+
+  useEffect(() => {
+    setWindowStart(dayStart);
+    setWindowEnd(dayEnd);
+  }, [dayStart, dayEnd]);
+
+  const windowStartMinutes = timeToMinutes(windowStart);
+  const windowEndMinutes = timeToMinutes(windowEnd);
+  const hasValidWindow = windowEndMinutes > windowStartMinutes;
 
   // Full 24h grid: render every slot from 00:00 → 24:00. Slots inside the
   // business window map onto the API's per-room availability grid; the rest are
@@ -186,18 +224,18 @@ export function BrowseRooms({
     return map;
   }, [times]);
 
-  const now = new Date();
-  const todayIso = now.toISOString().slice(0, 10);
+  const selectedDay = data.days[dayIndex];
+  const todayIso = formatLocalIsoDate(now);
   const nowMinutes = now.getHours() * 60 + now.getMinutes();
   const currentRange = useMemo(() => {
-    if (data.days[dayIndex] !== todayIso) return null;
+    if (selectedDay !== todayIso) return null;
     const currentSlotMinutes = Math.floor(nowMinutes / slotMinutes) * slotMinutes;
     const currentTime = `${String(Math.floor(currentSlotMinutes / 60)).padStart(2, "0")}:${String(
       currentSlotMinutes % 60
     ).padStart(2, "0")}`;
     const start = businessIndexByTime.get(currentTime);
     return start === undefined ? null : { start, end: start + 1 };
-  }, [businessIndexByTime, data.days, dayIndex, nowMinutes, slotMinutes, todayIso]);
+  }, [businessIndexByTime, nowMinutes, selectedDay, slotMinutes, todayIso]);
 
   const rooms = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -247,7 +285,9 @@ export function BrowseRooms({
 
   function endOptionsFor(ti: number): string[] {
     const lastEnd = addLabel(times[times.length - 1], slotMinutes);
-    return [...times.slice(ti + 1), lastEnd];
+    return [...times.slice(ti + 1), lastEnd].filter(
+      (time) => timeToMinutes(time) <= windowEndMinutes
+    );
   }
 
   function openBooking(
@@ -276,7 +316,7 @@ export function BrowseRooms({
     now.getMinutes()
   ).padStart(2, "0")}`;
   const markerOffset = (nowMinutes / slotMinutes) * SLOT_H;
-  const showMarker = data.days[dayIndex] === todayIso;
+  const showMarker = selectedDay === todayIso;
 
   // Auto-scroll the grid so it opens on a sensible anchor, one block from the top:
   // before 13:00 → anchor on the block right before 09:00; from 13:00 on →
@@ -285,10 +325,11 @@ export function BrowseRooms({
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    const anchorMinutes = nowMinutes < 13 * 60 ? 9 * 60 : 13 * 60;
+    const currentMinutes = new Date().getHours() * 60 + new Date().getMinutes();
+    const anchorMinutes = currentMinutes < 13 * 60 ? 9 * 60 : 13 * 60;
     const anchorBlock = Math.floor(anchorMinutes / slotMinutes);
     el.scrollTop = Math.max(0, (anchorBlock - 1) * SLOT_H);
-  }, [nowMinutes, slotMinutes, rooms.length]);
+  }, [selectedDay, slotMinutes]);
 
   return (
     <div className="flex h-full flex-col bg-white">
@@ -376,10 +417,19 @@ export function BrowseRooms({
             </button>
           </div>
 
-          {/* Business-hours window (read-only) */}
+          {/* Business-hours window */}
           <div className="flex items-center gap-2">
             <span className="text-xs font-semibold text-default-600">From</span>
-            <TimeField aria-label="Giờ bắt đầu" value={parseTime(dayStart)} hourCycle={24} isReadOnly>
+            <TimeField
+              aria-label="Giờ bắt đầu"
+              value={parseTime(windowStart)}
+              hourCycle={24}
+              isInvalid={!hasValidWindow}
+              onChange={(value) => {
+                const next = timeValueToLabel(value);
+                if (next) setWindowStart(next);
+              }}
+            >
               <TimeField.Group variant="secondary">
                 <TimeField.Input>
                   {(segment) => <TimeField.Segment segment={segment} />}
@@ -389,7 +439,16 @@ export function BrowseRooms({
           </div>
           <div className="flex items-center gap-2">
             <span className="text-xs font-semibold text-default-600">To</span>
-            <TimeField aria-label="Giờ kết thúc" value={parseTime(dayEnd)} hourCycle={24} isReadOnly>
+            <TimeField
+              aria-label="Giờ kết thúc"
+              value={parseTime(windowEnd)}
+              hourCycle={24}
+              isInvalid={!hasValidWindow}
+              onChange={(value) => {
+                const next = timeValueToLabel(value);
+                if (next) setWindowEnd(next);
+              }}
+            >
               <TimeField.Group variant="secondary">
                 <TimeField.Input>
                   {(segment) => <TimeField.Segment segment={segment} />}
@@ -397,6 +456,9 @@ export function BrowseRooms({
               </TimeField.Group>
             </TimeField>
           </div>
+          {!hasValidWindow && (
+            <span className="text-xs font-semibold text-danger-600">To must be after From</span>
+          )}
         </I18nProvider>
 
         <Button
@@ -481,6 +543,12 @@ export function BrowseRooms({
               {allTimes.map((t) => {
                 const onHour = t.endsWith(":00");
                 const bi = businessIndexByTime.get(t);
+                const slotStartMinutes = timeToMinutes(t);
+                const slotEndMinutes = slotStartMinutes + slotMinutes;
+                const outsideWindow =
+                  !hasValidWindow ||
+                  slotStartMinutes < windowStartMinutes ||
+                  slotEndMinutes > windowEndMinutes;
                 return (
                   <div key={t} className="grid" style={{ gridTemplateColumns: cols }}>
                     {/* time label (sticky to the left while scrolling) */}
@@ -496,8 +564,8 @@ export function BrowseRooms({
                     </div>
 
                   {rooms.map((r) => {
-                    // Outside the business-hours window → greyed out, not bookable.
-                    if (bi === undefined) {
+                    // Outside the selected/business-hours window → disabled, not bookable.
+                    if (bi === undefined || outsideWindow) {
                       return (
                         <div
                           key={r.email}

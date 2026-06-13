@@ -206,6 +206,14 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   chatThreads: () => req<{ threads: ChatThread[] }>("/api/chat/threads"),
+  renameChatThread: (threadId: string, title: string) =>
+    req<{ thread: ChatThread }>(`/api/chat/threads/${threadId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title }),
+    }),
+  deleteChatThread: (threadId: string) =>
+    req<{ ok: boolean }>(`/api/chat/threads/${threadId}`, { method: "DELETE" }),
   chatMessages: (threadId: string) =>
     req<{ messages: ChatMessage[] }>(`/api/chat/threads/${threadId}/messages`),
   sendChatMessage: (payload: { thread_id?: string | null; content: string }) =>

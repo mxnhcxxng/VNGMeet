@@ -97,7 +97,7 @@ npm run dev
 | Biến | Ý nghĩa | Mặc định |
 |---|---|---|
 | `TIMEZONE` | Múi giờ hiển thị (IANA) | `Asia/Ho_Chi_Minh` |
-| `BUSINESS_START_HOUR` / `BUSINESS_END_HOUR` | Khung giờ làm việc trên lưới | `8` / `18` |
+| `BUSINESS_START_HOUR` / `BUSINESS_END_HOUR` | Khung giờ làm việc trên lưới | `9` / `18` |
 | `SLOT_MINUTES` | Độ phân giải mỗi ô (phút) | `30` |
 | `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL` | Provider chat OpenAI-compatible | — |
 

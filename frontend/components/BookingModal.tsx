@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type MouseEvent } from "react";
 import {
   Button,
   Input,
@@ -43,16 +43,25 @@ export function BookingModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Reset the form whenever a new slot is opened.
   useEffect(() => {
     if (isOpen && slot) {
-      setSubject("");
-      setAttendees("");
-      setNotes("");
-      setEndTime(endOptions[0] ?? "");
+      if (!endTime || !endOptions.includes(endTime)) {
+        setEndTime(endOptions[0] ?? "");
+      }
       setError(null);
     }
-  }, [isOpen, slot, endOptions]);
+  }, [endOptions, endTime, isOpen, slot]);
+
+  const closeFromBackdrop = (event: MouseEvent<HTMLDivElement>) => {
+    if (event.target === event.currentTarget) onClose();
+  };
+
+  const clearDraft = () => {
+    setSubject("");
+    setAttendees("");
+    setNotes("");
+    setEndTime("");
+  };
 
   if (!slot || !isOpen) return null;
 
@@ -87,6 +96,7 @@ export function BookingModal({
         body: notes.trim() || undefined,
       });
       onBooked();
+      clearDraft();
       onClose();
     } catch (e: any) {
       const msg = String(e?.message ?? e);
@@ -105,7 +115,10 @@ export function BookingModal({
   const req = <span className="text-danger">*</span>;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      onMouseDown={closeFromBackdrop}
+    >
       <div className="flex w-full max-w-[800px] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
         {/* Room thumbnail (meeting_room_metadata.thumbnail_link) */}
         <div className="px-6 pt-6">

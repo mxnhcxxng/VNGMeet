@@ -788,6 +788,29 @@ export default function Home() {
     setActiveThreadId(null);
   };
 
+  const handleRenameThread = async (threadId: string, title: string) => {
+    try {
+      const res = await api.renameChatThread(threadId, title);
+      setChatThreads((threads) =>
+        threads.map((thread) => (thread.id === threadId ? res.thread : thread))
+      );
+    } catch (e: any) {
+      setError(e.message);
+      throw e;
+    }
+  };
+
+  const handleDeleteThread = async (threadId: string) => {
+    try {
+      await api.deleteChatThread(threadId);
+      setChatThreads((threads) => threads.filter((thread) => thread.id !== threadId));
+      if (activeThreadId === threadId) setActiveThreadId(null);
+    } catch (e: any) {
+      setError(e.message);
+      throw e;
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex h-screen flex-col items-center justify-center gap-3">
@@ -822,6 +845,8 @@ export default function Home() {
         activeThreadId={activeThreadId}
         onNewChat={() => setActiveThreadId(null)}
         onSelectThread={setActiveThreadId}
+        onRenameThread={handleRenameThread}
+        onDeleteThread={handleDeleteThread}
       />
 
       <main className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-2xl bg-white shadow-sm">
@@ -834,13 +859,6 @@ export default function Home() {
         <div className="min-h-0 flex-1">
           {view === "bookingHistory" ? (
             <BookingHistory />
-          ) : refreshing && !data ? (
-            <div className="flex h-full flex-col items-center justify-center gap-3">
-              <Spinner />
-              <span className="text-sm text-default-500">
-                Đang quét phòng họp...
-              </span>
-            </div>
           ) : view === "settings" ? (
             <SettingsScreen
               me={me}
@@ -852,6 +870,13 @@ export default function Home() {
               onThreadSelected={setActiveThreadId}
               onThreadsChanged={setChatThreads}
             />
+          ) : refreshing && !data ? (
+            <div className="flex h-full flex-col items-center justify-center gap-3">
+              <Spinner />
+              <span className="text-sm text-default-500">
+                Đang quét phòng họp...
+              </span>
+            </div>
           ) : !data?.rooms.length ? (
             <div className="flex h-full items-center justify-center text-default-500">
               Không tìm thấy phòng nào được đánh dấu là meeting room.

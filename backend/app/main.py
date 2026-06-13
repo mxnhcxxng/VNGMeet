@@ -952,6 +952,10 @@ class ChatSendRequest(BaseModel):
     thread_id: str | None = None
 
 
+class ChatThreadRenameRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=120)
+
+
 class ChatBookingActionRequest(BaseModel):
     thread_id: str
     confirmation_id: str
@@ -2147,6 +2151,43 @@ def list_chat_messages(request: Request, thread_id: str):
             for row in rows
         ]
     }
+
+
+@app.patch("/api/chat/threads/{thread_id}")
+def rename_chat_thread(
+    request: Request,
+    thread_id: str,
+    payload: ChatThreadRenameRequest,
+):
+    title = payload.title.strip()
+    if not title:
+        raise HTTPException(400, "Tên chat không được để trống.")
+
+    sb = _require_supabase_chat()
+    user_profile_id = _current_user_profile_id(request)
+    _assert_thread_owner(sb, thread_id, user_profile_id)
+    now = datetime.now(timezone.utc).isoformat()
+    rows = (
+        sb.table("thread")
+        .update({"title": title, "updated_at": now})
+        .eq("id", thread_id)
+        .eq("user_id", user_profile_id)
+        .execute()
+        .data
+        or []
+    )
+    if not rows:
+        raise HTTPException(503, "Could not rename chat thread.")
+    return {"thread": rows[0]}
+
+
+@app.delete("/api/chat/threads/{thread_id}")
+def delete_chat_thread(request: Request, thread_id: str):
+    sb = _require_supabase_chat()
+    user_profile_id = _current_user_profile_id(request)
+    _assert_thread_owner(sb, thread_id, user_profile_id)
+    sb.table("thread").delete().eq("id", thread_id).eq("user_id", user_profile_id).execute()
+    return {"ok": True}
 
 
 @app.post("/api/chat/messages")
