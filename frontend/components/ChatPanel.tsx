@@ -65,6 +65,14 @@ function MarkdownMessage({ content }: { content: string }) {
               {children}
             </a>
           ),
+          img: ({ src, alt }) => (
+            <img
+              src={src ?? ""}
+              alt={alt ?? "Map"}
+              className="mt-2 max-h-72 w-full rounded-lg border border-[#e9eaeb] object-contain"
+              loading="lazy"
+            />
+          ),
           ul: ({ children }) => (
             <ul className="mb-3 list-disc space-y-1 pl-5 last:mb-0">{children}</ul>
           ),
@@ -134,7 +142,7 @@ function pendingBookingFromMessage(message: ChatMessage): PendingBooking | null 
   if (!Array.isArray(toolResults)) return null;
   const pending = toolResults.find(
     (item) =>
-      item?.name === "book_room" &&
+      (item?.name === "book_room" || item?.name === "schedule_room") &&
       item?.result?.requires_confirmation &&
       item?.result?.confirmation_id &&
       item?.result?.booking
@@ -352,7 +360,7 @@ function BookingConfirmationCard({
         <Button
           size="sm"
           variant="primary"
-          isDisabled={disabled || !draft.room_email || !draft.subject}
+          isDisabled={disabled || !draft.room_email}
           isPending={busyAction === "accept"}
           onPress={() => submitAction("accept")}
         >
@@ -498,7 +506,14 @@ export function ChatPanel({
   };
 
   const scrollToBottom = () => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
+    const el = scrollRef.current;
+    if (el) {
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+      setShowScrollDown(false);
+      return;
+    }
+    endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    setShowScrollDown(false);
   };
 
   const refreshThreads = async () => {

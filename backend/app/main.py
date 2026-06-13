@@ -12,7 +12,7 @@ import hashlib
 import json
 import logging
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import date as date_cls, datetime, timedelta, timezone
 from typing import Literal
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
@@ -36,50 +36,49 @@ _AVAILABILITY_REFRESH_LOCK = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Start the availability refresh scheduler when app-only creds are present."""
+    """Start background jobs when their required integrations are configured."""
     scheduler = None
-    if (
-        settings.supabase_enabled
-        and settings.graph_app_enabled
-        and not settings.availability_refresh_disabled
-    ):
+    if settings.supabase_enabled and not settings.availability_refresh_disabled:
         from apscheduler.schedulers.asyncio import AsyncIOScheduler
         from apscheduler.triggers.cron import CronTrigger
 
         scheduler = AsyncIOScheduler(timezone=settings.timezone)
-        scheduler.add_job(
-            _safe_refresh,
-            CronTrigger(
-                minute=settings.availability_refresh_minutes,
-                timezone=settings.timezone,
-            ),
-            id="refresh_availability",
-            max_instances=1,
-            coalesce=True,
-            misfire_grace_time=120,
-        )
+        if settings.graph_app_enabled:
+            scheduler.add_job(
+                _safe_refresh,
+                CronTrigger(
+                    minute=settings.availability_refresh_minutes,
+                    timezone=settings.timezone,
+                ),
+                id="refresh_availability",
+                max_instances=1,
+                coalesce=True,
+                misfire_grace_time=120,
+            )
         scheduler.add_job(
             _safe_process_scheduled_bookings,
-            CronTrigger(hour=0, minute=0, second=5, timezone=settings.timezone),
+            CronTrigger(hour=0, minute=0, second=15, timezone=settings.timezone),
             id="process_scheduled_bookings",
             max_instances=1,
             coalesce=True,
             misfire_grace_time=300,
         )
-        # Prime the cache shortly after boot so the grid isn't empty on first load.
-        scheduler.add_job(_safe_refresh, "date", run_date=None)
+        if settings.graph_app_enabled:
+            # Prime the cache shortly after boot so the grid isn't empty on first load.
+            scheduler.add_job(_safe_refresh, "date", run_date=None)
         scheduler.start()
-        log.info(
-            "Availability scheduler started (cron minute=%s).",
+        log.warning(
+            "Background scheduler started (availability=%s, scheduled_bookings=True, cron minute=%s).",
+            settings.graph_app_enabled,
             settings.availability_refresh_minutes,
         )
     else:
         log.warning(
-            "Availability scheduler NOT started "
-            "(supabase_enabled=%s, graph_app_enabled=%s, disabled=%s). "
-            "Cache will refresh on demand from the requesting user's delegated token.",
+            "Background scheduler NOT started "
+            "(supabase_enabled=%s, disabled=%s). "
+            "Cache will refresh on demand from the requesting user's delegated token; "
+            "scheduled bookings will not run automatically.",
             settings.supabase_enabled,
-            settings.graph_app_enabled,
             settings.availability_refresh_disabled,
         )
     try:
@@ -1019,34 +1018,48 @@ def update_my_profile(request: Request, payload: UserProfileUpdateRequest):
 
 
 CHAT_BOT_EMAIL = "booking-bot@vngmeet.local"
+CHAT_MAX_OPTIONS = 5
 CHAT_SYSTEM_PROMPT = """Bạn là trợ lý đặt lịch cho app booking phòng họp.
 
 Phạm vi hỗ trợ:
-Chỉ trả lời các câu hỏi liên quan đến đặt lịch, kiểm tra lịch trống, đặt phòng họp, đổi lịch hoặc huỷ lịch.
+Chỉ trả lời các câu hỏi liên quan đến đặt lịch, kiểm tra lịch trống, đặt phòng họp, chỉ đường/tìm vị trí phòng họp, đổi lịch hoặc huỷ lịch.
 Nếu người dùng hỏi ngoài phạm vi này, hãy trả lời ngắn gọn: “Mình chỉ hỗ trợ các yêu cầu liên quan đến đặt lịch và phòng họp.”
 
 Nhiệm vụ chính:
 - Hiểu nhu cầu đặt lịch của người dùng.
 - Dùng API/function calling để kiểm tra phòng trống theo thời gian, số người, địa điểm hoặc yêu cầu cụ thể.
 - Gợi ý các khung giờ và phòng có thể đặt.
+- Trả chỉ đường/map đến phòng họp khi user hỏi vị trí hoặc cách đi đến một phòng.
+- Chỉ gợi ý phòng trong office của user theo ngữ cảnh profile, trừ khi profile chưa có office.
 - Xác nhận đủ thông tin trước khi chuẩn bị phiếu đặt phòng.
 - Gọi API/function calling để tạo phiếu xác nhận đặt phòng; chỉ book thật sau khi người dùng bấm Đồng ý trên card.
 
 Luồng xử lý:
 1. Người dùng hỏi có phòng phù hợp không.
-2. Kiểm tra thông tin đã có: ngày, giờ bắt đầu, giờ kết thúc hoặc thời lượng, số người, địa điểm/khu vực, yêu cầu thêm như màn hình, TV, máy chiếu, online meeting.
+2. Kiểm tra thông tin đã có: ngày, giờ bắt đầu, giờ kết thúc hoặc thời lượng, số người, địa điểm/khu vực.
 3. Nếu thiếu thông tin cần thiết, hỏi bổ sung ngắn gọn.
 4. Khi đủ thông tin, gọi function kiểm tra lịch/phòng trống.
-5. Trả về danh sách phòng và khung giờ có thể đặt.
+5. Trả về danh sách phòng và khung giờ có thể đặt theo đúng thứ tự API trả về.
+   Nếu không có phòng trống trọn khoảng thời gian, dùng split_suggestions để gợi ý tách phòng.
+   Nếu cũng không tách được, dùng alternate_suggestions để gợi ý khung giờ khác cùng duration.
 6. Khi người dùng chọn phòng, kiểm tra lại các trường bắt buộc để đặt lịch.
-7. Khi người dùng muốn đặt phòng, gọi function book_room để tạo card xác nhận với các thông tin đã điền.
+7. Khi người dùng muốn đặt phòng, gọi function book_room cho đặt tức thì hoặc schedule_room cho scheduled booking để tạo card xác nhận với các thông tin đã điền.
 8. Không nói đã đặt phòng sau khi gọi book_room; chỉ nói người dùng kiểm tra card và bấm Đồng ý hoặc Từ chối.
 9. Báo kết quả đặt phòng thành công hoặc thất bại sau khi hệ thống nhận action từ card.
+
+Luồng chỉ đường:
+- Khi user hỏi "chỉ đường", "đường đến", "map", "ở đâu", "vị trí" kèm tên phòng, gọi function get_room_directions.
+- Nếu tìm thấy phòng và có map_link, trả tên phòng, office/building/floor/zone nếu có, link và ảnh map bằng Markdown image.
+- Nếu user chỉ nói tên như "Chỉ đường đến Tokyo", hiểu Tokyo là tên phòng.
 
 Nguyên tắc phản hồi:
 - Trả lời ngắn gọn, rõ ràng, tập trung vào hành động tiếp theo.
 - Không bịa phòng, giờ trống hoặc trạng thái booking nếu chưa có dữ liệu từ API.
 - Nếu API không trả về phòng phù hợp, gợi ý người dùng đổi thời gian, địa điểm hoặc tiêu chí.
+- Nếu người dùng không nói tên cuộc họp, đặt subject là "Meeting".
+- Nếu đặt lịch ngoài vùng live availability/schedule-bookable, truyền booking_type="scheduled"; còn đặt tức thì thì booking_type="instant".
+- Trả nhiều option hữu ích nhưng tối đa 5 option. Nếu room có map_link, hiển thị ảnh map bằng Markdown image ngay dưới option đó.
+- Không hỏi thêm về thiết bị phòng họp.
 - Nếu book thất bại, giải thích lý do nếu API có trả về và đề xuất thử phòng/giờ khác.
 - Nếu người dùng muốn đổi lịch hoặc huỷ lịch, hiện app chưa có API đổi/huỷ; hãy xin thông tin và nói ngắn gọn rằng bạn chưa thể thực hiện tự động trong phiên bản này.
 """
@@ -1075,7 +1088,7 @@ CHAT_TOOLS = [
                     },
                     "capacity": {
                         "type": "integer",
-                        "description": "Số người tham dự tối thiểu. Có thể bỏ trống nếu user chưa nói.",
+                        "description": "Số người tham dự. Backend sẽ map <=4 thành small, 5-15 thành medium, 16+ thành large.",
                     },
                     "location": {
                         "type": "string",
@@ -1083,6 +1096,23 @@ CHAT_TOOLS = [
                     },
                 },
                 "required": ["date", "start_time", "end_time"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_room_directions",
+            "description": "Lấy thông tin vị trí/chỉ đường/map đến một phòng họp theo tên phòng.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "room_name": {
+                        "type": "string",
+                        "description": "Tên phòng user muốn tìm/chỉ đường đến, ví dụ Tokyo.",
+                    },
+                },
+                "required": ["room_name"],
             },
         },
     },
@@ -1106,8 +1136,38 @@ CHAT_TOOLS = [
                         "description": "Email người tham dự, nếu có.",
                     },
                     "body": {"type": "string", "description": "Nội dung mô tả cuộc họp."},
+                    "booking_type": {
+                        "type": "string",
+                        "enum": ["instant", "scheduled"],
+                        "description": "instant cho booking live; scheduled cho ngày/slot schedule-bookable.",
+                    },
                 },
-                "required": ["date", "start_time", "end_time", "subject"],
+                "required": ["date", "start_time", "end_time"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "schedule_room",
+            "description": "Tạo card xác nhận scheduled booking; chưa đặt phòng thật cho đến khi user bấm Đồng ý.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "room_email": {"type": "string", "description": "Email phòng họp."},
+                    "room_name": {"type": "string", "description": "Tên phòng họp."},
+                    "date": {"type": "string", "description": "Ngày đặt, định dạng YYYY-MM-DD."},
+                    "start_time": {"type": "string", "description": "Giờ bắt đầu HH:MM."},
+                    "end_time": {"type": "string", "description": "Giờ kết thúc HH:MM."},
+                    "subject": {"type": "string", "description": "Tiêu đề cuộc họp; nếu thiếu sẽ dùng Meeting."},
+                    "attendees": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Email người tham dự, nếu có.",
+                    },
+                    "body": {"type": "string", "description": "Nội dung mô tả cuộc họp."},
+                },
+                "required": ["date", "start_time", "end_time"],
             },
         },
     },
@@ -1276,26 +1336,318 @@ def _chat_slot_range(start_time: str, end_time: str) -> tuple[int, int]:
     return start, end
 
 
+def _chat_time_from_slot(idx: int) -> str:
+    minutes = idx * settings.availability_slot_minutes
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
+
+
+def _chat_slot_is_bookable(slots: list, idx: int) -> bool:
+    """True for live-free slots and seeded schedule-bookable slots."""
+    if idx < 0 or idx >= len(slots):
+        return False
+    return slots[idx] in (0, -1)
+
+
+def _chat_slot_has_scheduled_owner(slot_owner_ids: list, idx: int) -> bool:
+    return idx < len(slot_owner_ids) and bool(slot_owner_ids[idx])
+
+
+def _numeric_floor(value: object) -> int | None:
+    text = str(value or "")
+    digits = "".join(ch for ch in text if ch.isdigit() or ch == "-")
+    if not digits or digits == "-":
+        return None
+    try:
+        return int(digits)
+    except ValueError:
+        return None
+
+
+def _capacity_rank(room: dict) -> int:
+    capacity_size = _effective_capacity_size(room) or ""
+    if capacity_size == "medium":
+        return 0
+    if capacity_size == "large":
+        return 1
+    if capacity_size == "small":
+        return 2
+    return 3
+
+
+def _capacity_size_for_people(value: object) -> str | None:
+    if not isinstance(value, int) or value <= 0:
+        return None
+    if value <= 4:
+        return "small"
+    if value <= 15:
+        return "medium"
+    return "large"
+
+
+def _effective_capacity_size(room: dict) -> str | None:
+    return _capacity_size_for_people(room.get("capacity")) or (
+        str(room.get("capacity_size") or "").lower() or None
+    )
+
+
+def _location_rank(room: dict, profile: dict | None) -> tuple[int, int, int]:
+    user_building = str((profile or {}).get("building") or "").strip().lower()
+    room_building = str(room.get("building") or "").strip().lower()
+    same_building = bool(user_building and room_building and user_building == room_building)
+    user_floor = _numeric_floor((profile or {}).get("floor"))
+    room_floor = _numeric_floor(room.get("floor"))
+    has_floor = user_floor is not None and room_floor is not None
+    same_floor = has_floor and user_floor == room_floor
+
+    if same_building and same_floor:
+        return (0, 0, 0)
+    if not same_building and same_floor:
+        return (1, 0, 0)
+    if has_floor:
+        gap = abs(room_floor - user_floor)
+        above = 1 if room_floor > user_floor else 0
+        return (2 if same_building else 3, gap, above)
+    return (4, 9999, 1)
+
+
+def _sort_chat_rooms_like_browse(rooms: list[dict], profile: dict | None) -> list[dict]:
+    preferred = {
+        str(room or "").strip().lower()
+        for room in ((profile or {}).get("preferred_rooms") or [])
+        if str(room or "").strip()
+    }
+
+    def key(item: tuple[int, dict]) -> tuple:
+        index, room = item
+        email = str(room.get("email") or "").strip().lower()
+        return (
+            0 if email in preferred else 1,
+            _capacity_rank(room),
+            *_location_rank(room, profile),
+            str(room.get("name") or "").lower(),
+            index,
+        )
+
+    return [room for _, room in sorted(enumerate(rooms), key=key)]
+
+
+def _room_result(room: dict) -> dict:
+    return {
+        "name": room.get("name"),
+        "email": room.get("email"),
+        "building": room.get("building"),
+        "floor": room.get("floor"),
+        "zone": room.get("zone"),
+        "office": room.get("office"),
+        "capacity": room.get("capacity"),
+        "capacity_size": _effective_capacity_size(room),
+        "map_link": room.get("map_link"),
+        "booking_type": room.get("_booking_type") or "instant",
+    }
+
+
+def _rows_for_chat_availability(sb, capacity: object, location: str, profile: dict | None) -> list[dict]:
+    rows = (
+        sb.table("meeting_room_metadata")
+        .select("id, name, email, building, floor, zone, capacity, capacity_size, office, map_link")
+        .eq("in_use", True)
+        .execute()
+        .data
+        or []
+    )
+    user_office = str((profile or {}).get("office") or "").strip()
+    if user_office:
+        rows = [r for r in rows if str(r.get("office") or "").strip() == user_office]
+    requested_capacity_size = _capacity_size_for_people(capacity)
+    if requested_capacity_size:
+        rows = [
+            r
+            for r in rows
+            if _effective_capacity_size(r) == requested_capacity_size
+        ]
+    if location:
+        rows = [
+            r
+            for r in rows
+            if location
+            in " ".join(
+                str(r.get(k) or "").lower()
+                for k in ("name", "building", "floor", "zone", "office")
+            )
+        ]
+    return _sort_chat_rooms_like_browse(rows, profile)
+
+
+def _room_bookable_for_range(cache_row: dict | None, start_idx: int, end_idx: int) -> str | None:
+    slots = list(cache_row.get("slots") or []) if cache_row else []
+    owners = list(cache_row.get("slot_owner_ids") or []) if cache_row else []
+    if len(slots) != availability.SLOTS_PER_DAY:
+        return None
+    if start_idx < 0 or end_idx > len(slots) or end_idx <= start_idx:
+        return None
+    if len(owners) != availability.SLOTS_PER_DAY:
+        owners = [None] * availability.SLOTS_PER_DAY
+    uses_scheduled_slot = False
+    for idx in range(start_idx, end_idx):
+        if _chat_slot_has_scheduled_owner(owners, idx) or not _chat_slot_is_bookable(slots, idx):
+            return None
+        if slots[idx] == -1:
+            uses_scheduled_slot = True
+    return "scheduled" if uses_scheduled_slot else "instant"
+
+
+def _split_room_suggestions(
+    rows: list[dict],
+    cache: dict[tuple[str, str], dict],
+    day: str,
+    start_idx: int,
+    end_idx: int,
+    profile: dict | None,
+) -> list[dict]:
+    segments: list[dict] = []
+    idx = start_idx
+    while idx < end_idx:
+        best: tuple[int, dict, str] | None = None
+        for order, room in enumerate(rows):
+            row = cache.get((room["id"], day))
+            slots = list(row.get("slots") or []) if row else []
+            owners = list(row.get("slot_owner_ids") or []) if row else []
+            if len(owners) != availability.SLOTS_PER_DAY:
+                owners = [None] * availability.SLOTS_PER_DAY
+            if len(slots) != availability.SLOTS_PER_DAY:
+                continue
+            if _chat_slot_has_scheduled_owner(owners, idx) or not _chat_slot_is_bookable(slots, idx):
+                continue
+            end = idx
+            uses_scheduled_slot = False
+            while end < end_idx:
+                if _chat_slot_has_scheduled_owner(owners, end) or not _chat_slot_is_bookable(slots, end):
+                    break
+                uses_scheduled_slot = uses_scheduled_slot or slots[end] == -1
+                end += 1
+            if best is None or end > best[0]:
+                room_copy = {**room, "_booking_type": "scheduled" if uses_scheduled_slot else "instant"}
+                best = (end, room_copy, str(room.get("id")))
+                if end == end_idx:
+                    break
+        if best is None or best[0] <= idx:
+            return []
+        segments.append(
+            {
+                "date": day,
+                "start_time": _chat_time_from_slot(idx),
+                "end_time": _chat_time_from_slot(best[0]),
+                "room": _room_result(best[1]),
+            }
+        )
+        idx = best[0]
+    # Avoid suggesting a "split" with the same room for the whole duration.
+    if len({segment["room"]["email"] for segment in segments}) <= 1:
+        return []
+    return segments
+
+
+def _half_day_group(start_idx: int) -> str:
+    return "morning" if start_idx < (12 * 60 // settings.availability_slot_minutes) else "afternoon"
+
+
+def _alternate_priority(requested_date: date_cls, candidate_date: date_cls, start_idx: int, requested_start_idx: int) -> tuple:
+    same_day = candidate_date == requested_date
+    same_half = _half_day_group(start_idx) == _half_day_group(requested_start_idx)
+    if same_day and same_half:
+        tier = 0
+    elif same_day:
+        tier = 1
+    else:
+        tier = 2
+    distance = abs(
+        (datetime.combine(candidate_date, datetime.min.time()) + timedelta(minutes=start_idx * settings.availability_slot_minutes))
+        - (datetime.combine(requested_date, datetime.min.time()) + timedelta(minutes=requested_start_idx * settings.availability_slot_minutes))
+    )
+    return (tier, distance, candidate_date.isoformat(), abs(start_idx - requested_start_idx))
+
+
+def _alternate_time_suggestions(
+    rows: list[dict],
+    cache: dict[tuple[str, str], dict],
+    day_list: list[str],
+    requested_date: str,
+    start_idx: int,
+    end_idx: int,
+    profile: dict | None,
+) -> list[dict]:
+    duration = end_idx - start_idx
+    if duration <= 0:
+        return []
+    try:
+        requested_day = date_cls.fromisoformat(requested_date)
+    except ValueError:
+        return []
+    candidates: list[tuple[tuple, dict]] = []
+    business_start = settings.business_start_hour * 60 // settings.availability_slot_minutes
+    business_end = settings.business_end_hour * 60 // settings.availability_slot_minutes
+    for day in day_list:
+        try:
+            candidate_day = date_cls.fromisoformat(day)
+        except ValueError:
+            continue
+        latest_start = business_end - duration
+        for candidate_start in range(business_start, latest_start + 1):
+            candidate_end = candidate_start + duration
+            for room in rows:
+                booking_type = _room_bookable_for_range(
+                    cache.get((room["id"], day)), candidate_start, candidate_end
+                )
+                if not booking_type:
+                    continue
+                room_copy = {**room, "_booking_type": booking_type}
+                candidates.append(
+                    (
+                        _alternate_priority(
+                            requested_day, candidate_day, candidate_start, start_idx
+                        ),
+                        {
+                            "date": day,
+                            "start_time": _chat_time_from_slot(candidate_start),
+                            "end_time": _chat_time_from_slot(candidate_end),
+                            "room": _room_result(room_copy),
+                        },
+                    )
+                )
+                break
+    seen: set[tuple[str, str, str]] = set()
+    suggestions: list[dict] = []
+    for _, suggestion in sorted(candidates, key=lambda item: item[0]):
+        key = (suggestion["date"], suggestion["start_time"], suggestion["room"]["email"])
+        if key in seen:
+            continue
+        seen.add(key)
+        suggestions.append(suggestion)
+        if len(suggestions) >= CHAT_MAX_OPTIONS:
+            break
+    return suggestions
+
+
 def _norm_room_lookup(value: object) -> str:
     return " ".join(str(value or "").strip().lower().split())
 
 
-def _resolve_booking_room_from_metadata(payload: BookingRequest) -> BookingRequest:
-    """Resolve the room email/name from meeting_room_metadata instead of trusting LLM."""
+def _find_room_metadata(room_name: object = None, room_email: object = None) -> dict | None:
+    """Find one in-use room by exact or fuzzy name/email metadata."""
     if not settings.supabase_enabled:
-        return payload
+        return None
 
-    room_name = _norm_room_lookup(payload.room_name)
-    room_email = _norm_room_lookup(payload.room_email)
-    if not room_name and not room_email:
-        raise HTTPException(400, "Thiếu tên phòng hoặc email phòng.")
+    room_name_norm = _norm_room_lookup(room_name)
+    room_email_norm = _norm_room_lookup(room_email)
+    if not room_name_norm and not room_email_norm:
+        return None
 
     from .supabase_client import get_supabase
 
     rows = (
         get_supabase()
         .table("meeting_room_metadata")
-        .select("name, email")
+        .select("id, name, email, office, building, floor, zone, capacity, capacity_size, map_link")
         .eq("in_use", True)
         .execute()
         .data
@@ -1305,24 +1657,36 @@ def _resolve_booking_room_from_metadata(payload: BookingRequest) -> BookingReque
     def room_name_matches(row: dict) -> bool:
         name = _norm_room_lookup(row.get("name"))
         email = _norm_room_lookup(row.get("email"))
-        return bool(room_name and room_name in {name, email})
+        return bool(room_name_norm and room_name_norm in {name, email})
 
     def room_email_matches(row: dict) -> bool:
-        return bool(room_email and room_email == _norm_room_lookup(row.get("email")))
+        return bool(room_email_norm and room_email_norm == _norm_room_lookup(row.get("email")))
 
     match = next((row for row in rows if room_name_matches(row)), None)
     if not match:
         match = next((row for row in rows if room_email_matches(row)), None)
-    if not match and room_name:
+    if not match and room_name_norm:
         candidates = [
             row
             for row in rows
-            if room_name in _norm_room_lookup(row.get("name"))
-            or _norm_room_lookup(row.get("name")) in room_name
+            if room_name_norm in _norm_room_lookup(row.get("name"))
+            or _norm_room_lookup(row.get("name")) in room_name_norm
         ]
         if len(candidates) == 1:
             match = candidates[0]
 
+    return match
+
+
+def _resolve_booking_room_from_metadata(payload: BookingRequest) -> BookingRequest:
+    """Resolve the room email/name from meeting_room_metadata instead of trusting LLM."""
+    if not settings.supabase_enabled:
+        return payload
+
+    if not _norm_room_lookup(payload.room_name) and not _norm_room_lookup(payload.room_email):
+        raise HTTPException(400, "Thiếu tên phòng hoặc email phòng.")
+
+    match = _find_room_metadata(payload.room_name, payload.room_email)
     if not match or not match.get("email"):
         raise HTTPException(
             400,
@@ -1335,7 +1699,99 @@ def _resolve_booking_room_from_metadata(payload: BookingRequest) -> BookingReque
     return payload
 
 
-async def _tool_check_room_availability(request: Request, args: dict) -> dict:
+async def _tool_get_room_directions(args: dict) -> dict:
+    room_name = str(args.get("room_name") or "").strip()
+    if not room_name:
+        return {"ok": False, "error": "Thiếu tên phòng cần chỉ đường."}
+
+    room = _find_room_metadata(room_name)
+    if not room:
+        return {
+            "ok": False,
+            "error": "Không tìm thấy phòng này trong meeting_room_metadata.",
+        }
+
+    return {
+        "ok": True,
+        "room": _room_result(room),
+    }
+
+
+def _extract_room_direction_query(content: str) -> str | None:
+    text = " ".join(content.strip().split())
+    lower = text.lower()
+    triggers = (
+        "chỉ đường đến",
+        "chi duong den",
+        "đường đến",
+        "duong den",
+        "map đến",
+        "map den",
+        "vị trí phòng",
+        "vi tri phong",
+        "phòng",
+    )
+    if not any(trigger in lower for trigger in triggers):
+        return None
+
+    prefixes = (
+        "chỉ đường đến phòng họp",
+        "chỉ đường đến phòng",
+        "chỉ đường đến",
+        "chi duong den phong hop",
+        "chi duong den phong",
+        "chi duong den",
+        "đường đến phòng họp",
+        "đường đến phòng",
+        "đường đến",
+        "duong den phong hop",
+        "duong den phong",
+        "duong den",
+        "map đến phòng họp",
+        "map đến phòng",
+        "map đến",
+        "map den phong hop",
+        "map den phong",
+        "map den",
+        "vị trí phòng họp",
+        "vị trí phòng",
+        "vi tri phong hop",
+        "vi tri phong",
+    )
+    for prefix in sorted(prefixes, key=len, reverse=True):
+        if lower.startswith(prefix):
+            room_name = text[len(prefix) :].strip(" :,-")
+            return room_name or None
+    return None
+
+
+def _room_direction_reply(result: dict) -> str:
+    if not result.get("ok"):
+        return f"Mình chưa tìm thấy phòng này. {result.get('error') or ''}".strip()
+    room = result.get("room") or {}
+    name = room.get("name") or "phòng này"
+    details = [
+        str(room.get(key) or "").strip()
+        for key in ("office", "building", "floor", "zone")
+        if str(room.get(key) or "").strip()
+    ]
+    lines = [f"Đây là chỉ đường đến {name}."]
+    if details:
+        lines.append(f"Vị trí: {', '.join(details)}.")
+    map_link = str(room.get("map_link") or "").strip()
+    if map_link:
+        lines.append(f"[Mở map]({map_link})")
+        lines.append(f"![Map đến {name}]({map_link})")
+    else:
+        lines.append("Phòng này chưa có map_link trong metadata.")
+    return "\n".join(lines)
+
+
+async def _tool_check_room_availability(
+    request: Request,
+    args: dict,
+    user_profile_id: str | None,
+) -> dict:
     if not settings.supabase_enabled:
         return {"ok": False, "error": "Availability checking requires Supabase."}
     date = str(args.get("date") or "").strip()
@@ -1345,35 +1801,29 @@ async def _tool_check_room_availability(request: Request, args: dict) -> dict:
     location = str(args.get("location") or "").strip().lower()
     try:
         start_idx, end_idx = _chat_slot_range(start_time, end_time)
-        datetime.fromisoformat(date)
+        requested_day = date_cls.fromisoformat(date)
     except Exception:
         return {"ok": False, "error": "date/start_time/end_time không hợp lệ."}
 
     from .supabase_client import get_supabase
 
     sb = get_supabase()
-    query = (
-        sb.table("meeting_room_metadata")
-        .select("id, name, email, building, floor, zone, capacity, office")
-        .eq("in_use", True)
-    )
-    rows = query.execute().data or []
-    if isinstance(capacity, int) and capacity > 0:
-        rows = [r for r in rows if (r.get("capacity") or 0) >= capacity]
-    if location:
-        rows = [
-            r
-            for r in rows
-            if location
-            in " ".join(
-                str(r.get(k) or "").lower()
-                for k in ("name", "building", "floor", "zone", "office")
-            )
-        ]
+    profile = _read_user_profile(user_profile_id) if user_profile_id else None
+    rows = _rows_for_chat_availability(sb, capacity, location, profile)
 
     room_ids = [r["id"] for r in rows if r.get("id")]
+    today = datetime.now(ZoneInfo(settings.timezone)).date()
+    if requested_day < today:
+        return {"ok": False, "error": "Không thể kiểm tra/ngỏ ý đặt phòng trong quá khứ."}
+    day_list = [
+        (today + timedelta(days=i)).isoformat()
+        for i in range(settings.availability_days)
+    ]
+    if date not in day_list:
+        day_list.append(date)
+        day_list.sort()
     try:
-        cache = await _ensure_availability_cache_fresh(request, sb, room_ids, [date])
+        cache = await _ensure_availability_cache_fresh(request, sb, room_ids, day_list)
     except HTTPException as e:
         if e.status_code != 503:
             return {"ok": False, "error": str(e.detail)}
@@ -1403,20 +1853,19 @@ async def _tool_check_room_availability(request: Request, args: dict) -> dict:
 
     available = []
     for room in rows:
-        row = cache.get((room["id"], date))
-        slots = row.get("slots") if row else []
-        if len(slots) != availability.SLOTS_PER_DAY:
-            continue
-        if all(slots[idx] == 0 for idx in range(start_idx, min(end_idx, len(slots)))):
-            available.append(
-                {
-                    "name": room.get("name"),
-                    "email": room.get("email"),
-                    "building": room.get("building"),
-                    "floor": room.get("floor"),
-                    "zone": room.get("zone"),
-                    "capacity": room.get("capacity"),
-                }
+        booking_type = _room_bookable_for_range(cache.get((room["id"], date)), start_idx, end_idx)
+        if booking_type:
+            available.append({**room, "_booking_type": booking_type})
+
+    split_suggestions: list[dict] = []
+    alternate_suggestions: list[dict] = []
+    if not available:
+        split_suggestions = _split_room_suggestions(
+            rows, cache, date, start_idx, end_idx, profile
+        )
+        if not split_suggestions:
+            alternate_suggestions = _alternate_time_suggestions(
+                rows, cache, day_list, date, start_idx, end_idx, profile
             )
 
     return {
@@ -1424,9 +1873,13 @@ async def _tool_check_room_availability(request: Request, args: dict) -> dict:
         "date": date,
         "start_time": start_time,
         "end_time": end_time,
+        "user_context": _profile_payload(profile),
+        "requested_capacity_size": _capacity_size_for_people(capacity),
         "count": len(available),
-        "rooms": available[:8],
-        "truncated": len(available) > 8,
+        "rooms": [_room_result(room) for room in available[:CHAT_MAX_OPTIONS]],
+        "truncated": len(available) > CHAT_MAX_OPTIONS,
+        "split_suggestions": split_suggestions,
+        "alternate_suggestions": alternate_suggestions,
     }
 
 
@@ -1484,6 +1937,8 @@ async def _tool_check_room_availability_live(
                             "floor": room.get("floor"),
                             "zone": room.get("zone"),
                             "capacity": room.get("capacity"),
+                            "capacity_size": _effective_capacity_size(room),
+                            "map_link": room.get("map_link"),
                         }
                     )
     except httpx.HTTPStatusError as e:
@@ -1497,8 +1952,8 @@ async def _tool_check_room_availability_live(
         "start_time": start_time,
         "end_time": end_time,
         "count": len(available),
-        "rooms": available[:8],
-        "truncated": len(available) > 8,
+        "rooms": available[:CHAT_MAX_OPTIONS],
+        "truncated": len(available) > CHAT_MAX_OPTIONS,
         "source": "graph_live",
     }
 
@@ -1511,19 +1966,21 @@ async def _tool_book_room(
     auth_user_id: str | None,
 ) -> dict:
     _ = (request, graph_token, user_profile_id, auth_user_id)
+    booking_type = str(args.get("booking_type") or "instant").strip()
+    if booking_type not in {"instant", "schedule", "scheduled"}:
+        booking_type = "instant"
     payload = BookingRequest(
         room_email=str(args.get("room_email") or "").strip(),
         room_name=(args.get("room_name") or None),
         date=str(args.get("date") or "").strip(),
         start_time=str(args.get("start_time") or "").strip(),
         end_time=str(args.get("end_time") or "").strip(),
-        subject=str(args.get("subject") or "").strip(),
+        booking_type=booking_type,
+        subject=str(args.get("subject") or "Meeting").strip() or "Meeting",
         attendees=args.get("attendees") or [],
         body=args.get("body") or None,
         method="chatbot",
     )
-    if not payload.subject:
-        return {"ok": False, "error": "Thiếu subject."}
     if payload.end_time <= payload.start_time:
         return {"ok": False, "error": "Giờ kết thúc phải sau giờ bắt đầu."}
     try:
@@ -1547,10 +2004,20 @@ async def _run_chat_tool(
     auth_user_id: str | None,
 ) -> dict:
     if name == "check_room_availability":
-        return await _tool_check_room_availability(request, args)
+        return await _tool_check_room_availability(request, args, user_profile_id)
+    if name == "get_room_directions":
+        return await _tool_get_room_directions(args)
     if name == "book_room":
         return await _tool_book_room(
             request, args, graph_token, user_profile_id, auth_user_id
+        )
+    if name == "schedule_room":
+        return await _tool_book_room(
+            request,
+            {**args, "booking_type": "scheduled"},
+            graph_token,
+            user_profile_id,
+            auth_user_id,
         )
     return {"ok": False, "error": f"Unknown tool: {name}"}
 
@@ -1563,6 +2030,17 @@ async def _call_llm_with_tools(
     auth_user_id: str | None,
 ) -> tuple[str, list[dict]]:
     now = datetime.now(ZoneInfo(settings.timezone))
+    profile = _read_user_profile(user_profile_id) if user_profile_id else None
+    profile_payload = _profile_payload(profile) or {}
+    profile_context = (
+        "\n\nNgữ cảnh người dùng từ profile/app:\n"
+        f"- Email: {profile_payload.get('email') or 'chưa rõ'}.\n"
+        f"- Office: {profile_payload.get('office') or 'chưa rõ'}.\n"
+        f"- Building: {profile_payload.get('building') or 'chưa rõ'}.\n"
+        f"- Floor/chỗ ngồi: {profile_payload.get('floor') or 'chưa rõ'}.\n"
+        f"- Preferred rooms: {', '.join(profile_payload.get('preferred_rooms') or []) or 'không có'}.\n"
+        "- Khi gợi ý phòng, ưu tiên và giới hạn theo office trong profile nếu đã có office."
+    )
     runtime_context = (
         f"\n\nNgữ cảnh thời gian hiện tại:\n"
         f"- Hôm nay là {now.date().isoformat()}.\n"
@@ -1572,7 +2050,7 @@ async def _call_llm_with_tools(
         "hãy quy đổi theo ngữ cảnh thời gian này trước khi gọi function."
     )
     messages = [
-        {"role": "system", "content": CHAT_SYSTEM_PROMPT + runtime_context},
+        {"role": "system", "content": CHAT_SYSTEM_PROMPT + runtime_context + profile_context},
         *history,
     ]
     tool_results: list[dict] = []
@@ -1694,6 +2172,52 @@ async def send_chat_message(request: Request, payload: ChatSendRequest):
     user_msg = _insert_chat_message(
         sb, thread_id, user_profile_id, bot_profile_id, content
     )
+
+    direction_room_name = _extract_room_direction_query(content)
+    if direction_room_name:
+        direction_result = await _tool_get_room_directions(
+            {"room_name": direction_room_name}
+        )
+        assistant_msg = _insert_chat_message(
+            sb,
+            thread_id,
+            bot_profile_id,
+            user_profile_id,
+            _room_direction_reply(direction_result),
+            {
+                "tool_results": [
+                    {
+                        "name": "get_room_directions",
+                        "arguments": {"room_name": direction_room_name},
+                        "result": direction_result,
+                    }
+                ]
+            },
+        )
+        return {
+            "thread": {
+                "id": thread_id,
+                "title": thread.get("title"),
+                "created_at": thread.get("created_at"),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            },
+            "messages": [
+                {
+                    "id": user_msg["id"],
+                    "role": "user",
+                    "content": user_msg.get("content") or "",
+                    "created_at": user_msg.get("created_at"),
+                },
+                {
+                    "id": assistant_msg["id"],
+                    "role": "assistant",
+                    "content": assistant_msg.get("content") or "",
+                    "created_at": assistant_msg.get("created_at"),
+                    "metadata": assistant_msg.get("metadata") or {},
+                },
+            ],
+        }
+
     history = _chat_messages_for_llm(sb, thread_id, bot_profile_id)
     reply, tool_results = await _call_llm_with_tools(
         request, history, graph_token, user_profile_id, auth_user_id
@@ -2160,9 +2684,7 @@ async def create_booking(request: Request, payload: BookingRequest):
     )
 
     payload = _resolve_booking_room_from_metadata(payload)
-    if not payload.subject.strip():
-        _log_user_booking_activity(user_profile_id, payload, "failed", "empty_subject")
-        raise HTTPException(400, "Tiêu đề cuộc họp không được để trống")
+    payload.subject = payload.subject.strip() or "Meeting"
     if payload.end_time <= payload.start_time:
         _log_user_booking_activity(user_profile_id, payload, "failed", "invalid_time_range")
         raise HTTPException(400, "Giờ kết thúc phải sau giờ bắt đầu")
