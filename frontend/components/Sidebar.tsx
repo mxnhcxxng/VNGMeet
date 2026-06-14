@@ -20,7 +20,7 @@ export type View = "browse" | "chat" | "settings" | "bookingHistory";
 
 // Shared pill-button layout for the nav / setting rows (matches the design).
 const ROW =
-  "flex h-10 w-full items-center gap-2 rounded-full px-4 text-base font-medium text-[#18181b] transition-colors";
+  "flex h-10 w-full items-center gap-2 rounded-full px-4 text-base font-medium text-[#18181b] dark:text-[#f7f7f7] transition-colors";
 
 function ChatThreadRow({
   thread,
@@ -95,8 +95,8 @@ function ChatThreadRow({
 
   return (
     <div
-      className={`group/thread flex h-10 w-full items-center rounded-full pl-4 pr-1 text-sm font-medium text-[#18181b] transition-colors ${
-        active ? "bg-[var(--default)]" : "hover:bg-[#f5f5f5]"
+      className={`group/thread flex h-10 w-full items-center rounded-full pl-4 pr-1 text-sm font-medium text-[#18181b] dark:text-[#f7f7f7] transition-colors ${
+        active ? "bg-[var(--default)]" : "hover:bg-[#f5f5f5] dark:hover:bg-[#22262f]"
       }`}
       title={thread.title || "Chat mới"}
     >
@@ -111,7 +111,7 @@ function ChatThreadRow({
             if (event.key === "Enter") saveRename();
             if (event.key === "Escape") cancelRename();
           }}
-          className="min-w-0 flex-1 bg-transparent text-sm font-medium text-[#18181b] outline-none"
+          className="min-w-0 flex-1 bg-transparent text-sm font-medium text-[#18181b] dark:text-[#f7f7f7] outline-none"
         />
       ) : (
         <button
@@ -187,17 +187,17 @@ export function Sidebar({
   const email = display.includes("@") ? display : "";
 
   return (
-    <aside className="flex w-[280px] shrink-0 flex-col rounded-2xl bg-white shadow-sm">
+    <aside className="flex w-[280px] shrink-0 flex-col rounded-2xl bg-white dark:bg-[#0c0e12] shadow-sm">
       {/* Brand + collapse */}
       <div className="flex items-center justify-between px-5 pt-5">
         <div className="flex items-center gap-[7.5px]">
           <BrandIcon size={24} className="shrink-0" />
-          <span className="text-[18px] font-bold leading-6 text-[#181d27]">VNG MEET</span>
+          <span className="text-[18px] font-bold leading-6 text-[#181d27] dark:text-[#f7f7f7]">VNG MEET</span>
         </div>
         <button
           type="button"
           aria-label="Thu gọn"
-          className="flex h-8 w-8 items-center justify-center rounded-2xl text-[#18181b] transition-colors hover:bg-[#f5f5f5]"
+          className="flex h-8 w-8 items-center justify-center rounded-2xl text-[#18181b] dark:text-[#f7f7f7] transition-colors hover:bg-[#f5f5f5] dark:hover:bg-[#22262f]"
         >
           <LayoutSideContentLeft width={16} height={16} />
         </button>
@@ -211,7 +211,7 @@ export function Sidebar({
             onChange("chat");
             onNewChat?.();
           }}
-          className={`${ROW} ${view === "chat" && !activeThreadId ? "bg-[var(--default)]" : "hover:bg-[#f5f5f5]"}`}
+          className={`${ROW} ${view === "chat" && !activeThreadId ? "bg-[var(--default)]" : "hover:bg-[#f5f5f5] dark:hover:bg-[#22262f]"}`}
         >
           <PencilToSquare width={16} height={16} />
           New chat
@@ -219,7 +219,7 @@ export function Sidebar({
         <button
           type="button"
           onClick={() => onChange("browse")}
-          className={`${ROW} ${view === "browse" ? "bg-[var(--default)]" : "hover:bg-[#f5f5f5]"}`}
+          className={`${ROW} ${view === "browse" ? "bg-[var(--default)]" : "hover:bg-[#f5f5f5] dark:hover:bg-[#22262f]"}`}
         >
           <LayoutHeaderCells width={16} height={16} />
           Browse Rooms
@@ -227,7 +227,7 @@ export function Sidebar({
         <button
           type="button"
           onClick={() => onChange("bookingHistory")}
-          className={`${ROW} ${view === "bookingHistory" ? "bg-[var(--default)]" : "hover:bg-[#f5f5f5]"}`}
+          className={`${ROW} ${view === "bookingHistory" ? "bg-[var(--default)]" : "hover:bg-[#f5f5f5] dark:hover:bg-[#22262f]"}`}
         >
           <ClockArrowRotateLeft width={16} height={16} />
           Booking History
@@ -236,7 +236,7 @@ export function Sidebar({
 
       {/* Recents (chat threads) */}
       <div className="mt-3 flex min-h-0 flex-1 flex-col px-4">
-        <div className="px-3 pb-1 pt-3 text-xs font-medium text-[#71717a]">Recents</div>
+        <div className="px-3 pb-1 pt-3 text-xs font-medium text-[#71717a] dark:text-[#94979c]">Recents</div>
         <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {(chatThreads ?? []).map((thread) => {
             const active = view === "chat" && activeThreadId === thread.id;
@@ -255,7 +255,7 @@ export function Sidebar({
             );
           })}
           {!(chatThreads ?? []).length && (
-            <div className="px-4 py-2 text-sm text-[#a4a7ae]">Chưa có thread</div>
+            <div className="px-4 py-2 text-sm text-[#a4a7ae] dark:text-[#94979c]">Chưa có thread</div>
           )}
         </div>
       </div>
@@ -265,13 +265,13 @@ export function Sidebar({
         <button
           type="button"
           onClick={() => onChange("settings")}
-          className={`${ROW} ${view === "settings" ? "bg-[var(--default)]" : "hover:bg-[#f5f5f5]"}`}
+          className={`${ROW} ${view === "settings" ? "bg-[var(--default)]" : "hover:bg-[#f5f5f5] dark:hover:bg-[#22262f]"}`}
         >
           <Gear width={16} height={16} />
           Setting
         </button>
 
-        <div className="h-px w-full bg-[#e9eaeb]" />
+        <div className="h-px w-full bg-[#e9eaeb] dark:bg-[#373a41]" />
 
         <div className="flex items-center justify-between gap-3 px-1 py-2">
           <div className="flex min-w-0 items-center gap-3">
@@ -281,8 +281,8 @@ export function Sidebar({
               className="h-9 w-9 shrink-0 rounded-full object-cover"
             />
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium text-[#18181b]">{name}</p>
-              {email && <p className="truncate text-xs text-[#71717a]">{email}</p>}
+              <p className="truncate text-sm font-medium text-[#18181b] dark:text-[#f7f7f7]">{name}</p>
+              {email && <p className="truncate text-xs text-[#71717a] dark:text-[#94979c]">{email}</p>}
             </div>
           </div>
           <button
@@ -290,7 +290,7 @@ export function Sidebar({
             onClick={onLogout}
             aria-label="Đăng xuất"
             title="Đăng xuất"
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[#71717a] transition-colors hover:bg-[#f5f5f5] hover:text-[#18181b]"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[#71717a] dark:text-[#94979c] transition-colors hover:bg-[#f5f5f5] dark:hover:bg-[#22262f] hover:text-[#18181b] dark:hover:text-[#f7f7f7]"
           >
             <ArrowRightFromSquare width={16} height={16} />
           </button>

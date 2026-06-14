@@ -130,7 +130,7 @@ export function BookingModal({
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
       onMouseDown={closeFromBackdrop}
     >
-      <div className="flex w-full max-w-[800px] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+      <div className="flex w-full max-w-[800px] flex-col overflow-hidden rounded-2xl bg-white dark:bg-[#0c0e12] shadow-2xl">
         {/* Room thumbnail (meeting_room_metadata.thumbnail_link) */}
         <div className="px-6 pt-6">
           <div className="relative h-[120px] w-full overflow-hidden rounded-lg bg-default-100">

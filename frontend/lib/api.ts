@@ -37,6 +37,8 @@ export interface Me {
   profileComplete?: boolean;
 }
 
+export type ThemeMode = "system" | "light" | "dark";
+
 export interface UserProfile {
   email: string;
   email_username: string;
@@ -45,6 +47,7 @@ export interface UserProfile {
   building: string;
   preferred_rooms: string[];
   book_without_confirmation: boolean;
+  theme: ThemeMode;
 }
 
 export interface UserProfileOption {
@@ -176,6 +179,7 @@ export const api = {
   updateUserProfile: (
     payload: Pick<UserProfile, "office" | "floor" | "building" | "preferred_rooms"> & {
       book_without_confirmation?: boolean;
+      theme?: ThemeMode;
     }
   ) =>
     req<{ ok: boolean; profile: UserProfile | null; profileComplete: boolean }>(

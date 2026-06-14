@@ -82,7 +82,7 @@ function FilterSelect({
 }) {
   return (
     <div className="flex items-center gap-2">
-      <span className="whitespace-nowrap text-sm text-[#71717a]">{label}</span>
+      <span className="whitespace-nowrap text-sm text-[#71717a] dark:text-[#94979c]">{label}</span>
       <Select
         aria-label={label}
         variant="secondary"
@@ -268,12 +268,12 @@ export function BookingHistory() {
               <Magnifier
                 width={28}
                 height={28}
-                className="mb-2 text-[#a4a7ae]"
+                className="mb-2 text-[#a4a7ae] dark:text-[#94979c]"
               />
-              <p className="text-base font-semibold text-[#181d27]">
+              <p className="text-base font-semibold text-[#181d27] dark:text-[#f7f7f7]">
                 No results found
               </p>
-              <p className="text-sm text-[#71717a]">
+              <p className="text-sm text-[#71717a] dark:text-[#94979c]">
                 Try adjusting your search or filters
               </p>
             </EmptyState>
@@ -325,7 +325,7 @@ export function BookingHistory() {
           {/* Pagination bar — the Pagination root is the full-width row (summary left, content right). */}
           <Pagination>
             <Pagination.Summary>
-              <div className="flex items-center gap-2 text-sm text-[#71717a]">
+              <div className="flex items-center gap-2 text-sm text-[#71717a] dark:text-[#94979c]">
                 <span>Showing</span>
                 <Select
                   aria-label="Rows per page"

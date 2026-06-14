@@ -44,13 +44,13 @@ function TypingDots() {
 
 function MarkdownMessage({ content }: { content: string }) {
   return (
-    <div className="text-sm leading-7 text-[#252b37]">
+    <div className="text-sm leading-7 text-[#252b37] dark:text-[#f7f7f7]">
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkBreaks]}
         components={{
           p: ({ children }) => <p className="mb-3 last:mb-0">{children}</p>,
           strong: ({ children }) => (
-            <strong className="font-semibold text-[#181d27]">{children}</strong>
+            <strong className="font-semibold text-[#181d27] dark:text-[#f7f7f7]">{children}</strong>
           ),
           em: ({ children }) => <em className="italic">{children}</em>,
           a: ({ children, href }) => (
@@ -67,7 +67,7 @@ function MarkdownMessage({ content }: { content: string }) {
             <img
               src={src ?? ""}
               alt={alt ?? "Map"}
-              className="mt-2 max-h-72 w-full rounded-lg border border-[#e9eaeb] object-contain"
+              className="mt-2 max-h-72 w-full rounded-lg border border-[#e9eaeb] dark:border-[#373a41] object-contain"
               loading="lazy"
             />
           ),
@@ -79,16 +79,16 @@ function MarkdownMessage({ content }: { content: string }) {
           ),
           li: ({ children }) => <li className="leading-7">{children}</li>,
           h1: ({ children }) => (
-            <h1 className="mb-2 mt-1 text-lg font-semibold text-[#181d27]">{children}</h1>
+            <h1 className="mb-2 mt-1 text-lg font-semibold text-[#181d27] dark:text-[#f7f7f7]">{children}</h1>
           ),
           h2: ({ children }) => (
-            <h2 className="mb-2 mt-1 text-base font-semibold text-[#181d27]">{children}</h2>
+            <h2 className="mb-2 mt-1 text-base font-semibold text-[#181d27] dark:text-[#f7f7f7]">{children}</h2>
           ),
           h3: ({ children }) => (
-            <h3 className="mb-1 mt-1 text-sm font-semibold text-[#181d27]">{children}</h3>
+            <h3 className="mb-1 mt-1 text-sm font-semibold text-[#181d27] dark:text-[#f7f7f7]">{children}</h3>
           ),
           blockquote: ({ children }) => (
-            <blockquote className="mb-3 border-l-2 border-[#e9eaeb] pl-3 text-[#535862] last:mb-0">
+            <blockquote className="mb-3 border-l-2 border-[#e9eaeb] dark:border-[#373a41] pl-3 text-[#535862] dark:text-[#94979c] last:mb-0">
               {children}
             </blockquote>
           ),
@@ -98,29 +98,29 @@ function MarkdownMessage({ content }: { content: string }) {
             return isBlock ? (
               <code className="font-mono text-[13px]">{children}</code>
             ) : (
-              <code className="rounded bg-[#f0f0f1] px-1.5 py-0.5 font-mono text-[13px] text-[#181d27]">
+              <code className="rounded bg-[#f0f0f1] dark:bg-[#22262f] px-1.5 py-0.5 font-mono text-[13px] text-[#181d27] dark:text-[#f7f7f7]">
                 {children}
               </code>
             );
           },
           pre: ({ children }) => (
-            <pre className="mb-3 overflow-x-auto rounded-lg bg-[#f5f5f5] p-3 leading-6 last:mb-0">
+            <pre className="mb-3 overflow-x-auto rounded-lg bg-[#f5f5f5] dark:bg-[#22262f] p-3 leading-6 last:mb-0">
               {children}
             </pre>
           ),
-          hr: () => <hr className="my-3 border-[#e9eaeb]" />,
+          hr: () => <hr className="my-3 border-[#e9eaeb] dark:border-[#373a41]" />,
           table: ({ children }) => (
             <div className="mb-3 overflow-x-auto last:mb-0">
               <table className="w-full border-collapse text-sm">{children}</table>
             </div>
           ),
           th: ({ children }) => (
-            <th className="border border-[#e9eaeb] bg-[#f9f9fa] px-3 py-1.5 text-left font-semibold">
+            <th className="border border-[#e9eaeb] dark:border-[#373a41] bg-[#f9f9fa] dark:bg-[#13161b] px-3 py-1.5 text-left font-semibold">
               {children}
             </th>
           ),
           td: ({ children }) => (
-            <td className="border border-[#e9eaeb] px-3 py-1.5">{children}</td>
+            <td className="border border-[#e9eaeb] dark:border-[#373a41] px-3 py-1.5">{children}</td>
           ),
         }}
       >
@@ -256,10 +256,10 @@ function BookingConfirmationCard({
   };
 
   return (
-    <div className="mt-3 flex w-full max-w-[400px] flex-col gap-8 rounded-3xl border border-[#e9eaeb] bg-white p-6">
+    <div className="mt-3 flex w-full max-w-[400px] flex-col gap-8 rounded-3xl border border-[#e9eaeb] dark:border-[#373a41] bg-white dark:bg-[#13161b] p-6">
       <div className="flex flex-col gap-1">
         <div className="flex flex-col items-center gap-3 pt-1">
-          <div className="flex size-10 items-center justify-center rounded-full bg-[#fee7de]">
+          <div className="flex size-10 items-center justify-center rounded-full bg-[#fee7de] dark:bg-[#3B1202]">
             <Calendar width={16} height={16} className="text-[var(--accent)]" />
           </div>
           <h2 className="w-full break-words text-center text-base font-semibold text-default-900">
@@ -416,8 +416,8 @@ function AssistantActions({ content }: { content: string }) {
 
 function AssistantAvatar() {
   return (
-    <Avatar size="sm" className="mt-0.5 shrink-0 bg-[#FEEAE2]">
-      <Avatar.Fallback className="bg-[#FEEAE2]">
+    <Avatar size="sm" className="mt-0.5 shrink-0 bg-[#FEEAE2] dark:bg-[#3B1202]">
+      <Avatar.Fallback className="bg-[#FEEAE2] dark:bg-[#3B1202]">
         <BrandIcon size={18} />
       </Avatar.Fallback>
     </Avatar>
@@ -607,19 +607,19 @@ export function ChatPanel({
           {loading ? (
             <div className="flex h-[60vh] flex-col items-center justify-center gap-3">
               <Spinner />
-              <span className="text-sm text-[#535862]">Đang tải chat...</span>
+              <span className="text-sm text-[#535862] dark:text-[#94979c]">Đang tải chat...</span>
             </div>
           ) : empty ? (
             <div className="flex h-[60vh] flex-col items-center justify-center text-center">
-              <Avatar size="lg" className="mb-5 bg-[#FEEAE2]">
-                <Avatar.Fallback className="bg-[#FEEAE2]">
+              <Avatar size="lg" className="mb-5 bg-[#FEEAE2] dark:bg-[#3B1202]">
+                <Avatar.Fallback className="bg-[#FEEAE2] dark:bg-[#3B1202]">
                   <BrandIcon size={28} />
                 </Avatar.Fallback>
               </Avatar>
-              <h1 className="text-2xl font-semibold tracking-tight text-[#181d27]">
+              <h1 className="text-2xl font-semibold tracking-tight text-[#181d27] dark:text-[#f7f7f7]">
                 When would you like to book a room?
               </h1>
-              <p className="mt-2 max-w-md text-sm text-[#535862]">
+              <p className="mt-2 max-w-md text-sm text-[#535862] dark:text-[#94979c]">
                 Describe your meeting and I&apos;ll suggest the best available rooms.
               </p>
               <div className="mt-8 grid w-full max-w-xl gap-2 sm:grid-cols-2">
@@ -628,7 +628,7 @@ export function ChatPanel({
                     key={text}
                     type="button"
                     onClick={() => pickSuggestion(text)}
-                    className="rounded-xl border border-[#e9eaeb] bg-white px-4 py-3 text-left text-sm text-[#414651] transition hover:border-[#d5d7da] hover:bg-[#f9f9fa]"
+                    className="rounded-xl border border-[#e9eaeb] dark:border-[#373a41] bg-white dark:bg-[#13161b] px-4 py-3 text-left text-sm text-[#414651] dark:text-[#f7f7f7] transition hover:border-[#d5d7da] dark:hover:border-[#373a41] hover:bg-[#f9f9fa] dark:hover:bg-[#22262f]"
                   >
                     {text}
                   </button>
@@ -665,7 +665,7 @@ export function ChatPanel({
                 if (message.role === "user") {
                   return (
                     <div key={message.id} className="flex justify-end">
-                      <div className="max-w-[80%] whitespace-pre-line rounded-2xl rounded-br-md bg-[#f5f5f5] px-4 py-2.5 text-sm leading-6 text-[#181d27]">
+                      <div className="max-w-[80%] whitespace-pre-line rounded-2xl rounded-br-md bg-[#f5f5f5] dark:bg-[#22262f] px-4 py-2.5 text-sm leading-6 text-[#181d27] dark:text-[#f7f7f7]">
                         {message.content}
                       </div>
                     </div>
@@ -719,7 +719,7 @@ export function ChatPanel({
           </div>
         )}
 
-        <div className="flex flex-col gap-2 rounded-2xl border border-[#e9eaeb] bg-[var(--default)] p-3 transition focus-within:bg-[var(--default-hover)]">
+        <div className="flex flex-col gap-2 rounded-2xl border border-[#e9eaeb] dark:border-[#373a41] bg-[var(--default)] p-3 transition focus-within:bg-[var(--default-hover)]">
           <textarea
             ref={textareaRef}
             rows={2}
@@ -731,7 +731,7 @@ export function ChatPanel({
               el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
             }}
             placeholder="Describe your meeting requirements..."
-            className="block max-h-[200px] min-h-[60px] w-full resize-none bg-transparent px-1 py-1.5 text-sm leading-6 text-[#181d27] outline-none placeholder:text-[#a4a7ae]"
+            className="block max-h-[200px] min-h-[60px] w-full resize-none bg-transparent px-1 py-1.5 text-sm leading-6 text-[#181d27] dark:text-[#f7f7f7] outline-none placeholder:text-[#a4a7ae] dark:placeholder:text-[#94979c]"
             onKeyDown={(e) => {
               // Ignore Enter while an IME composition is active (Vietnamese / CJK
               // input methods on macOS, etc.). The Enter that commits the

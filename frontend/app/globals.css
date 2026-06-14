@@ -2,6 +2,12 @@
 @import "tailwindcss";
 @import "@heroui/react/styles";
 
+/* Tailwind v4 doesn't read `darkMode: "class"` from tailwind.config.js unless a
+   JS config is wired in, so `dark:` would otherwise key off the OS
+   `prefers-color-scheme`. Bind it to the `.dark` class we toggle on <html>
+   instead, matching HeroUI's own class-based theming. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 html,
 body {
   height: 100%;
@@ -10,6 +16,12 @@ body {
 body {
   font-family: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
   color: #181d27;
+}
+
+/* Dark mode: flip the inherited base text color so anything that doesn't set
+   its own color (or text-foreground) stays legible on the dark background. */
+html.dark body {
+  color: #f7f7f7;
 }
 
 /* Brand color comes solely from --accent (set below). The `primary` button

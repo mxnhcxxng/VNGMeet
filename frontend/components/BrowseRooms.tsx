@@ -359,9 +359,9 @@ export function BrowseRooms({
   }, [slotMinutes]);
 
   return (
-    <div className="flex h-full flex-col bg-white">
+    <div className="flex h-full flex-col bg-white dark:bg-[#0c0e12]">
       {/* Office tabs */}
-      <div className="border-b border-[color:var(--separator)] bg-white px-6 pt-3">
+      <div className="border-b border-[color:var(--separator)] bg-white dark:bg-[#0c0e12] px-6 pt-3">
         <Tabs
           variant="secondary"
           selectedKey={office || undefined}
@@ -381,7 +381,7 @@ export function BrowseRooms({
       </div>
 
       {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-3 border-b border-[color:var(--separator)] bg-white px-6 py-4">
+      <div className="flex flex-wrap items-center gap-3 border-b border-[color:var(--separator)] bg-white dark:bg-[#0c0e12] px-6 py-4">
         <Button
           variant="tertiary"
           className="rounded-full"
@@ -529,7 +529,7 @@ export function BrowseRooms({
       <div ref={scrollRef} className="flex-1 overflow-auto">
         {rooms.length === 0 ? (
           <div className="flex h-full items-center justify-center p-6">
-            <Card className="w-full max-w-md border border-[color:var(--separator)] bg-white text-center shadow-sm">
+            <Card className="w-full max-w-md border border-[color:var(--separator)] bg-white dark:bg-[#13161b] text-center shadow-sm">
               <Card.Content className="items-center gap-4 p-8">
                 <div className="flex h-12 w-12 items-center justify-center rounded-full bg-default-100 text-default-500">
                   <CalendarIcon width={20} height={20} />
@@ -554,10 +554,10 @@ export function BrowseRooms({
           <div className="min-w-fit">
             {/* Room header */}
             <div
-              className="sticky top-0 z-20 grid border-b border-[color:var(--separator)] bg-white shadow-sm"
+              className="sticky top-0 z-20 grid border-b border-[color:var(--separator)] bg-white dark:bg-[#0c0e12] shadow-sm"
               style={{ gridTemplateColumns: cols }}
             >
-              <div className="sticky left-0 z-30 border-r border-[color:var(--separator)] bg-white" />
+              <div className="sticky left-0 z-30 border-r border-[color:var(--separator)] bg-white dark:bg-[#0c0e12]" />
               {rooms.map((r) => (
                 <div
                   key={r.email}
@@ -588,7 +588,7 @@ export function BrowseRooms({
                   <div key={t} className="grid" style={{ gridTemplateColumns: cols }}>
                     {/* time label (sticky to the left while scrolling) */}
                     <div
-                      className="sticky left-0 z-10 border-r border-[color:var(--separator)] bg-white"
+                      className="sticky left-0 z-10 border-r border-[color:var(--separator)] bg-white dark:bg-[#0c0e12]"
                       style={{ height: SLOT_H }}
                     >
                       {onHour && (
@@ -605,11 +605,12 @@ export function BrowseRooms({
                         <div
                           key={r.email}
                           aria-disabled
-                          className="border-r border-t border-[color:var(--separator)]"
-                          style={{
-                            height: SLOT_H,
-                            backgroundColor: "var(--background-secondary)",
-                          }}
+                          // Off-hours/disabled. In dark mode --background-secondary
+                          // is only ~4% off the page bg, so the cell reads the same
+                          // as a free slot — lift it a touch to set it apart, but
+                          // gently enough that the grid separators stay visible.
+                          className="border-r border-t border-[color:var(--separator)] bg-[var(--background-secondary)] dark:bg-[#14171e]"
+                          style={{ height: SLOT_H }}
                         />
                       );
                     }
@@ -645,7 +646,7 @@ export function BrowseRooms({
                               openBooking(r, t, schedule);
                             }
                           }}
-                          className="accent-keep-blue group cursor-pointer border-r border-t border-[color:var(--separator)] bg-white px-1 outline-none transition-colors hover:bg-[var(--accent-soft)] hover:shadow-[inset_0_0_0_1px_var(--accent)] focus:bg-[var(--accent-soft)] focus:shadow-[inset_0_0_0_1px_var(--accent)]"
+                          className="accent-keep-blue group cursor-pointer border-r border-t border-[color:var(--separator)] bg-white dark:bg-[#0c0e12] px-1 outline-none transition-colors hover:bg-[var(--accent-soft)] hover:shadow-[inset_0_0_0_1px_var(--accent)] focus:bg-[var(--accent-soft)] focus:shadow-[inset_0_0_0_1px_var(--accent)]"
                           style={{ height: SLOT_H }}
                         >
                           <div className="flex h-full items-center justify-center">
@@ -663,7 +664,7 @@ export function BrowseRooms({
                     return (
                       <div
                         key={r.email}
-                        className="border-r border-t border-[color:var(--separator)] bg-white"
+                        className="border-r border-t border-[color:var(--separator)] bg-white dark:bg-[#0c0e12]"
                         style={{ height: SLOT_H }}
                       >
                         <div
@@ -730,7 +731,7 @@ export function BrowseRooms({
                 style={{ top: markerOffset }}
               >
                 <span
-                  className="sticky left-0 z-20 flex shrink-0 items-center justify-end bg-white pr-1.5"
+                  className="sticky left-0 z-20 flex shrink-0 items-center justify-end bg-white dark:bg-[#0c0e12] pr-1.5"
                   style={{ width: TIME_COL }}
                 >
                   <span

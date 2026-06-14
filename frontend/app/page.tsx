@@ -38,6 +38,7 @@ import {
 } from "@/components/ChatPanel";
 import { SettingsScreen } from "@/components/SettingsScreen";
 import { BrandIcon } from "@/components/BrandIcon";
+import { useTheme } from "@/app/providers";
 import {
   BookingHistory,
   clearBookingHistoryCache,
@@ -278,7 +279,7 @@ function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
   };
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen bg-white dark:bg-[#0c0e12]">
       <main className="grid min-h-screen lg:grid-cols-[1fr_1.04fr]">
         <section className="flex items-center justify-center px-8 py-12">
           <form
@@ -291,10 +292,10 @@ function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
             <BrandIcon size={64} />
 
             <div className="flex w-full flex-col gap-3">
-              <h1 className="text-2xl font-bold leading-8 text-[#181d27]">
+              <h1 className="text-2xl font-bold leading-8 text-[#181d27] dark:text-[#f7f7f7]">
                 Welcome to VNG Meet
               </h1>
-              <p className="text-base leading-6 text-[#535862]">
+              <p className="text-base leading-6 text-[#535862] dark:text-[#94979c]">
                 Please read the instruction on the right side carefully to get
                 the Microsoft Graph Access Token
               </p>
@@ -314,7 +315,7 @@ function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
                     <button
                       type="button"
                       onClick={handlePaste}
-                      className="inline-flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-sm font-medium text-[#535862] transition-colors hover:bg-black/5 hover:text-[#181d27]"
+                      className="inline-flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-sm font-medium text-[#535862] transition-colors hover:bg-black/5 hover:text-[#181d27] dark:text-[#94979c] dark:hover:bg-white/5 dark:hover:text-[#f7f7f7]"
                     >
                       <Copy width={14} height={14} />
                       Paste
@@ -488,7 +489,7 @@ function ProfileInfoScreen({
   };
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen bg-white dark:bg-[#0c0e12]">
       <main className="grid min-h-screen lg:grid-cols-[1fr_1.04fr]">
         <section className="flex items-center justify-center px-8 py-12">
           <div className="flex w-full max-w-[480px] flex-col items-start gap-6">
@@ -496,10 +497,10 @@ function ProfileInfoScreen({
 
             {/* Header */}
             <div className="flex w-full flex-col gap-3">
-              <h1 className="text-2xl font-bold leading-8 text-[#181d27]">
+              <h1 className="text-2xl font-bold leading-8 text-[#181d27] dark:text-[#f7f7f7]">
                 Hi, {emailUsername}
               </h1>
-              <p className="text-base leading-6 text-[#535862]">
+              <p className="text-base leading-6 text-[#535862] dark:text-[#94979c]">
                 Complete your details to get better room recommendations. You can
             always change it later in Setting
               </p>
@@ -723,6 +724,7 @@ function ProfileInfoScreen({
 }
 
 export default function Home() {
+  const { setTheme } = useTheme();
   const [me, setMe] = useState<Me | null>(null);
   const [loading, setLoading] = useState(true);
   const [sessionExpiredOpen, setSessionExpiredOpen] = useState(false);
@@ -772,6 +774,19 @@ export default function Home() {
   useEffect(() => {
     refreshMe();
   }, [refreshMe]);
+
+  // Theme is a per-user preference: while signed in, the profile's saved theme
+  // is the source of truth. While signed out, ignore any lingering stored
+  // choice and follow the OS so the pre-login screens match the system
+  // appearance. (ThemeProvider keeps the value in localStorage + on <html>.)
+  useEffect(() => {
+    if (!me) return;
+    if (me.authenticated) {
+      if (me.profile?.theme) setTheme(me.profile.theme);
+    } else {
+      setTheme("system");
+    }
+  }, [me, setTheme]);
 
   // Supabase OAuth flow (only when configured).
   useEffect(() => {
@@ -916,7 +931,7 @@ export default function Home() {
 
   const sessionExpiredModal = sessionExpiredOpen ? (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-[420px] rounded-2xl bg-white p-6 shadow-2xl">
+      <div className="w-full max-w-[420px] rounded-2xl bg-white p-6 shadow-2xl dark:bg-[#0c0e12]">
         <h2 className="text-lg font-semibold text-default-900">
           Session expired
         </h2>
@@ -952,7 +967,7 @@ export default function Home() {
   }
 
   return (
-    <div className="flex h-screen gap-2 overflow-hidden bg-[#f0f0f1] p-2">
+    <div className="flex h-screen gap-2 overflow-hidden bg-[#f0f0f1] p-2 dark:bg-[#13161b]">
       <Sidebar
         view={view}
         onChange={setView}
@@ -966,7 +981,7 @@ export default function Home() {
         onDeleteThread={handleDeleteThread}
       />
 
-      <main className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-2xl bg-white shadow-sm">
+      <main className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-2xl bg-white shadow-sm dark:bg-[#0c0e12]">
         {error && (
           <div className="border-b border-danger-200 bg-danger-50 px-6 py-2 text-sm text-danger">
             {error}

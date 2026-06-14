@@ -22,64 +22,26 @@ import {
 import {
   api,
   type Me,
+  type ThemeMode,
   type UserProfileOption,
   type UserProfileOptions,
 } from "@/lib/api";
+import { useTheme } from "@/app/providers";
 
-// --- Display preference (mock data, FE-only — not persisted) -----------------
+// --- Display preference ------------------------------------------------------
 
-type ThemeMode = "system" | "light" | "dark";
-
-// A tiny window mockup so each card reads as a light / dark / split preview,
-// mirroring the Figma cards without pulling in the exported raster assets.
-function ThemePreview({ tone }: { tone: "light" | "dark" }) {
-  const isDark = tone === "dark";
-  const screen = isDark ? "#0c0e12" : "#ffffff";
-  const nav = isDark ? "#13161b" : "#fafafa";
-  const border = isDark ? "#373a41" : "#e9eaeb";
-  const muted = isDark ? "#22262f" : "#f5f5f5";
-  const text = isDark ? "#f7f7f7" : "#181d27";
-
-  return (
-    <div
-      className="absolute inset-0 overflow-hidden rounded-[5px] border"
-      style={{ background: screen, borderColor: border }}
-    >
-      <div
-        className="flex h-[11px] items-center gap-[3px] px-1.5"
-        style={{ background: nav, borderBottom: `1px solid ${border}` }}
-      >
-        <span className="h-1 w-1 rounded-full bg-[#ff5f57]" />
-        <span className="h-1 w-1 rounded-full bg-[#febc2e]" />
-        <span className="h-1 w-1 rounded-full bg-[#28c840]" />
-      </div>
-      <div className="flex h-full">
-        <div className="flex w-[28%] flex-col gap-[3px] p-1.5" style={{ borderRight: `1px solid ${border}` }}>
-          <span className="h-1 rounded-sm bg-[#1570ef]" />
-          <span className="h-1 rounded-sm" style={{ background: muted }} />
-          <span className="h-1 rounded-sm" style={{ background: muted }} />
-          <span className="h-1 rounded-sm" style={{ background: muted }} />
-        </div>
-        <div className="flex flex-1 flex-col gap-[4px] p-1.5">
-          <span className="text-[6px] font-bold" style={{ color: text }}>
-            Your calendar
-          </span>
-          <span className="h-[34px] rounded-[3px]" style={{ background: nav }} />
-          <span className="h-[34px] rounded-[3px]" style={{ background: nav }} />
-        </div>
-      </div>
-    </div>
-  );
-}
-
+// Each card is the exported Figma preview thumbnail (200×132, includes its own
+// rounded border). Selection adds an orange ring + dot on top.
 function ThemeCard({
   mode,
   label,
+  src,
   selected,
   onSelect,
 }: {
   mode: ThemeMode;
   label: string;
+  src: string;
   selected: boolean;
   onSelect: (mode: ThemeMode) => void;
 }) {
@@ -90,41 +52,37 @@ function ThemeCard({
       className="flex max-w-[240px] flex-col items-start gap-3 text-left"
     >
       <div
-        className={`relative h-[132px] w-[200px] overflow-hidden rounded-[10px] bg-[#f5f5f5] transition-shadow ${
+        className={`relative h-[132px] w-[200px] overflow-hidden rounded-[10px] transition-shadow ${
           selected
-            ? "shadow-[0px_0px_0px_2px_#ffffff,0px_0px_0px_4px_#f05a22]"
-            : "ring-1 ring-inset ring-[#d5d7da]"
+            ? "shadow-[0px_0px_0px_2px_#ffffff,0px_0px_0px_4px_#f05a22] dark:shadow-[0px_0px_0px_2px_#0c0e12,0px_0px_0px_4px_#f05a22]"
+            : ""
         }`}
       >
-        <div className="absolute inset-[11px]">
-          {mode === "system" ? (
-            <div className="absolute inset-0 flex">
-              <div className="relative w-[58%]">
-                <ThemePreview tone="light" />
-              </div>
-              <div className="relative flex-1">
-                <ThemePreview tone="dark" />
-              </div>
-            </div>
-          ) : (
-            <ThemePreview tone={mode === "dark" ? "dark" : "light"} />
-          )}
-        </div>
+        <img
+          src={src}
+          alt={label}
+          width={200}
+          height={132}
+          draggable={false}
+          className="h-full w-full select-none"
+        />
         {selected && (
           <span className="absolute bottom-2 left-2 flex h-5 w-5 items-center justify-center rounded-full bg-[#f05a22]">
             <span className="h-1.5 w-1.5 rounded-full bg-white" />
           </span>
         )}
       </div>
-      <span className="w-full text-sm font-semibold text-[#181d27]">{label}</span>
+      <span className="w-full text-sm font-semibold text-[#181d27] dark:text-[#f7f7f7]">
+        {label}
+      </span>
     </button>
   );
 }
 
-const THEME_CARDS: { mode: ThemeMode; label: string }[] = [
-  { mode: "system", label: "System preference" },
-  { mode: "light", label: "Light mode" },
-  { mode: "dark", label: "Dark mode" },
+const THEME_CARDS: { mode: ThemeMode; label: string; src: string }[] = [
+  { mode: "system", label: "System preference", src: "/theme-system.svg" },
+  { mode: "light", label: "Light mode", src: "/theme-light.svg" },
+  { mode: "dark", label: "Dark mode", src: "/theme-dark.svg" },
 ];
 
 // --- Language (mock data, FE-only — not persisted) ---------------------------
@@ -139,8 +97,8 @@ const LANGUAGE_OPTIONS = [
 function SectionLabel({ title, description }: { title: string; description: string }) {
   return (
     <div className="flex min-w-[200px] max-w-[280px] flex-1 flex-col">
-      <p className="text-sm font-medium text-[#18181b]">{title}</p>
-      <p className="text-sm text-[#71717a]">{description}</p>
+      <p className="text-sm font-medium text-[#18181b] dark:text-[#f7f7f7]">{title}</p>
+      <p className="text-sm text-[#71717a] dark:text-[#94979c]">{description}</p>
     </div>
   );
 }
@@ -166,8 +124,10 @@ export function SettingsScreen({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // Mock-only preferences (kept in local state, never sent to the backend).
-  const [theme, setTheme] = useState<ThemeMode>("system");
+  // Theme is applied live (and persisted) through the global provider; we still
+  // track the last-saved value below so Cancel can revert it.
+  const { theme, setTheme } = useTheme();
+  // Language stays FE-only for now (not persisted to the backend).
   const [language, setLanguage] = useState("en");
 
   // Baseline snapshot of the form so Save only enables on a real change (and
@@ -178,7 +138,7 @@ export function SettingsScreen({
     building: me.profile?.building ?? "",
     preferredRooms: [...(me.profile?.preferred_rooms ?? [])],
     bookWithoutConfirmation: me.profile?.book_without_confirmation ?? false,
-    theme: "system" as ThemeMode,
+    theme: (me.profile?.theme ?? "system") as ThemeMode,
     language: "en",
   });
 
@@ -272,6 +232,7 @@ export function SettingsScreen({
         building: isCampus ? building : "",
         preferred_rooms: preferredRooms,
         book_without_confirmation: bookWithoutConfirmation,
+        theme,
       });
       // New baseline so the button drops back to disabled after a save.
       initial.current = {
@@ -309,7 +270,7 @@ export function SettingsScreen({
 
       <div className="mx-auto flex w-full max-w-[1280px] flex-col gap-12">
         <div className="-mt-10 flex items-start gap-5 px-8">
-            <div className="flex size-[160px] shrink-0 items-center justify-center rounded-full border border-black/10 bg-white p-1.5">
+            <div className="flex size-[160px] shrink-0 items-center justify-center rounded-full border border-black/10 dark:border-[#373a41] bg-white dark:bg-[#13161b] p-1.5">
               <img
                 src="/default-avatar.jpg"
                 alt={displayName || "User"}
@@ -317,8 +278,8 @@ export function SettingsScreen({
               />
             </div>
             <div className="flex flex-1 flex-col gap-1 pt-16">
-              <p className="text-2xl font-semibold text-[#181d27]">{displayName}</p>
-              {email && <p className="text-base text-[#535862]">{email}</p>}
+              <p className="text-2xl font-semibold text-[#181d27] dark:text-[#f7f7f7]">{displayName}</p>
+              {email && <p className="text-base text-[#535862] dark:text-[#94979c]">{email}</p>}
             </div>
           </div>
 
@@ -506,7 +467,7 @@ export function SettingsScreen({
             </div>
           </div>
 
-          <div className="h-px w-full bg-[#e9eaeb]" />
+          <div className="h-px w-full bg-[#e9eaeb] dark:bg-[#373a41]" />
 
           {/* Booking confirmation toggle */}
           <div className="flex flex-wrap items-start gap-x-8 gap-y-4">
@@ -523,7 +484,7 @@ export function SettingsScreen({
                   <Switch.Thumb />
                 </Switch.Control>
               </Switch>
-              <span className="text-sm font-medium text-[#18181b]">
+              <span className="text-sm font-medium text-[#18181b] dark:text-[#f7f7f7]">
                 {bookWithoutConfirmation
                   ? "Book without confirmation"
                   : "Ask for confirmation"}
@@ -531,7 +492,7 @@ export function SettingsScreen({
             </div>
           </div>
 
-          <div className="h-px w-full bg-[#e9eaeb]" />
+          <div className="h-px w-full bg-[#e9eaeb] dark:bg-[#373a41]" />
 
           {/* Display preference (mock) */}
           <div className="flex flex-wrap items-start gap-x-8 gap-y-4">
@@ -545,6 +506,7 @@ export function SettingsScreen({
                   key={card.mode}
                   mode={card.mode}
                   label={card.label}
+                  src={card.src}
                   selected={theme === card.mode}
                   onSelect={setTheme}
                 />
@@ -552,7 +514,7 @@ export function SettingsScreen({
             </div>
           </div>
 
-          <div className="h-px w-full bg-[#e9eaeb]" />
+          <div className="h-px w-full bg-[#e9eaeb] dark:bg-[#373a41]" />
 
           {/* Language (mock) */}
           <div className="flex flex-wrap items-start gap-x-8 gap-y-4">
@@ -584,7 +546,7 @@ export function SettingsScreen({
             </div>
           </div>
 
-          <div className="h-px w-full bg-[#e9eaeb]" />
+          <div className="h-px w-full bg-[#e9eaeb] dark:bg-[#373a41]" />
 
           {err && (
             <Chip color="danger" variant="soft" size="sm" className="self-start">

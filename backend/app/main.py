@@ -335,6 +335,7 @@ def _profile_payload(profile: dict | None, email: str | None = None) -> dict | N
         "building": row.get("building") or "",
         "preferred_rooms": row.get("preferred_rooms") or [],
         "book_without_confirmation": bool(row.get("book_without_confirmation")),
+        "theme": row.get("theme") or "system",
     }
 
 
@@ -349,7 +350,7 @@ def _read_user_profile(profile_id: str | None, email: str | None = None) -> dict
             .table("user_profiles")
             .select(
                 "id, email, email_username, office, floor, building, "
-                "preferred_rooms, book_without_confirmation"
+                "preferred_rooms, book_without_confirmation, theme"
             )
             .limit(1)
         )
@@ -983,6 +984,7 @@ class UserProfileUpdateRequest(BaseModel):
     building: str = ""
     preferred_rooms: list[str] = Field(default_factory=list)
     book_without_confirmation: bool | None = None
+    theme: str | None = None
 
 
 @app.get("/api/users/profile-options")
@@ -1009,6 +1011,11 @@ def update_my_profile(request: Request, payload: UserProfileUpdateRequest):
     # through separately when the client sent it.
     if payload.book_without_confirmation is not None:
         cleaned["book_without_confirmation"] = payload.book_without_confirmation
+    if payload.theme is not None:
+        theme = str(payload.theme).strip().lower()
+        if theme not in ("system", "light", "dark"):
+            raise HTTPException(400, "Theme không hợp lệ.")
+        cleaned["theme"] = theme
 
     profile_id = _upsert_user_profile(claims)
     if not profile_id:
@@ -2220,14 +2227,25 @@ async def _call_llm_with_tools(
     weekday_names = [
         "Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6", "Thứ 7", "Chủ nhật",
     ]
+    # Precompute calendar-week ranges so the model never does week math itself
+    # (it tends to read "tuần sau" as today+7 instead of next Monday's week).
+    today = now.date()
+    this_monday = today - timedelta(days=today.weekday())
+    this_sunday = this_monday + timedelta(days=6)
+    next_monday = this_monday + timedelta(days=7)
+    next_sunday = next_monday + timedelta(days=6)
     runtime_context = (
         f"\n\nNgữ cảnh thời gian hiện tại:\n"
-        f"- Hôm nay là {now.date().isoformat()} ({weekday_names[now.weekday()]}).\n"
+        f"- Hôm nay là {today.isoformat()} ({weekday_names[now.weekday()]}).\n"
         f"- Thời gian hiện tại là {now.strftime('%H:%M')}.\n"
         f"- Timezone là {settings.timezone}.\n"
-        "- Tuần bắt đầu từ Thứ 2 và kết thúc vào Chủ nhật. Khi người dùng nói "
-        "'đầu tuần', 'thứ 2 tuần này', 'cuối tuần', 'tuần sau'... hãy tính theo "
-        "quy ước Thứ 2 là ngày đầu tuần.\n"
+        "- Tuần bắt đầu từ Thứ 2 và kết thúc vào Chủ nhật.\n"
+        f"- Tuần này: Thứ 2 {this_monday.isoformat()} đến Chủ nhật {this_sunday.isoformat()}.\n"
+        f"- Tuần sau: Thứ 2 {next_monday.isoformat()} đến Chủ nhật {next_sunday.isoformat()}.\n"
+        "- 'Tuần sau'/'tuần tới' là tuần lịch kế tiếp ở trên (bắt đầu Thứ 2 "
+        f"{next_monday.isoformat()}), KHÔNG phải 7 ngày kể từ hôm nay. Khi user "
+        "nói 'đầu tuần', 'thứ X tuần này/tuần sau', 'cuối tuần'... hãy lấy ngày "
+        "tương ứng trong các dải ngày đã cho, không tự cộng trừ ngày.\n"
         "- Khi người dùng nói hôm nay/ngày mai/hôm qua hoặc thứ trong tuần, "
         "hãy quy đổi theo ngữ cảnh thời gian này trước khi gọi function.\n"
         "- Quy ước buổi trong ngày: sáng = 09:00-12:00, trưa = 12:00-13:00, "

@@ -41,6 +41,12 @@ alter table user_profiles add column if not exists book_without_confirmation boo
 alter table user_profiles alter column book_without_confirmation set default false;
 update user_profiles set book_without_confirmation = false where book_without_confirmation is null;
 alter table user_profiles alter column book_without_confirmation set not null;
+-- UI theme preference: 'system' follows the OS setting, 'light' / 'dark' force a mode.
+alter table user_profiles add column if not exists theme text not null default 'system';
+alter table user_profiles alter column theme set default 'system';
+update user_profiles set theme = 'system' where theme is null;
+alter table user_profiles
+  add constraint user_profiles_theme_check check (theme in ('system', 'light', 'dark')) not valid;
 create unique index if not exists user_profiles_email_lower_key
   on user_profiles (lower(email));
 create unique index if not exists user_profiles_email_key
