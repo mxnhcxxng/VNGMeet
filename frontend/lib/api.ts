@@ -39,6 +39,8 @@ export interface Me {
 
 export type ThemeMode = "system" | "light" | "dark";
 
+export type UserRole = "admin" | "user";
+
 export interface UserProfile {
   email: string;
   email_username: string;
@@ -48,6 +50,7 @@ export interface UserProfile {
   preferred_rooms: string[];
   book_without_confirmation: boolean;
   theme: ThemeMode;
+  role: UserRole;
 }
 
 export interface UserProfileOption {

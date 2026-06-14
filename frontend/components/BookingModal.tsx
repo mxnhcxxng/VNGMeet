@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type MouseEvent } from "react";
+import { useEffect, useRef, useState, type MouseEvent } from "react";
 import {
   Button,
   Input,
@@ -28,6 +28,7 @@ export function BookingModal({
   onClose,
   slot,
   endOptions,
+  initialEndTime,
   userDomain,
   onBooked,
 }: {
@@ -35,6 +36,7 @@ export function BookingModal({
   onClose: () => void;
   slot: BookingSlot | null;
   endOptions: string[]; // selectable end times (after startTime)
+  initialEndTime?: string | null; // end time pre-selected from a drag selection
   userDomain?: string; // email username, used to auto-fill the meeting title
   onBooked: () => void;
 }) {
@@ -45,14 +47,26 @@ export function BookingModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Initialise the end time once per opened slot. A drag selection passes the
+  // chosen end via `initialEndTime`; otherwise default to the first option (the
+  // single-slot duration). Keyed so the user's later manual changes aren't
+  // overwritten on re-render.
+  const initKeyRef = useRef<string | null>(null);
   useEffect(() => {
-    if (isOpen && slot) {
-      if (!endTime || !endOptions.includes(endTime)) {
-        setEndTime(endOptions[0] ?? "");
-      }
-      setError(null);
+    if (!isOpen || !slot) {
+      initKeyRef.current = null;
+      return;
     }
-  }, [endOptions, endTime, isOpen, slot]);
+    const key = `${slot.roomEmail}|${slot.date}|${slot.startTime}|${initialEndTime ?? ""}`;
+    if (initKeyRef.current === key) return;
+    initKeyRef.current = key;
+    const preferred =
+      initialEndTime && endOptions.includes(initialEndTime)
+        ? initialEndTime
+        : endOptions[0] ?? "";
+    setEndTime(preferred);
+    setError(null);
+  }, [endOptions, initialEndTime, isOpen, slot]);
 
   // Auto-fill the meeting title when the modal opens: "<Domain>'s Meeting" for
   // instant bookings, "<Domain>'s Scheduled Meeting" for schedule bookings.

@@ -47,6 +47,15 @@ alter table user_profiles alter column theme set default 'system';
 update user_profiles set theme = 'system' where theme is null;
 alter table user_profiles
   add constraint user_profiles_theme_check check (theme in ('system', 'light', 'dark')) not valid;
+-- Access role. 'admin' sees the full assistant reply (including <think> blocks),
+-- 'user' has them hidden in the UI. Role is managed by service_role only; the
+-- client read policy below never lets a user change their own role.
+alter table user_profiles add column if not exists role text not null default 'user';
+alter table user_profiles alter column role set default 'user';
+update user_profiles set role = 'user' where role is null;
+alter table user_profiles alter column role set not null;
+alter table user_profiles
+  add constraint user_profiles_role_check check (role in ('admin', 'user')) not valid;
 create unique index if not exists user_profiles_email_lower_key
   on user_profiles (lower(email));
 create unique index if not exists user_profiles_email_key

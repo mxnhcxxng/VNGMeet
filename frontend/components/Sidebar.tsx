@@ -26,12 +26,14 @@ function ChatThreadRow({
   thread,
   active,
   onClick,
+  onPrefetch,
   onRename,
   onDelete,
 }: {
   thread: ChatThread;
   active: boolean;
   onClick: () => void;
+  onPrefetch?: () => void;
   onRename?: (threadId: string, title: string) => Promise<void>;
   onDelete?: (threadId: string) => Promise<void>;
 }) {
@@ -99,6 +101,8 @@ function ChatThreadRow({
         active ? "bg-[var(--default)]" : "hover:bg-[#f5f5f5] dark:hover:bg-[#22262f]"
       }`}
       title={thread.title || "Chat mới"}
+      onMouseEnter={onPrefetch}
+      onFocus={onPrefetch}
     >
       {editing ? (
         <input
@@ -168,6 +172,7 @@ export function Sidebar({
   activeThreadId,
   onNewChat,
   onSelectThread,
+  onPrefetchThread,
   onRenameThread,
   onDeleteThread,
 }: {
@@ -179,6 +184,7 @@ export function Sidebar({
   activeThreadId?: string | null;
   onNewChat?: () => void;
   onSelectThread?: (threadId: string) => void;
+  onPrefetchThread?: (threadId: string) => void;
   onRenameThread?: (threadId: string, title: string) => Promise<void>;
   onDeleteThread?: (threadId: string) => Promise<void>;
 }) {
@@ -249,6 +255,11 @@ export function Sidebar({
                   onChange("chat");
                   onSelectThread?.(thread.id);
                 }}
+                onPrefetch={
+                  onPrefetchThread
+                    ? () => onPrefetchThread(thread.id)
+                    : undefined
+                }
                 onRename={onRenameThread}
                 onDelete={onDeleteThread}
               />

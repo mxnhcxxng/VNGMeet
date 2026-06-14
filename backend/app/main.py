@@ -336,6 +336,7 @@ def _profile_payload(profile: dict | None, email: str | None = None) -> dict | N
         "preferred_rooms": row.get("preferred_rooms") or [],
         "book_without_confirmation": bool(row.get("book_without_confirmation")),
         "theme": row.get("theme") or "system",
+        "role": row.get("role") or "user",
     }
 
 
@@ -350,7 +351,7 @@ def _read_user_profile(profile_id: str | None, email: str | None = None) -> dict
             .table("user_profiles")
             .select(
                 "id, email, email_username, office, floor, building, "
-                "preferred_rooms, book_without_confirmation, theme"
+                "preferred_rooms, book_without_confirmation, theme, role"
             )
             .limit(1)
         )

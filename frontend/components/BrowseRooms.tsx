@@ -171,6 +171,9 @@ export function BrowseRooms({
   const onClose = () => setIsOpen(false);
   const [selectedSlot, setSelectedSlot] = useState<BookingSlot | null>(null);
   const [endOptions, setEndOptions] = useState<string[]>([]);
+  // End time pre-selected from a drag selection (null → modal defaults to the
+  // first option, the single-slot duration).
+  const [initialEndTime, setInitialEndTime] = useState<string | null>(null);
   // Anchor for the date picker calendar. The custom DatePicker has no Group/
   // DateInput, so react-aria has no element to position the popover against and
   // it falls back to the top-left corner. Wiring the trigger ref fixes that.
@@ -323,7 +326,8 @@ export function BrowseRooms({
   function openBooking(
     room: ScheduleRoom,
     t: string,
-    schedule?: boolean
+    schedule?: boolean,
+    desiredEnd?: string
   ) {
     setSelectedSlot({
       roomEmail: room.email,
@@ -334,8 +338,82 @@ export function BrowseRooms({
       schedule,
     });
     setEndOptions(endOptionsFor(room, t, schedule));
+    setInitialEndTime(desiredEnd ?? null);
     onOpen();
   }
+
+  // --- Drag-to-select start/end across a single room column ----------------
+  // Indices are into `allTimes` (the full 24h grid). `anchorIndex` is where the
+  // mousedown landed; `headIndex` is the cell under the cursor. The selection is
+  // the inclusive range [min, max], so dragging up or down both work. `dragRef`
+  // mirrors the state so the window-level mouseup listener and rapid mouseenter
+  // handlers read fresh values without stale closures.
+  type DragState = {
+    room: ScheduleRoom;
+    roomEmail: string;
+    anchorIndex: number;
+    headIndex: number;
+  };
+  const [drag, setDrag] = useState<DragState | null>(null);
+  const dragRef = useRef<DragState | null>(null);
+  function setDragState(next: DragState | null) {
+    dragRef.current = next;
+    setDrag(next);
+  }
+
+  function rangeBookable(room: ScheduleRoom, from: number, to: number) {
+    for (let i = from; i <= to; i += 1) {
+      if (!isBookableSlot(room, allTimes[i])) return false;
+    }
+    return true;
+  }
+
+  function beginDrag(room: ScheduleRoom, ti: number) {
+    setDragState({ room, roomEmail: room.email, anchorIndex: ti, headIndex: ti });
+  }
+
+  // Open the modal for the selected range, then clear the drag. The earliest
+  // slot becomes the start; the bottom of the latest slot becomes the end.
+  function finishDrag() {
+    const d = dragRef.current;
+    setDragState(null);
+    if (!d) return;
+    const lo = Math.min(d.anchorIndex, d.headIndex);
+    const hi = Math.max(d.anchorIndex, d.headIndex);
+    const startTime = allTimes[lo];
+    const schedule = statusFor(d.room, startTime) >= 3;
+    const desiredEnd = addLabel(allTimes[hi], slotMinutes);
+    openBooking(d.room, startTime, schedule, desiredEnd);
+  }
+
+  // Called as the cursor enters a cell mid-drag. Crossing into another column
+  // or a non-bookable (disabled/busy) cell stops the drag and opens the modal
+  // with whatever was selected so far.
+  function extendDrag(roomEmail: string, ti: number, bookable: boolean) {
+    const d = dragRef.current;
+    if (!d) return;
+    if (roomEmail !== d.roomEmail) {
+      finishDrag();
+      return;
+    }
+    if (ti === d.headIndex) return;
+    const lo = Math.min(d.anchorIndex, ti);
+    const hi = Math.max(d.anchorIndex, ti);
+    if (!bookable || !rangeBookable(d.room, lo, hi)) {
+      finishDrag();
+      return;
+    }
+    setDragState({ ...d, headIndex: ti });
+  }
+
+  // Releasing the mouse anywhere ends the drag and opens the modal.
+  useEffect(() => {
+    if (!drag) return;
+    const onUp = () => finishDrag();
+    window.addEventListener("mouseup", onUp);
+    return () => window.removeEventListener("mouseup", onUp);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drag]);
 
   // Current-time marker (only when the selected day is today). Offset is measured
   // from midnight since the grid now spans the full day.
@@ -574,8 +652,8 @@ export function BrowseRooms({
             </div>
 
             {/* Rows */}
-            <div className="relative">
-              {allTimes.map((t) => {
+            <div className="relative select-none">
+              {allTimes.map((t, ti) => {
                 const onHour = t.endsWith(":00");
                 const bi = businessIndexByTime.get(t);
                 const slotStartMinutes = timeToMinutes(t);
@@ -605,6 +683,7 @@ export function BrowseRooms({
                         <div
                           key={r.email}
                           aria-disabled
+                          onMouseEnter={() => extendDrag(r.email, ti, false)}
                           // Off-hours/disabled. In dark mode --background-secondary
                           // is only ~4% off the page bg, so the cell reads the same
                           // as a free slot — lift it a touch to set it apart, but
@@ -634,24 +713,56 @@ export function BrowseRooms({
                       (r.grid[bi + 1]?.[dayIndex] ?? 0) === status;
 
                     if (free) {
+                      const dragLo = drag ? Math.min(drag.anchorIndex, drag.headIndex) : 0;
+                      const dragHi = drag ? Math.max(drag.anchorIndex, drag.headIndex) : 0;
+                      const selected =
+                        drag !== null &&
+                        drag.roomEmail === r.email &&
+                        ti >= dragLo &&
+                        ti <= dragHi;
+                      // The earliest selected slot is the booking start → the
+                      // "+ Book" chip sticks there.
+                      const selectionStart = selected && ti === dragLo;
+                      const label = schedule ? "+ Schedule Book" : "+ Book";
                       return (
                         <div
                           key={r.email}
                           role="button"
                           tabIndex={0}
-                          onClick={() => openBooking(r, t, schedule)}
+                          onMouseDown={(event) => {
+                            // Left button only; preventDefault stops text
+                            // selection while dragging across cells.
+                            if (event.button !== 0) return;
+                            event.preventDefault();
+                            beginDrag(r, ti);
+                          }}
+                          onMouseEnter={() => extendDrag(r.email, ti, true)}
                           onKeyDown={(event) => {
                             if (event.key === "Enter" || event.key === " ") {
                               event.preventDefault();
                               openBooking(r, t, schedule);
                             }
                           }}
-                          className="accent-keep-blue group cursor-pointer border-r border-t border-[color:var(--separator)] bg-white dark:bg-[#0c0e12] px-1 outline-none transition-colors hover:bg-[var(--accent-soft)] hover:shadow-[inset_0_0_0_1px_var(--accent)] focus:bg-[var(--accent-soft)] focus:shadow-[inset_0_0_0_1px_var(--accent)]"
+                          className={`accent-keep-blue group cursor-pointer border-r border-t border-[color:var(--separator)] px-1 outline-none transition-colors ${
+                            selected
+                              ? "bg-[var(--accent-soft)]"
+                              : "bg-white dark:bg-[#0c0e12] hover:bg-[var(--accent-soft)] hover:shadow-[inset_0_0_0_1px_var(--accent)] focus:bg-[var(--accent-soft)] focus:shadow-[inset_0_0_0_1px_var(--accent)]"
+                          }`}
                           style={{ height: SLOT_H }}
                         >
                           <div className="flex h-full items-center justify-center">
-                            <span className="rounded-md px-2 py-0.5 text-xs font-semibold text-transparent transition-colors group-hover:bg-[var(--accent)] group-hover:text-[var(--accent-foreground)] group-focus:bg-[var(--accent)] group-focus:text-[var(--accent-foreground)]">
-                              {schedule ? "+ Schedule Book" : "+ Book"}
+                            <span
+                              className={
+                                selectionStart
+                                  ? "rounded-md bg-[var(--accent)] px-2 py-0.5 text-xs font-semibold text-[var(--accent-foreground)]"
+                                  : selected
+                                    ? "hidden"
+                                    : drag
+                                      ? "rounded-md px-2 py-0.5 text-xs font-semibold text-transparent"
+                                      : "rounded-md px-2 py-0.5 text-xs font-semibold text-transparent transition-colors group-hover:bg-[var(--accent)] group-hover:text-[var(--accent-foreground)] group-focus:bg-[var(--accent)] group-focus:text-[var(--accent-foreground)]"
+                              }
+                            >
+                              {label}
                             </span>
                           </div>
                         </div>
@@ -664,6 +775,7 @@ export function BrowseRooms({
                     return (
                       <div
                         key={r.email}
+                        onMouseEnter={() => extendDrag(r.email, ti, false)}
                         className="border-r border-t border-[color:var(--separator)] bg-white dark:bg-[#0c0e12]"
                         style={{ height: SLOT_H }}
                       >
@@ -764,6 +876,7 @@ export function BrowseRooms({
         onClose={onClose}
         slot={selectedSlot}
         endOptions={endOptions}
+        initialEndTime={initialEndTime}
         userDomain={userDomain}
         onBooked={onRefresh}
       />

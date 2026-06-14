@@ -35,6 +35,7 @@ import {
   ChatPanel,
   clearChatMessagesCache,
   deleteCachedChatThread,
+  prefetchChatThread,
 } from "@/components/ChatPanel";
 import { SettingsScreen } from "@/components/SettingsScreen";
 import { BrandIcon } from "@/components/BrandIcon";
@@ -977,6 +978,7 @@ export default function Home() {
         activeThreadId={activeThreadId}
         onNewChat={() => setActiveThreadId(null)}
         onSelectThread={setActiveThreadId}
+        onPrefetchThread={prefetchChatThread}
         onRenameThread={handleRenameThread}
         onDeleteThread={handleDeleteThread}
       />
@@ -998,6 +1000,7 @@ export default function Home() {
               threadId={activeThreadId}
               onThreadSelected={setActiveThreadId}
               onThreadsChanged={setChatThreads}
+              userRole={me.profile?.role}
             />
           ) : refreshing && !data ? (
             <div className="flex h-full flex-col items-center justify-center gap-3">

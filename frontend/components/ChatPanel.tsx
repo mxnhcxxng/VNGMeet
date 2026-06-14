@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
@@ -10,7 +10,6 @@ import {
   Checkbox,
   Chip,
   ScrollShadow,
-  Spinner,
 } from "@heroui/react";
 import {
   ArrowDown,
@@ -22,7 +21,7 @@ import {
   ThumbsDown,
   ThumbsUp,
 } from "@gravity-ui/icons";
-import { api, type BookingRequest, type ChatMessage, type ChatThread } from "@/lib/api";
+import { api, type BookingRequest, type ChatMessage, type ChatThread, type UserRole } from "@/lib/api";
 import { BrandIcon } from "./BrandIcon";
 
 const SUGGESTIONS = [
@@ -42,7 +41,11 @@ function TypingDots() {
   );
 }
 
-function MarkdownMessage({ content }: { content: string }) {
+const MarkdownMessage = memo(function MarkdownMessage({
+  content,
+}: {
+  content: string;
+}) {
   return (
     <div className="text-sm leading-7 text-[#252b37] dark:text-[#f7f7f7]">
       <ReactMarkdown
@@ -128,7 +131,7 @@ function MarkdownMessage({ content }: { content: string }) {
       </ReactMarkdown>
     </div>
   );
-}
+});
 
 type PendingBooking = {
   confirmationId: string;
@@ -139,13 +142,50 @@ type PendingBooking = {
 // Module-level cache so switching away from Chat and back does not refetch
 // already-opened threads. Cleared on logout, and per-thread on delete.
 const cachedMessagesByThread = new Map<string, ChatMessage[]>();
+// In-flight fetches keyed by thread, so a hover-prefetch and the click that
+// follows share a single network round trip instead of racing two.
+const inflightByThread = new Map<string, Promise<ChatMessage[]>>();
+
+// Fetch (or reuse) a thread's messages and populate the cache. Both the
+// prefetch-on-hover path and the load-on-select path go through here, so the
+// second caller piggybacks on the first request.
+function loadThreadMessages(threadId: string): Promise<ChatMessage[]> {
+  const cached = cachedMessagesByThread.get(threadId);
+  if (cached) return Promise.resolve(cached);
+  const existing = inflightByThread.get(threadId);
+  if (existing) return existing;
+  const promise = api
+    .chatMessages(threadId)
+    .then((res) => {
+      cachedMessagesByThread.set(threadId, res.messages);
+      inflightByThread.delete(threadId);
+      return res.messages;
+    })
+    .catch((e) => {
+      inflightByThread.delete(threadId);
+      throw e;
+    });
+  inflightByThread.set(threadId, promise);
+  return promise;
+}
+
+// Warm the cache when the user hovers/focuses a thread row, so the click that
+// follows usually resolves from cache and switches instantly.
+export function prefetchChatThread(threadId: string) {
+  if (!threadId) return;
+  loadThreadMessages(threadId).catch(() => {
+    /* best-effort; the real load surfaces the error */
+  });
+}
 
 export function clearChatMessagesCache() {
   cachedMessagesByThread.clear();
+  inflightByThread.clear();
 }
 
 export function deleteCachedChatThread(threadId: string) {
   cachedMessagesByThread.delete(threadId);
+  inflightByThread.delete(threadId);
 }
 
 function pendingBookingFromMessage(message: ChatMessage): PendingBooking | null {
@@ -317,9 +357,14 @@ function BookingConfirmationCard({
           onChange={setSkipConfirmation}
           isDisabled={disabled}
         >
-          <span className="text-sm font-medium text-default-500">
-            Book without confirmation next time
-          </span>
+          <Checkbox.Control>
+            <Checkbox.Indicator />
+          </Checkbox.Control>
+          <Checkbox.Content>
+            <span className="text-sm font-medium text-default-500">
+              Book without confirmation next time
+            </span>
+          </Checkbox.Content>
         </Checkbox>
 
         {localError && (
@@ -424,14 +469,23 @@ function AssistantAvatar() {
   );
 }
 
+// Admins see the assistant's full reply; everyone else has reasoning hidden.
+// Strips <think>...</think> blocks (including an unterminated trailing one
+// while a reply is still streaming).
+function stripThinking(content: string): string {
+  return content.replace(/<think>[\s\S]*?(?:<\/think>|$)/gi, "").trimStart();
+}
+
 export function ChatPanel({
   threadId,
   onThreadSelected,
   onThreadsChanged,
+  userRole = "user",
 }: {
   threadId: string | null;
   onThreadSelected: (threadId: string) => void;
   onThreadsChanged: (threads: ChatThread[]) => void;
+  userRole?: UserRole;
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>(() =>
     threadId ? cachedMessagesByThread.get(threadId) ?? [] : []
@@ -480,11 +534,10 @@ export function ChatPanel({
       setLoading(true);
       setError(null);
       try {
-        const res = await api.chatMessages(threadId);
+        const messages = await loadThreadMessages(threadId);
         if (alive) {
           jumpToBottomRef.current = true;
-          cachedMessagesByThread.set(threadId, res.messages);
-          setMessages(res.messages);
+          setMessages(messages);
         }
       } catch (e: any) {
         if (alive) setError(e.message);
@@ -605,9 +658,16 @@ export function ChatPanel({
           )}
 
           {loading ? (
-            <div className="flex h-[60vh] flex-col items-center justify-center gap-3">
-              <Spinner />
-              <span className="text-sm text-[#535862] dark:text-[#94979c]">Đang tải chat...</span>
+            <div className="space-y-6 pb-4" aria-label="Đang tải chat">
+              {[0, 1, 2].map((row) => (
+                <div key={row} className="flex gap-3">
+                  <div className="size-8 shrink-0 animate-pulse rounded-full bg-[#f0f0f1] dark:bg-[#22262f]" />
+                  <div className="flex-1 space-y-2 py-1">
+                    <div className="h-3.5 w-3/4 animate-pulse rounded bg-[#f0f0f1] dark:bg-[#22262f]" />
+                    <div className="h-3.5 w-1/2 animate-pulse rounded bg-[#f0f0f1] dark:bg-[#22262f]" />
+                  </div>
+                </div>
+              ))}
             </div>
           ) : empty ? (
             <div className="flex h-[60vh] flex-col items-center justify-center text-center">
@@ -672,11 +732,16 @@ export function ChatPanel({
                   );
                 }
 
+                const displayContent =
+                  userRole === "admin"
+                    ? message.content
+                    : stripThinking(message.content);
+
                 return (
                   <div key={message.id} className="group flex gap-3">
                     <AssistantAvatar />
                     <div className="min-w-0 flex-1">
-                      {message.content.trim() && <MarkdownMessage content={message.content} />}
+                      {displayContent.trim() && <MarkdownMessage content={displayContent} />}
                       {pending && (
                         <BookingConfirmationCard
                           pending={pending}
@@ -686,7 +751,7 @@ export function ChatPanel({
                           onActionMessage={appendActionMessage}
                         />
                       )}
-                      {message.content.trim() && <AssistantActions content={message.content} />}
+                      {displayContent.trim() && <AssistantActions content={displayContent} />}
                     </div>
                   </div>
                 );
