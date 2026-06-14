@@ -334,6 +334,7 @@ def _profile_payload(profile: dict | None, email: str | None = None) -> dict | N
         "floor": row.get("floor") or "",
         "building": row.get("building") or "",
         "preferred_rooms": row.get("preferred_rooms") or [],
+        "book_without_confirmation": bool(row.get("book_without_confirmation")),
     }
 
 
@@ -346,7 +347,10 @@ def _read_user_profile(profile_id: str | None, email: str | None = None) -> dict
         query = (
             get_supabase()
             .table("user_profiles")
-            .select("id, email, email_username, office, floor, building, preferred_rooms")
+            .select(
+                "id, email, email_username, office, floor, building, "
+                "preferred_rooms, book_without_confirmation"
+            )
             .limit(1)
         )
         if profile_id:
@@ -969,6 +973,8 @@ class ChatBookingActionRequest(BaseModel):
     confirmation_id: str
     action: Literal["accept", "reject", "expire"]
     booking: BookingRequest | None = None
+    # When the user ticks "book without confirmation next time" on the card.
+    book_without_confirmation: bool = False
 
 
 class UserProfileUpdateRequest(BaseModel):
@@ -976,6 +982,7 @@ class UserProfileUpdateRequest(BaseModel):
     floor: str = ""
     building: str = ""
     preferred_rooms: list[str] = Field(default_factory=list)
+    book_without_confirmation: bool | None = None
 
 
 @app.get("/api/users/profile-options")
@@ -998,6 +1005,10 @@ def update_my_profile(request: Request, payload: UserProfileUpdateRequest):
         claims = auth.get_manual_claims(auth.session_id(request))
 
     cleaned = _validate_profile_selection(payload.model_dump())
+    # _validate_profile_selection only keeps location fields; carry the toggle
+    # through separately when the client sent it.
+    if payload.book_without_confirmation is not None:
+        cleaned["book_without_confirmation"] = payload.book_without_confirmation
 
     profile_id = _upsert_user_profile(claims)
     if not profile_id:
@@ -1048,7 +1059,7 @@ Nhiệm vụ chính:
 
 Luồng xử lý:
 1. Người dùng hỏi có phòng phù hợp không.
-2. Kiểm tra thông tin đã có: ngày, giờ bắt đầu, giờ kết thúc hoặc thời lượng, số người, địa điểm/khu vực.
+2. Kiểm tra thông tin đã có: ngày, giờ bắt đầu, giờ kết thúc hoặc thời lượng, nhu cầu phòng (nhỏ/vừa/lớn), địa điểm/khu vực.
 3. Nếu thiếu thông tin cần thiết, hỏi bổ sung ngắn gọn.
 4. Khi đủ thông tin, gọi function kiểm tra lịch/phòng trống.
 5. Trả về danh sách phòng và khung giờ có thể đặt theo đúng thứ tự API trả về.
@@ -1056,7 +1067,10 @@ Luồng xử lý:
    Nếu cũng không tách được, dùng alternate_suggestions để gợi ý khung giờ khác cùng duration.
 6. Khi người dùng chọn phòng, kiểm tra lại các trường bắt buộc để đặt lịch.
 7. Khi người dùng muốn đặt phòng, gọi function book_room cho đặt tức thì hoặc schedule_room cho scheduled booking để tạo card xác nhận với các thông tin đã điền.
-8. Không nói đã đặt phòng sau khi gọi book_room; chỉ nói người dùng kiểm tra card và bấm Đồng ý hoặc Từ chối.
+8. Xử lý kết quả book_room/schedule_room theo trường trả về:
+   - Nếu trả về requires_confirmation=true: KHÔNG nói đã đặt phòng; chỉ nói người dùng kiểm tra card và bấm Đồng ý hoặc Từ chối.
+   - Nếu trả về booked=true (user đã bật chế độ đặt phòng không cần xác nhận): báo luôn kết quả. Nếu pending=true thì nói scheduled booking đã được tạo và sẽ tự đặt khi lịch mở; nếu không thì nói đặt phòng thành công. Sau đó gọi get_room_directions cho phòng vừa đặt để đính kèm map.
+   - Nếu ok=false: báo thất bại kèm lý do và đề xuất phòng/giờ khác.
 9. Báo kết quả đặt phòng thành công hoặc thất bại sau khi hệ thống nhận action từ card.
 
 Luồng chỉ đường:
@@ -1068,11 +1082,15 @@ Luồng chỉ đường:
 Nguyên tắc phản hồi:
 - Trả lời ngắn gọn, rõ ràng, tập trung vào hành động tiếp theo.
 - Trả lời cùng ngôn ngữ với người dùng. Nếu user hỏi tiếng Việt, toàn bộ câu trả lời nên là tiếng Việt tự nhiên, kể cả hướng dẫn đường đi lấy từ metadata tiếng Anh.
+- Không hỏi số lượng người tham dự. Thay vào đó hỏi nhu cầu phòng để user chọn: nhỏ (4 người), vừa (5-12 người), lớn (13+ người); rồi truyền capacity_size là small/medium/large tương ứng. Nếu user tự nói rõ con số thì mới truyền capacity.
+- Sức chứa phòng được phân loại theo cột capacity_size (small/medium/large), không dựa trên con số capacity thô.
+- Chỉ hỗ trợ đặt phòng vào ngày làm việc trong tuần (Thứ 2 đến Thứ 6). Nếu user yêu cầu Thứ 7 hoặc Chủ nhật, báo ngắn gọn rằng chỉ đặt được vào ngày làm việc T2-T6 và gợi ý chọn ngày làm việc gần nhất. Khi gợi ý ngày/khung giờ, không trả ra Thứ 7 hoặc Chủ nhật.
 - Không bịa phòng, giờ trống hoặc trạng thái booking nếu chưa có dữ liệu từ API.
 - Nếu API không trả về phòng phù hợp, gợi ý người dùng đổi thời gian, địa điểm hoặc tiêu chí.
 - Nếu người dùng không nói tên cuộc họp, để trống subject; hệ thống sẽ tự điền tên mặc định.
 - Nếu đặt lịch ngoài vùng live availability/schedule-bookable, truyền booking_type="scheduled"; còn đặt tức thì thì booking_type="instant".
-- Trả nhiều option hữu ích nhưng tối đa 5 option. Nếu room có map_link, hiển thị ảnh map bằng Markdown image ngay dưới option đó.
+- Trả nhiều option hữu ích nhưng tối đa 5 option.
+- Khi liệt kê/gợi ý phòng, KHÔNG hiển thị map hay ảnh map. Chỉ hiển thị map trong 2 trường hợp: (1) user hỏi vị trí/chỉ đường (gọi get_room_directions), hoặc (2) sau khi đặt phòng thành công thì gọi get_room_directions cho phòng vừa đặt để đính kèm map.
 - Không hỏi thêm về thiết bị phòng họp.
 - Nếu book thất bại, giải thích lý do nếu API có trả về và đề xuất thử phòng/giờ khác.
 - Nếu người dùng muốn đổi lịch hoặc huỷ lịch, hiện app chưa có API đổi/huỷ; hãy xin thông tin và nói ngắn gọn rằng bạn chưa thể thực hiện tự động trong phiên bản này.
@@ -1100,9 +1118,14 @@ CHAT_TOOLS = [
                         "type": "string",
                         "description": "Giờ kết thúc, định dạng HH:MM theo timezone Asia/Ho_Chi_Minh.",
                     },
+                    "capacity_size": {
+                        "type": "string",
+                        "enum": ["small", "medium", "large"],
+                        "description": "Nhu cầu phòng do user chọn: small = nhỏ (4 người), medium = vừa (5-12 người), large = lớn (13+ người). Ưu tiên dùng trường này thay vì hỏi số người.",
+                    },
                     "capacity": {
                         "type": "integer",
-                        "description": "Số người tham dự. Backend sẽ map <=4 thành small, 5-15 thành medium, 16+ thành large.",
+                        "description": "Số người tham dự, chỉ dùng khi user tự nói rõ con số. Backend map <=4 thành small, 5-12 thành medium, 13+ thành large.",
                     },
                     "location": {
                         "type": "string",
@@ -1393,15 +1416,21 @@ def _capacity_size_for_people(value: object) -> str | None:
         return None
     if value <= 4:
         return "small"
-    if value <= 15:
+    if value <= 12:
         return "medium"
     return "large"
 
 
+def _normalize_capacity_size(value: object) -> str | None:
+    size = str(value or "").strip().lower()
+    return size if size in {"small", "medium", "large"} else None
+
+
 def _effective_capacity_size(room: dict) -> str | None:
-    return _capacity_size_for_people(room.get("capacity")) or (
-        str(room.get("capacity_size") or "").lower() or None
-    )
+    # Source of truth for a room's size is the `capacity_size` column; only fall
+    # back to deriving from the numeric `capacity` when the column is missing.
+    explicit = str(room.get("capacity_size") or "").lower() or None
+    return explicit or _capacity_size_for_people(room.get("capacity"))
 
 
 def _location_rank(room: dict, profile: dict | None) -> tuple[int, int, int]:
@@ -1445,8 +1474,10 @@ def _sort_chat_rooms_like_browse(rooms: list[dict], profile: dict | None) -> lis
     return [room for _, room in sorted(enumerate(rooms), key=key)]
 
 
-def _room_result(room: dict) -> dict:
-    return {
+def _room_result(room: dict, include_map: bool = False) -> dict:
+    # Map/direction are only attached when explicitly requested (directions tool
+    # or a completed booking) so the room listing stays map-free.
+    result = {
         "name": room.get("name"),
         "email": room.get("email"),
         "building": room.get("building"),
@@ -1455,13 +1486,17 @@ def _room_result(room: dict) -> dict:
         "office": room.get("office"),
         "capacity": room.get("capacity"),
         "capacity_size": _effective_capacity_size(room),
-        "map_link": room.get("map_link"),
-        "direction": room.get("direction"),
         "booking_type": room.get("_booking_type") or "instant",
     }
+    if include_map:
+        result["map_link"] = room.get("map_link")
+        result["direction"] = room.get("direction")
+    return result
 
 
-def _rows_for_chat_availability(sb, capacity: object, location: str, profile: dict | None) -> list[dict]:
+def _rows_for_chat_availability(
+    sb, requested_capacity_size: str | None, location: str, profile: dict | None
+) -> list[dict]:
     rows = (
         sb.table("meeting_room_metadata")
         .select(
@@ -1476,7 +1511,6 @@ def _rows_for_chat_availability(sb, capacity: object, location: str, profile: di
     user_office = str((profile or {}).get("office") or "").strip()
     if user_office:
         rows = [r for r in rows if str(r.get("office") or "").strip() == user_office]
-    requested_capacity_size = _capacity_size_for_people(capacity)
     if requested_capacity_size:
         rows = [
             r
@@ -1734,7 +1768,7 @@ async def _tool_get_room_directions(args: dict) -> dict:
 
     return {
         "ok": True,
-        "room": _room_result(room),
+        "room": _room_result(room, include_map=True),
     }
 
 
@@ -1894,8 +1928,12 @@ async def _tool_check_room_availability(
     date = str(args.get("date") or "").strip()
     start_time = str(args.get("start_time") or "").strip()
     end_time = str(args.get("end_time") or "").strip()
-    capacity = args.get("capacity")
     location = str(args.get("location") or "").strip().lower()
+    # User chọn nhu cầu phòng trực tiếp (small/medium/large); giữ fallback cho
+    # trường hợp model vẫn truyền con số capacity.
+    requested_capacity_size = _normalize_capacity_size(
+        args.get("capacity_size")
+    ) or _capacity_size_for_people(args.get("capacity"))
     try:
         start_idx, end_idx = _chat_slot_range(start_time, end_time)
         requested_day = date_cls.fromisoformat(date)
@@ -1906,12 +1944,17 @@ async def _tool_check_room_availability(
 
     sb = get_supabase()
     profile = _read_user_profile(user_profile_id) if user_profile_id else None
-    rows = _rows_for_chat_availability(sb, capacity, location, profile)
+    rows = _rows_for_chat_availability(sb, requested_capacity_size, location, profile)
 
     room_ids = [r["id"] for r in rows if r.get("id")]
     today = datetime.now(ZoneInfo(settings.timezone)).date()
     if requested_day < today:
         return {"ok": False, "error": "Không thể kiểm tra/ngỏ ý đặt phòng trong quá khứ."}
+    if requested_day.weekday() >= 5:
+        return {
+            "ok": False,
+            "error": "Chỉ hỗ trợ đặt phòng vào ngày làm việc (Thứ 2 đến Thứ 6).",
+        }
     day_list = [
         (today + timedelta(days=i)).isoformat()
         for i in range(settings.availability_days)
@@ -1971,7 +2014,7 @@ async def _tool_check_room_availability(
         "start_time": start_time,
         "end_time": end_time,
         "user_context": _profile_payload(profile),
-        "requested_capacity_size": _capacity_size_for_people(capacity),
+        "requested_capacity_size": requested_capacity_size,
         "count": len(available),
         "rooms": [_room_result(room) for room in available[:CHAT_MAX_OPTIONS]],
         "truncated": len(available) > CHAT_MAX_OPTIONS,
@@ -2035,8 +2078,6 @@ async def _tool_check_room_availability_live(
                             "zone": room.get("zone"),
                             "capacity": room.get("capacity"),
                             "capacity_size": _effective_capacity_size(room),
-                            "map_link": room.get("map_link"),
-                            "direction": room.get("direction"),
                         }
                     )
     except httpx.HTTPStatusError as e:
@@ -2063,15 +2104,27 @@ async def _tool_book_room(
     user_profile_id: str | None,
     auth_user_id: str | None,
 ) -> dict:
-    _ = (request, graph_token, auth_user_id)
+    _ = (graph_token, auth_user_id)
+    profile = _read_user_profile(user_profile_id) if user_profile_id else None
+    # The bot must not pick instant vs scheduled itself: a date is "scheduled"
+    # only when it falls beyond the live-availability window
+    # (today .. today + availability_days - 1). Anything inside the window is
+    # instant. Compute it from the date so the LLM's booking_type is overridden.
+    booking_date = str(args.get("date") or "").strip()
     booking_type = str(args.get("booking_type") or "instant").strip()
     if booking_type not in {"instant", "schedule", "scheduled"}:
         booking_type = "instant"
+    try:
+        target_day = date_cls.fromisoformat(booking_date)
+        today = datetime.now(ZoneInfo(settings.timezone)).date()
+        horizon_end = today + timedelta(days=settings.availability_days - 1)
+        booking_type = "scheduled" if target_day > horizon_end else "instant"
+    except ValueError:
+        pass
     # Auto-fill the subject when the user didn't name the meeting:
     # "<Domain>'s Meeting" for instant, "<Domain>'s Scheduled Meeting" otherwise.
     subject = str(args.get("subject") or "").strip()
     if not subject:
-        profile = _read_user_profile(user_profile_id) if user_profile_id else None
         domain = (_profile_payload(profile) or {}).get("email_username") or ""
         kind = "Meeting" if booking_type == "instant" else "Scheduled Meeting"
         subject = f"{domain}'s {kind}" if domain else kind
@@ -2093,6 +2146,23 @@ async def _tool_book_room(
         payload = _resolve_booking_room_from_metadata(payload)
     except HTTPException as e:
         return {"ok": False, "error": str(e.detail)}
+
+    # If the user previously opted in, book immediately without a confirmation card.
+    if profile and profile.get("book_without_confirmation"):
+        try:
+            result = await create_booking(request, payload)
+        except HTTPException as e:
+            return {"ok": False, "error": str(e.detail)}
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": str(e)}
+        return {
+            "ok": True,
+            "booked": True,
+            "pending": result.get("status") == "pending",
+            "booking": payload.model_dump(),
+            "result": result,
+        }
+
     return {
         "ok": True,
         "requires_confirmation": True,
@@ -2147,13 +2217,22 @@ async def _call_llm_with_tools(
         f"- Preferred rooms: {', '.join(profile_payload.get('preferred_rooms') or []) or 'không có'}.\n"
         "- Khi gợi ý phòng, ưu tiên và giới hạn theo office trong profile nếu đã có office."
     )
+    weekday_names = [
+        "Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6", "Thứ 7", "Chủ nhật",
+    ]
     runtime_context = (
         f"\n\nNgữ cảnh thời gian hiện tại:\n"
-        f"- Hôm nay là {now.date().isoformat()}.\n"
+        f"- Hôm nay là {now.date().isoformat()} ({weekday_names[now.weekday()]}).\n"
         f"- Thời gian hiện tại là {now.strftime('%H:%M')}.\n"
         f"- Timezone là {settings.timezone}.\n"
+        "- Tuần bắt đầu từ Thứ 2 và kết thúc vào Chủ nhật. Khi người dùng nói "
+        "'đầu tuần', 'thứ 2 tuần này', 'cuối tuần', 'tuần sau'... hãy tính theo "
+        "quy ước Thứ 2 là ngày đầu tuần.\n"
         "- Khi người dùng nói hôm nay/ngày mai/hôm qua hoặc thứ trong tuần, "
-        "hãy quy đổi theo ngữ cảnh thời gian này trước khi gọi function."
+        "hãy quy đổi theo ngữ cảnh thời gian này trước khi gọi function.\n"
+        "- Quy ước buổi trong ngày: sáng = 09:00-12:00, trưa = 12:00-13:00, "
+        "chiều = 13:00-18:00. Khi user nói 'buổi sáng/trưa/chiều' mà không nói "
+        "giờ cụ thể, dùng khoảng giờ tương ứng này."
     )
     messages = [
         {"role": "system", "content": CHAT_SYSTEM_PROMPT + runtime_context + profile_context},
@@ -2432,6 +2511,10 @@ async def chat_booking_action(request: Request, payload: ChatBookingActionReques
     if not payload.booking:
         raise HTTPException(400, "Thiếu thông tin đặt phòng.")
 
+    # User opted in on the card: remember it so future chat bookings skip the card.
+    if payload.book_without_confirmation:
+        _set_book_without_confirmation(user_profile_id, True)
+
     payload.booking.method = "chatbot"
     try:
         result = await create_booking(request, payload.booking)
@@ -2574,6 +2657,22 @@ def _set_active_booking(user_profile_id: str | None, active: bool) -> None:
         ).eq("id", user_profile_id).execute()
     except Exception as e:  # noqa: BLE001
         log.warning("could not update active_booking flag: %s", e)
+
+
+def _set_book_without_confirmation(user_profile_id: str | None, value: bool) -> None:
+    if not user_profile_id or not settings.supabase_enabled:
+        return
+    try:
+        from .supabase_client import get_supabase
+
+        get_supabase().table("user_profiles").update(
+            {
+                "book_without_confirmation": value,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+        ).eq("id", user_profile_id).execute()
+    except Exception as e:  # noqa: BLE001
+        log.warning("could not update book_without_confirmation flag: %s", e)
 
 
 def _user_has_active_booking(user_profile_id: str | None) -> bool:

@@ -245,6 +245,7 @@ function BookingConfirmationCard({
         action,
         booking:
           action === "accept" ? { ...booking, method: "chatbot" as const } : undefined,
+        book_without_confirmation: action === "accept" ? skipConfirmation : undefined,
       });
       onActionMessage(res.message);
     } catch (e: any) {

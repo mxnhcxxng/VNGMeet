@@ -13,6 +13,7 @@ import {
   ListBoxItem,
   SearchField,
   Select,
+  Switch,
   Tag,
   TagGroup,
   TextField,
@@ -157,6 +158,9 @@ export function SettingsScreen({
   const [preferredRooms, setPreferredRooms] = useState<string[]>(
     me.profile?.preferred_rooms ?? []
   );
+  const [bookWithoutConfirmation, setBookWithoutConfirmation] = useState(
+    me.profile?.book_without_confirmation ?? false
+  );
   const [options, setOptions] = useState<UserProfileOptions | null>(null);
   const [optionsLoading, setOptionsLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -173,6 +177,7 @@ export function SettingsScreen({
     floor: me.profile?.floor ?? "",
     building: me.profile?.building ?? "",
     preferredRooms: [...(me.profile?.preferred_rooms ?? [])],
+    bookWithoutConfirmation: me.profile?.book_without_confirmation ?? false,
     theme: "system" as ThemeMode,
     language: "en",
   });
@@ -203,6 +208,7 @@ export function SettingsScreen({
     (isCampus ? floor : "") !== initial.current.floor ||
     (isCampus ? building : "") !== initial.current.building ||
     sortedRooms(preferredRooms) !== sortedRooms(initial.current.preferredRooms) ||
+    bookWithoutConfirmation !== initial.current.bookWithoutConfirmation ||
     theme !== initial.current.theme ||
     language !== initial.current.language;
   const { contains } = useFilter({ sensitivity: "base" });
@@ -214,6 +220,7 @@ export function SettingsScreen({
     setFloor(initial.current.floor);
     setBuilding(initial.current.building);
     setPreferredRooms([...initial.current.preferredRooms]);
+    setBookWithoutConfirmation(initial.current.bookWithoutConfirmation);
     setTheme(initial.current.theme);
     setLanguage(initial.current.language);
     setErr(null);
@@ -264,6 +271,7 @@ export function SettingsScreen({
         floor: isCampus ? floor : "",
         building: isCampus ? building : "",
         preferred_rooms: preferredRooms,
+        book_without_confirmation: bookWithoutConfirmation,
       });
       // New baseline so the button drops back to disabled after a save.
       initial.current = {
@@ -271,6 +279,7 @@ export function SettingsScreen({
         floor: isCampus ? floor : "",
         building: isCampus ? building : "",
         preferredRooms: [...preferredRooms],
+        bookWithoutConfirmation,
         theme,
         language,
       };
@@ -494,6 +503,31 @@ export function SettingsScreen({
                   </Autocomplete.Filter>
                 </Autocomplete.Popover>
               </Autocomplete>
+            </div>
+          </div>
+
+          <div className="h-px w-full bg-[#e9eaeb]" />
+
+          {/* Booking confirmation toggle */}
+          <div className="flex flex-wrap items-start gap-x-8 gap-y-4">
+            <SectionLabel
+              title="Booking confirmation"
+              description="Let the chatbot book a room instantly when you pick one, skipping the in-chat confirmation card."
+            />
+            <div className="flex min-w-[280px] flex-1 items-center gap-3">
+              <Switch
+                isSelected={bookWithoutConfirmation}
+                onChange={setBookWithoutConfirmation}
+              >
+                <Switch.Control>
+                  <Switch.Thumb />
+                </Switch.Control>
+              </Switch>
+              <span className="text-sm font-medium text-[#18181b]">
+                {bookWithoutConfirmation
+                  ? "Book without confirmation"
+                  : "Ask for confirmation"}
+              </span>
             </div>
           </div>
 

@@ -44,6 +44,7 @@ export interface UserProfile {
   floor: string;
   building: string;
   preferred_rooms: string[];
+  book_without_confirmation: boolean;
 }
 
 export interface UserProfileOption {
@@ -144,6 +145,7 @@ export interface ChatBookingActionPayload {
   confirmation_id: string;
   action: "accept" | "reject" | "expire";
   booking?: BookingRequest;
+  book_without_confirmation?: boolean;
 }
 
 export const api = {
@@ -172,7 +174,9 @@ export const api = {
   me: () => req<Me>("/api/auth/me"),
   userProfileOptions: () => req<UserProfileOptions>("/api/users/profile-options"),
   updateUserProfile: (
-    payload: Pick<UserProfile, "office" | "floor" | "building" | "preferred_rooms">
+    payload: Pick<UserProfile, "office" | "floor" | "building" | "preferred_rooms"> & {
+      book_without_confirmation?: boolean;
+    }
   ) =>
     req<{ ok: boolean; profile: UserProfile | null; profileComplete: boolean }>(
       "/api/users/me/profile",

@@ -90,7 +90,7 @@ const CAPACITY_RANK: Record<string, number> = {
 function capacityRank(room: ScheduleRoom) {
   if (typeof room.capacity === "number") {
     if (room.capacity <= 4) return CAPACITY_RANK.small;
-    if (room.capacity <= 15) return CAPACITY_RANK.medium;
+    if (room.capacity <= 12) return CAPACITY_RANK.medium;
     return CAPACITY_RANK.large;
   }
   if (room.capacity_size) return CAPACITY_RANK[room.capacity_size] ?? 3;

@@ -35,6 +35,12 @@ alter table user_profiles add column if not exists active_booking boolean not nu
 alter table user_profiles alter column active_booking set default false;
 update user_profiles set active_booking = false where active_booking is null;
 alter table user_profiles alter column active_booking set not null;
+-- When true, the chatbot books a room immediately after the user picks one,
+-- skipping the in-chat confirmation card. Opt-in via the card's checkbox.
+alter table user_profiles add column if not exists book_without_confirmation boolean not null default false;
+alter table user_profiles alter column book_without_confirmation set default false;
+update user_profiles set book_without_confirmation = false where book_without_confirmation is null;
+alter table user_profiles alter column book_without_confirmation set not null;
 create unique index if not exists user_profiles_email_lower_key
   on user_profiles (lower(email));
 create unique index if not exists user_profiles_email_key
@@ -272,15 +278,15 @@ create policy "manage own favorites" on favorite_rooms
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 -- Nhóm sức chứa cho meeting_room_metadata, dùng cho filter Browse rooms/chatbot.
--- Quy ước hiện tại: <=4 Nhỏ, 5-15 Vừa, 16+ Lớn.
+-- Quy ước hiện tại: <=4 Nhỏ, 5-12 Vừa, 13+ Lớn.
 alter table meeting_room_metadata
   add column if not exists capacity_size text generated always as (
     case
-      when capacity is null then null
-      when capacity <= 4 then 'small'
-      when capacity between 5 and 15 then 'medium'
-      when capacity >= 16 then 'large'
-      else null
+      when capacity is null then null::text
+      when capacity <= 4 then 'small'::text
+      when capacity between 5 and 12 then 'medium'::text
+      when capacity > 12 then 'large'::text
+      else null::text
     end
   ) stored;
 alter table meeting_room_metadata add column if not exists thumbnail_link text;
