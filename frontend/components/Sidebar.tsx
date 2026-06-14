@@ -18,15 +18,6 @@ import { BrandIcon } from "./BrandIcon";
 
 export type View = "browse" | "chat" | "settings" | "bookingHistory";
 
-function initialsOf(name: string) {
-  return name
-    .replace(/@.*/, "")
-    .split(/[.\s_]+/)
-    .slice(0, 2)
-    .map((w) => w[0]?.toUpperCase() ?? "")
-    .join("");
-}
-
 // Shared pill-button layout for the nav / setting rows (matches the design).
 const ROW =
   "flex h-10 w-full items-center gap-2 rounded-full px-4 text-base font-medium text-[#18181b] transition-colors";
@@ -246,7 +237,7 @@ export function Sidebar({
       {/* Recents (chat threads) */}
       <div className="mt-3 flex min-h-0 flex-1 flex-col px-4">
         <div className="px-3 pb-1 pt-3 text-xs font-medium text-[#71717a]">Recents</div>
-        <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto pr-1">
+        <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {(chatThreads ?? []).map((thread) => {
             const active = view === "chat" && activeThreadId === thread.id;
             return (
@@ -270,7 +261,7 @@ export function Sidebar({
       </div>
 
       {/* Setting + divider + user (with logout) */}
-      <div className="flex flex-col gap-4 px-4 pb-5">
+      <div className="flex flex-col gap-4 px-4 pb-5 pt-5">
         <button
           type="button"
           onClick={() => onChange("settings")}
@@ -284,9 +275,11 @@ export function Sidebar({
 
         <div className="flex items-center justify-between gap-3 px-1 py-2">
           <div className="flex min-w-0 items-center gap-3">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#a5b4fc] to-[#7c3aed] text-sm font-semibold text-white">
-              {initialsOf(display) || "U"}
-            </div>
+            <img
+              src="/default-avatar.jpg"
+              alt={display || "User"}
+              className="h-9 w-9 shrink-0 rounded-full object-cover"
+            />
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium text-[#18181b]">{name}</p>
               {email && <p className="truncate text-xs text-[#71717a]">{email}</p>}

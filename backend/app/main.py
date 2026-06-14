@@ -387,7 +387,7 @@ def _request_identity(request: Request) -> tuple[str | None, str | None]:
     token = auth.get_manual_token(auth.session_id(request))
     if not token:
         raise HTTPException(401, "Not authenticated")
-    claims = auth.decode_jwt_claims(token)
+    claims = auth.get_manual_claims(auth.session_id(request))
     return None, _profile_email(claims)
 
 
@@ -409,12 +409,12 @@ async def _booking_auth_context(
     token = auth.get_manual_token(auth.session_id(request))
     if not token:
         raise HTTPException(401, "Not authenticated")
-    claims = auth.decode_jwt_claims(token)
+    claims = auth.get_manual_claims(auth.session_id(request))
     return token, None, _upsert_user_profile(claims), _profile_email(claims)
 
 
 @app.post("/api/auth/token")
-def set_token(request: Request, access_token: str = Body(..., embed=True)):
+async def set_token(request: Request, access_token: str = Body(..., embed=True)):
     """Manual mode: paste a Graph access token (e.g. from Graph Explorer).
 
     Token does not auto-refresh — paste again when it expires (~1h). Works without
@@ -422,9 +422,9 @@ def set_token(request: Request, access_token: str = Body(..., embed=True)):
     """
     if not access_token or not access_token.strip():
         raise HTTPException(400, "access_token rỗng")
+    claims = await auth.verify_manual_graph_token(access_token)
     sid = auth.session_id(request)
-    auth.set_manual_token(sid, access_token)
-    claims = auth.decode_jwt_claims(access_token)
+    auth.set_manual_token(sid, access_token, claims)
     _upsert_user_profile(claims)
     return JSONResponse({"ok": True, "username": _profile_display_name(claims)})
 
@@ -462,7 +462,7 @@ def me(request: Request):
     token = auth.get_manual_token(sid)
     if not token:
         return JSONResponse({"authenticated": False})
-    claims = auth.decode_jwt_claims(token)
+    claims = auth.get_manual_claims(sid)
     profile, profile_complete = _me_profile_response(claims)
     return JSONResponse(
         {
@@ -484,7 +484,7 @@ def touch_user_activity(request: Request):
         token = auth.get_manual_token(auth.session_id(request))
         if not token:
             raise HTTPException(401, "Not authenticated")
-        claims = auth.decode_jwt_claims(token)
+        claims = auth.get_manual_claims(auth.session_id(request))
     _upsert_user_profile(claims)
     return {"ok": True}
 
@@ -967,7 +967,7 @@ class ChatThreadRenameRequest(BaseModel):
 class ChatBookingActionRequest(BaseModel):
     thread_id: str
     confirmation_id: str
-    action: Literal["accept", "reject"]
+    action: Literal["accept", "reject", "expire"]
     booking: BookingRequest | None = None
 
 
@@ -995,7 +995,7 @@ def update_my_profile(request: Request, payload: UserProfileUpdateRequest):
         token = auth.get_manual_token(auth.session_id(request))
         if not token:
             raise HTTPException(401, "Not authenticated")
-        claims = auth.decode_jwt_claims(token)
+        claims = auth.get_manual_claims(auth.session_id(request))
 
     cleaned = _validate_profile_selection(payload.model_dump())
 
@@ -1063,9 +1063,11 @@ Luồng chỉ đường:
 - Khi user hỏi "chỉ đường", "đường đến", "map", "ở đâu", "vị trí" kèm tên phòng, gọi function get_room_directions.
 - Nếu tìm thấy phòng, trả tên phòng, office/building/floor/zone nếu có, direction nếu có, link và ảnh map nếu có map_link.
 - Nếu user chỉ nói tên như "Chỉ đường đến Tokyo", hiểu Tokyo là tên phòng.
+- Nếu dữ liệu direction/map note trong DB là tiếng Anh nhưng user hỏi bằng tiếng Việt, hãy dịch/diễn đạt lại phần hướng dẫn sang tiếng Việt tự nhiên; không trả nguyên văn tiếng Anh trừ tên riêng, tầng, toà nhà, khu vực hoặc landmark.
 
 Nguyên tắc phản hồi:
 - Trả lời ngắn gọn, rõ ràng, tập trung vào hành động tiếp theo.
+- Trả lời cùng ngôn ngữ với người dùng. Nếu user hỏi tiếng Việt, toàn bộ câu trả lời nên là tiếng Việt tự nhiên, kể cả hướng dẫn đường đi lấy từ metadata tiếng Anh.
 - Không bịa phòng, giờ trống hoặc trạng thái booking nếu chưa có dữ liệu từ API.
 - Nếu API không trả về phòng phù hợp, gợi ý người dùng đổi thời gian, địa điểm hoặc tiêu chí.
 - Nếu người dùng không nói tên cuộc họp, đặt subject là "Meeting".
@@ -1201,7 +1203,7 @@ def _current_user_profile_id(request: Request) -> str:
         token = auth.get_manual_token(auth.session_id(request))
         if not token:
             raise HTTPException(401, "Not authenticated")
-        claims = auth.decode_jwt_claims(token)
+        claims = auth.get_manual_claims(auth.session_id(request))
     profile_id = _upsert_user_profile(claims)
     if not profile_id:
         raise HTTPException(503, "Could not resolve user profile for chat.")
@@ -1784,7 +1786,79 @@ def _extract_room_direction_query(content: str) -> str | None:
     return None
 
 
-def _room_direction_reply(result: dict) -> str:
+def _looks_vietnamese(text: str) -> bool:
+    lower = text.lower()
+    vietnamese_chars = set("ăâđêôơưáàảãạấầẩẫậắằẳẵặéèẻẽẹếềểễệíìỉĩịóòỏõọốồổỗộớờởỡợúùủũụứừửữựýỳỷỹỵ")
+    if any(ch in vietnamese_chars for ch in lower):
+        return True
+    vietnamese_words = (
+        "chỉ đường",
+        "chi duong",
+        "đường đến",
+        "duong den",
+        "vị trí",
+        "vi tri",
+        "ở đâu",
+        "o dau",
+        "phòng",
+        "phong",
+        "tới",
+        "toi",
+        "đến",
+        "den",
+    )
+    return any(word in lower for word in vietnamese_words)
+
+
+async def _rewrite_direction_for_user_language(
+    direction: str, user_content: str
+) -> str:
+    direction = direction.strip()
+    if not direction or not _looks_vietnamese(user_content):
+        return direction
+    try:
+        headers = {
+            "Authorization": f"Bearer {settings.llm_api_key}",
+            "Content-Type": "application/json",
+        }
+        async with httpx.AsyncClient(timeout=20) as client:
+            res = await client.post(
+                _chat_completion_url(),
+                headers=headers,
+                json={
+                    "model": settings.llm_model,
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": (
+                                "Bạn dịch/diễn đạt lại hướng dẫn đường đi sang tiếng Việt tự nhiên. "
+                                "Giữ nguyên tên riêng, tên phòng, tên toà nhà, tầng, zone, landmark, "
+                                "mã hiệu và URL. Không thêm thông tin mới."
+                            ),
+                        },
+                        {
+                            "role": "user",
+                            "content": (
+                                "User hỏi bằng tiếng Việt. Hãy chuyển hướng dẫn sau sang tiếng Việt:\n"
+                                f"{direction}"
+                            ),
+                        },
+                    ],
+                    "temperature": 0,
+                },
+            )
+        if res.status_code >= 400:
+            log.warning("direction localization failed: %s", res.text)
+            return direction
+        msg = (res.json().get("choices") or [{}])[0].get("message") or {}
+        localized = str(msg.get("content") or "").strip()
+        return localized or direction
+    except Exception as e:  # noqa: BLE001 - direction text should not block chat
+        log.warning("direction localization failed: %s", e)
+        return direction
+
+
+async def _room_direction_reply(result: dict, user_content: str = "") -> str:
     if not result.get("ok"):
         return f"Mình chưa tìm thấy phòng này. {result.get('error') or ''}".strip()
     room = result.get("room") or {}
@@ -1799,6 +1873,7 @@ def _room_direction_reply(result: dict) -> str:
         lines.append(f"Vị trí: {', '.join(details)}.")
     direction = str(room.get("direction") or "").strip()
     if direction:
+        direction = await _rewrite_direction_for_user_language(direction, user_content)
         lines.append(f"Hướng dẫn: {direction}")
     map_link = str(room.get("map_link") or "").strip()
     if map_link:
@@ -2243,7 +2318,7 @@ async def send_chat_message(request: Request, payload: ChatSendRequest):
             thread_id,
             bot_profile_id,
             user_profile_id,
-            _room_direction_reply(direction_result),
+            await _room_direction_reply(direction_result, content),
             {
                 "tool_results": [
                     {
@@ -2330,13 +2405,18 @@ async def chat_booking_action(request: Request, payload: ChatBookingActionReques
             "action": payload.action,
         }
     }
-    if payload.action == "reject":
+    if payload.action in {"reject", "expire"}:
+        if payload.action == "expire":
+            content = "Yêu cầu đặt phòng đã hết hạn. Bạn hãy gửi lại yêu cầu nếu vẫn muốn đặt phòng này."
+            metadata["booking_action"]["status"] = "expired"
+        else:
+            content = "Đã huỷ yêu cầu đặt phòng này."
         assistant_msg = _insert_chat_message(
             sb,
             str(thread["id"]),
             bot_profile_id,
             user_profile_id,
-            "Đã huỷ yêu cầu đặt phòng này.",
+            content,
             metadata,
         )
         return {"ok": True, "message": _chat_message_response(assistant_msg, "assistant")}

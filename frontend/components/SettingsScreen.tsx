@@ -25,15 +25,6 @@ import {
   type UserProfileOptions,
 } from "@/lib/api";
 
-function initialsOf(name: string) {
-  return name
-    .replace(/@.*/, "")
-    .split(/[.\s_]+/)
-    .slice(0, 2)
-    .map((w) => w[0]?.toUpperCase() ?? "")
-    .join("");
-}
-
 // --- Display preference (mock data, FE-only — not persisted) -----------------
 
 type ThemeMode = "system" | "light" | "dark";
@@ -301,15 +292,20 @@ export function SettingsScreen({
     <div className="h-full overflow-y-auto pb-12">
       {/* Cover image — fills the full horizontal width of the container */}
       <div className="px-1 pt-1">
-        <div className="h-[200px] w-full rounded-xl bg-gradient-to-r from-purple-300 via-pink-300 to-amber-200" />
+        <div
+          className="h-[200px] w-full rounded-xl bg-cover bg-center"
+          style={{ backgroundImage: "url('/profile-cover.png')" }}
+        />
       </div>
 
       <div className="mx-auto flex w-full max-w-[1280px] flex-col gap-12">
         <div className="-mt-10 flex items-start gap-5 px-8">
-            <div className="flex size-[160px] shrink-0 items-center justify-center rounded-full border border-black/10 bg-white p-1.5 shadow-2xl">
-              <div className="flex size-full items-center justify-center rounded-full bg-gradient-to-br from-[#a5b4fc] to-[#7c3aed] text-4xl font-semibold text-white">
-                {initialsOf(displayName) || "U"}
-              </div>
+            <div className="flex size-[160px] shrink-0 items-center justify-center rounded-full border border-black/10 bg-white p-1.5">
+              <img
+                src="/default-avatar.jpg"
+                alt={displayName || "User"}
+                className="size-full rounded-full object-cover"
+              />
             </div>
             <div className="flex flex-1 flex-col gap-1 pt-16">
               <p className="text-2xl font-semibold text-[#181d27]">{displayName}</p>

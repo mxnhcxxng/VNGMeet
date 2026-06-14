@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
@@ -19,6 +19,8 @@ import {
 import {
   ArrowDown,
   Check,
+  CircleInfo,
+  Clock,
   Copy,
   PaperPlane,
   ThumbsDown,
@@ -135,7 +137,20 @@ function MarkdownMessage({ content }: { content: string }) {
 type PendingBooking = {
   confirmationId: string;
   booking: BookingRequest;
+  createdAt?: string;
 };
+
+// Module-level cache so switching away from Chat and back does not refetch
+// already-opened threads. Cleared on logout, and per-thread on delete.
+const cachedMessagesByThread = new Map<string, ChatMessage[]>();
+
+export function clearChatMessagesCache() {
+  cachedMessagesByThread.clear();
+}
+
+export function deleteCachedChatThread(threadId: string) {
+  cachedMessagesByThread.delete(threadId);
+}
 
 function pendingBookingFromMessage(message: ChatMessage): PendingBooking | null {
   const toolResults = (message.metadata as any)?.tool_results;
@@ -151,6 +166,7 @@ function pendingBookingFromMessage(message: ChatMessage): PendingBooking | null 
   return {
     confirmationId: pending.result.confirmation_id,
     booking: pending.result.booking,
+    createdAt: message.created_at,
   };
 }
 
@@ -236,11 +252,57 @@ function BookingConfirmationCard({
   );
   const [busyAction, setBusyAction] = useState<"accept" | "reject" | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
-  const disabled = actioned || !!busyAction || !threadId;
+  const [expiresAt] = useState(() => {
+    const createdAt = pending.createdAt ? new Date(pending.createdAt).getTime() : NaN;
+    return (Number.isFinite(createdAt) ? createdAt : Date.now()) + 60_000;
+  });
+  const [remainingSeconds, setRemainingSeconds] = useState(() =>
+    Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000))
+  );
+  const expireSentRef = useRef(false);
+  const expired = remainingSeconds <= 0;
+  const disabled = actioned || expired || !!busyAction || !threadId;
+  const bookingType = String(draft.booking_type ?? "");
+  const schedule = bookingType === "scheduled" || bookingType === "schedule";
+  const roomName = draft.room_name || draft.room_email;
+  const initials = roomName
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((word) => word[0])
+    .join("")
+    .toUpperCase();
 
   const update = (key: keyof BookingRequest, value: string) => {
     setDraft((prev) => ({ ...prev, [key]: value }));
   };
+
+  useEffect(() => {
+    if (actioned) return;
+    const tick = () => {
+      setRemainingSeconds(Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000)));
+    };
+    tick();
+    const timer = window.setInterval(tick, 250);
+    return () => window.clearInterval(timer);
+  }, [actioned, expiresAt]);
+
+  useEffect(() => {
+    if (!threadId || actioned || remainingSeconds > 0 || expireSentRef.current) return;
+    expireSentRef.current = true;
+    const expire = async () => {
+      try {
+        const res = await api.chatBookingAction({
+          thread_id: threadId,
+          confirmation_id: pending.confirmationId,
+          action: "expire",
+        });
+        onActionMessage(res.message);
+      } catch {
+        /* expiration is best-effort; the card still disables locally */
+      }
+    };
+    expire();
+  }, [actioned, onActionMessage, pending.confirmationId, remainingSeconds, threadId]);
 
   const submitAction = async (action: "accept" | "reject") => {
     if (!threadId || disabled) return;
@@ -267,104 +329,138 @@ function BookingConfirmationCard({
   };
 
   return (
-    <div className="mt-3 w-full max-w-md rounded-2xl border border-[#e9eaeb] bg-white p-4 shadow-sm">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <div>
-          <div className="text-sm font-semibold text-[#181d27]">Xác nhận đặt phòng</div>
-          <div className="text-xs text-[#535862]">
-            Kiểm tra và chỉnh thông tin trước khi book.
+    <div className="mt-3 flex w-full max-w-[640px] flex-col overflow-hidden rounded-2xl border border-[#e9eaeb] bg-white shadow-sm">
+      <div className="px-5 pt-5">
+        <div className="relative h-[112px] w-full overflow-hidden rounded-lg bg-default-100">
+          <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-primary to-secondary text-2xl font-bold text-white">
+            {initials}
           </div>
+          {schedule && (
+            <div className="absolute bottom-2 left-2 inline-flex items-center gap-1 rounded-md bg-[var(--accent)] px-2 py-1 text-xs font-medium leading-5 text-[var(--accent-foreground)] shadow-sm">
+              <Clock width={14} height={14} />
+              <span>Scheduled Booking</span>
+            </div>
+          )}
         </div>
+      </div>
+
+      <div className="flex items-start justify-between gap-3 px-5 pb-4 pt-5">
+        <div className="min-w-0">
+          <h2 className="truncate text-base font-semibold text-default-900">{roomName}</h2>
+          <p className="truncate text-sm text-default-500">{draft.room_email}</p>
+          <p className="mt-1 text-sm text-default-500">
+            {draft.date} · {draft.start_time}-{draft.end_time}
+          </p>
+        </div>
+        <div className="flex shrink-0 flex-col items-end gap-1">
         {actioned && (
           <Chip size="sm" color="success" variant="soft">
             Đã xử lý
           </Chip>
         )}
+          {!actioned && expired ? (
+            <Chip size="sm" color="danger" variant="soft">
+              Hết hạn
+            </Chip>
+          ) : !actioned ? (
+            <Chip size="sm" color={remainingSeconds <= 10 ? "warning" : "default"} variant="soft">
+              {remainingSeconds}s
+            </Chip>
+          ) : null}
+        </div>
       </div>
+
       {localError && (
-        <Chip size="sm" color="danger" variant="soft" className="mb-3">
+        <Chip size="sm" color="danger" variant="soft" className="mx-5 mb-4 self-start">
           {localError}
         </Chip>
       )}
 
-      <div className="grid gap-2 sm:grid-cols-2">
+      <div className="grid gap-4 px-5">
+        <TextField fullWidth isRequired isDisabled={disabled}>
+          <Label>Meeting Title</Label>
+          <Input
+            variant="secondary"
+            placeholder="Meeting title"
+            value={draft.subject}
+            onChange={(event) => update("subject", event.target.value)}
+          />
+        </TextField>
+
         <FieldInput
-          label="Phòng"
-          value={draft.room_name || draft.room_email}
-          onChange={(value) => update("room_name", value)}
-          isDisabled={disabled}
-        />
-        <FieldInput
-          label="Email phòng"
-          value={draft.room_email}
-          onChange={(value) => update("room_email", value)}
-          isDisabled={disabled}
-        />
-        <FieldInput
-          label="Ngày"
+          label="Date"
           type="date"
           value={draft.date}
           onChange={(value) => update("date", value)}
           isDisabled={disabled}
         />
-        <div className="grid grid-cols-2 gap-2">
+
+        <div className="grid grid-cols-2 gap-4">
           <FieldInput
-            label="Bắt đầu"
+            label="Start time"
             type="time"
             value={draft.start_time}
             onChange={(value) => update("start_time", value)}
-            isDisabled={disabled}
+            isDisabled
           />
           <FieldInput
-            label="Kết thúc"
+            label="End time"
             type="time"
             value={draft.end_time}
             onChange={(value) => update("end_time", value)}
-            isDisabled={disabled}
+            isDisabled
           />
         </div>
-      </div>
 
-      <div className="mt-2 grid gap-2">
         <FieldInput
-          label="Tiêu đề"
-          value={draft.subject}
-          onChange={(value) => update("subject", value)}
-          isDisabled={disabled}
-        />
-        <FieldInput
-          label="Người tham dự"
+          label="Attendees"
           value={attendeesText}
           onChange={setAttendeesText}
-          placeholder="email1@company.com, email2@company.com"
+          placeholder='Invite required attendees, separate by a comma ","'
           isDisabled={disabled}
         />
         <FieldTextArea
-          label="Nội dung"
+          label="Description"
           value={draft.body ?? ""}
           onChange={(value) => update("body", value)}
           isDisabled={disabled}
         />
+
+        {schedule && (
+          <div className="grid gap-3 pt-1">
+            <div className="flex items-start gap-2 text-sm leading-5 text-default-600">
+              <CircleInfo width={16} height={16} className="mt-0.5 shrink-0 text-[var(--accent)]" />
+              <p>
+                The schedule is not open for booking yet. We&apos;ll automatically book this room for you as soon as booking becomes available.
+              </p>
+            </div>
+            <div className="flex items-start gap-2 text-sm leading-5 text-default-600">
+              <CircleInfo width={16} height={16} className="mt-0.5 shrink-0 text-[var(--accent)]" />
+              <p>
+                To ensure fairness for everyone, each user can have only one active scheduled booking at a time.
+              </p>
+            </div>
+          </div>
+        )}
       </div>
 
-      <div className="mt-3 flex justify-end gap-2">
+      <div className="flex items-center justify-center gap-2 px-5 pb-5 pt-7">
         <Button
-          size="sm"
-          variant="secondary"
+          variant="tertiary"
+          className="flex-1 rounded-full"
           isDisabled={disabled}
           isPending={busyAction === "reject"}
           onPress={() => submitAction("reject")}
         >
-          Từ chối
+          Cancel
         </Button>
         <Button
-          size="sm"
-          variant="primary"
+          className="flex-1 rounded-full"
           isDisabled={disabled || !draft.room_email}
           isPending={busyAction === "accept"}
           onPress={() => submitAction("accept")}
         >
-          Đồng ý
+          Book
         </Button>
       </div>
     </div>
@@ -459,21 +555,47 @@ export function ChatPanel({
   onThreadSelected: (threadId: string) => void;
   onThreadsChanged: (threads: ChatThread[]) => void;
 }) {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>(() =>
+    threadId ? cachedMessagesByThread.get(threadId) ?? [] : []
+  );
   const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(
+    Boolean(threadId && !cachedMessagesByThread.has(threadId))
+  );
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showScrollDown, setShowScrollDown] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const jumpToBottomRef = useRef(true);
+
+  const setCachedMessages = (
+    updater: ChatMessage[] | ((messages: ChatMessage[]) => ChatMessage[]),
+    cacheThreadId = threadId
+  ) => {
+    setMessages((prev) => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      if (cacheThreadId) cachedMessagesByThread.set(cacheThreadId, next);
+      return next;
+    });
+  };
 
   useEffect(() => {
     let alive = true;
     const load = async () => {
       if (!threadId) {
+        jumpToBottomRef.current = true;
         setMessages([]);
+        setLoading(false);
+        setError(null);
+        return;
+      }
+      const cachedMessages = cachedMessagesByThread.get(threadId);
+      if (cachedMessages) {
+        jumpToBottomRef.current = true;
+        setMessages(cachedMessages);
+        setLoading(false);
         setError(null);
         return;
       }
@@ -481,7 +603,11 @@ export function ChatPanel({
       setError(null);
       try {
         const res = await api.chatMessages(threadId);
-        if (alive) setMessages(res.messages);
+        if (alive) {
+          jumpToBottomRef.current = true;
+          cachedMessagesByThread.set(threadId, res.messages);
+          setMessages(res.messages);
+        }
       } catch (e: any) {
         if (alive) setError(e.message);
       } finally {
@@ -494,9 +620,20 @@ export function ChatPanel({
     };
   }, [threadId]);
 
-  useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages.length, sending]);
+  useLayoutEffect(() => {
+    if (loading) return;
+    const behavior = jumpToBottomRef.current ? "auto" : "smooth";
+    const el = scrollRef.current;
+    if (el) {
+      el.scrollTo({ top: el.scrollHeight, behavior });
+      setShowScrollDown(false);
+      jumpToBottomRef.current = false;
+      return;
+    }
+    endRef.current?.scrollIntoView({ behavior, block: "end" });
+    setShowScrollDown(false);
+    jumpToBottomRef.current = false;
+  }, [loading, messages.length, sending]);
 
   const onScroll = () => {
     const el = scrollRef.current;
@@ -526,7 +663,7 @@ export function ChatPanel({
   };
 
   const appendActionMessage = (message: ChatMessage) => {
-    setMessages((prev) =>
+    setCachedMessages((prev) =>
       prev.some((item) => item.id === message.id) ? prev : [...prev, message]
     );
     refreshThreads();
@@ -549,19 +686,19 @@ export function ChatPanel({
       content,
       created_at: new Date().toISOString(),
     };
-    setMessages((prev) => [...prev, optimistic]);
+    setCachedMessages((prev) => [...prev, optimistic]);
     try {
       const res = await api.sendChatMessage({ thread_id: threadId, content });
       const returned = res.messages;
-      setMessages((prev) => [
-        ...prev.filter((m) => m.id !== optimistic.id),
-        ...returned,
-      ]);
+      setCachedMessages(
+        (prev) => [...prev.filter((m) => m.id !== optimistic.id), ...returned],
+        res.thread.id
+      );
       if (!threadId) onThreadSelected(res.thread.id);
       await refreshThreads();
     } catch (e: any) {
       setError(e.message);
-      setMessages((prev) => prev.filter((m) => m.id !== optimistic.id));
+      setCachedMessages((prev) => prev.filter((m) => m.id !== optimistic.id));
     } finally {
       setSending(false);
     }
@@ -628,7 +765,10 @@ export function ChatPanel({
                   ? actionStatusByConfirmation(messages, pending.confirmationId)
                   : null;
                 const actioned = Boolean(
-                  action && (action.action === "reject" || action.status === "ok")
+                  action &&
+                    (action.action === "reject" ||
+                      action.status === "ok" ||
+                      action.status === "expired")
                 );
 
                 if (message.role === "user") {

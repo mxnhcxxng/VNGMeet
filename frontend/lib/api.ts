@@ -142,7 +142,7 @@ export interface ChatMessage {
 export interface ChatBookingActionPayload {
   thread_id: string;
   confirmation_id: string;
-  action: "accept" | "reject";
+  action: "accept" | "reject" | "expire";
   booking?: BookingRequest;
 }
 

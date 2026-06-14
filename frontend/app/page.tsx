@@ -6,7 +6,6 @@ import {
   Button,
   Chip,
   EmptyState,
-  Input,
   InputGroup,
   type Key,
   Label,
@@ -32,10 +31,17 @@ import { Check, Copy } from "@gravity-ui/icons";
 import { supabase } from "@/lib/supabase";
 import { Sidebar, type View } from "@/components/Sidebar";
 import { BrowseRooms } from "@/components/BrowseRooms";
-import { ChatPanel } from "@/components/ChatPanel";
+import {
+  ChatPanel,
+  clearChatMessagesCache,
+  deleteCachedChatThread,
+} from "@/components/ChatPanel";
 import { SettingsScreen } from "@/components/SettingsScreen";
 import { BrandIcon } from "@/components/BrandIcon";
-import { BookingHistory, clearBookingHistoryCache } from "@/components/BookingHistory";
+import {
+  BookingHistory,
+  clearBookingHistoryCache,
+} from "@/components/BookingHistory";
 
 // Keep the browse range aligned with backend availability_days.
 const RANGE_DAYS = 18;
@@ -204,7 +210,9 @@ const LOGIN_STEPS: {
     ),
     description: (
       <div className="flex flex-col gap-0.5">
-        <p>If the link isn&apos;t available, paste this link into your search bar</p>
+        <p>
+          If the link isn&apos;t available, paste this link into your search bar
+        </p>
         <div className="flex items-center gap-2">
           <span className="break-all font-semibold">{GRAPH_EXPLORER_URL}</span>
           <CopyLinkButton text={GRAPH_EXPLORER_URL} />
@@ -235,7 +243,8 @@ function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
 
   const goToStep = (direction: 1 | -1) => {
     setStepIndex(
-      (current) => (current + direction + LOGIN_STEPS.length) % LOGIN_STEPS.length,
+      (current) =>
+        (current + direction + LOGIN_STEPS.length) % LOGIN_STEPS.length,
     );
   };
 
@@ -246,7 +255,11 @@ function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
       await api.setToken(token.trim());
       onAuthed();
     } catch (e: any) {
-      setErr(e.message);
+      setErr(
+        e.message === "UNAUTHENTICATED"
+          ? "Graph token không hợp lệ hoặc đã hết hạn."
+          : e.message,
+      );
     } finally {
       setBusy(false);
     }
@@ -269,7 +282,7 @@ function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
       <main className="grid min-h-screen lg:grid-cols-[1fr_1.04fr]">
         <section className="flex items-center justify-center px-8 py-12">
           <form
-            className="flex w-full max-w-[360px] flex-col items-start gap-6"
+            className="flex w-full max-w-[480px] flex-col items-start gap-6"
             onSubmit={(event) => {
               event.preventDefault();
               if (token.trim()) submitToken();
@@ -279,11 +292,11 @@ function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
 
             <div className="flex w-full flex-col gap-3">
               <h1 className="text-2xl font-bold leading-8 text-[#181d27]">
-                Welcome back
+                Welcome to VNG Meet
               </h1>
               <p className="text-base leading-6 text-[#535862]">
-                Please read the instruction on the right side to get the
-                Microsoft Graph Access Token
+                Please read the instruction on the right side carefully to get
+                the Microsoft Graph Access Token
               </p>
 
               <TextField fullWidth>
@@ -316,10 +329,17 @@ function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
                 type="submit"
                 size="lg"
                 fullWidth
-                isDisabled={!token.trim()}
+                isDisabled={!token.trim() || busy}
                 isPending={busy}
               >
-                Authenticate
+                {busy ? (
+                  <span className="inline-flex items-center justify-center gap-2">
+                    <Spinner size="sm" color="current" />
+                    Checking...
+                  </span>
+                ) : (
+                  "Authenticate"
+                )}
               </Button>
 
               {err && (
@@ -382,7 +402,7 @@ function ProfileInfoScreen({
   const [floor, setFloor] = useState(me.profile?.floor ?? "");
   const [building, setBuilding] = useState(me.profile?.building ?? "");
   const [preferredRooms, setPreferredRooms] = useState<string[]>(
-    me.profile?.preferred_rooms ?? []
+    me.profile?.preferred_rooms ?? [],
   );
   const [options, setOptions] = useState<UserProfileOptions | null>(null);
   const [optionsLoading, setOptionsLoading] = useState(true);
@@ -391,7 +411,7 @@ function ProfileInfoScreen({
 
   const email =
     [me.profile?.email, me.email, me.username].find((value) =>
-      Boolean(value && value.includes("@"))
+      Boolean(value && value.includes("@")),
     ) ||
     me.profile?.email ||
     me.email ||
@@ -467,224 +487,236 @@ function ProfileInfoScreen({
     }
   };
 
-  const req = <span className="text-danger">*</span>;
-
   return (
-    <div className="flex min-h-screen items-center justify-center bg-default-100 p-4">
-      <div className="flex w-full max-w-[640px] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-        {/* Banner */}
-        <div className="px-6 pt-6">
-          <div className="h-[120px] w-full rounded-lg bg-gradient-to-r from-purple-300 via-pink-300 to-amber-200" />
-        </div>
+    <div className="min-h-screen bg-white">
+      <main className="grid min-h-screen lg:grid-cols-[1fr_1.04fr]">
+        <section className="flex items-center justify-center px-8 py-12">
+          <div className="flex w-full max-w-[480px] flex-col items-start gap-6">
+            <BrandIcon size={64} />
 
-        {/* Header */}
-        <div className="px-6 pb-5 pt-6">
-          <h2 className="text-base font-semibold text-default-900">
-            Complete your details to get room recommendations
-          </h2>
-        </div>
+            {/* Header */}
+            <div className="flex w-full flex-col gap-3">
+              <h1 className="text-2xl font-bold leading-8 text-[#181d27]">
+                Hi, {emailUsername}
+              </h1>
+              <p className="text-base leading-6 text-[#535862]">
+                Complete your details to get better room recommendations
+              </p>
+            </div>
 
-        {/* Form */}
-        <div className="grid gap-4 px-6">
-          <div className="grid grid-cols-2 gap-4">
-            <TextField fullWidth isDisabled>
-              <Label>Domain {req}</Label>
-              <Input variant="secondary" value={emailUsername} />
-            </TextField>
-            <TextField fullWidth isDisabled>
-              <Label>Email {req}</Label>
-              <Input variant="secondary" value={email} />
-            </TextField>
-          </div>
+            {/* Form */}
+            <div className="grid w-full gap-4">
+              <Select
+                variant="secondary"
+                className="flex flex-col gap-2"
+                placeholder="Choose Office"
+                selectedKey={office || null}
+                onSelectionChange={changeOffice}
+                isRequired
+                isDisabled={optionsLoading}
+              >
+                <Label>Office</Label>
+                <Select.Trigger>
+                  <Select.Value />
+                  <Select.Indicator />
+                </Select.Trigger>
+                <Select.Popover>
+                  <ListBox>
+                    {(options?.office ?? []).map((item) => (
+                      <ListBoxItem key={item.value} id={item.value}>
+                        {item.label}
+                      </ListBoxItem>
+                    ))}
+                  </ListBox>
+                </Select.Popover>
+              </Select>
 
-          <Select
-            variant="secondary"
-            className="flex flex-col gap-2"
-            placeholder="Choose Office"
-            selectedKey={office || null}
-            onSelectionChange={changeOffice}
-            isRequired
-            isDisabled={optionsLoading}
-          >
-            <Label>Office</Label>
-            <Select.Trigger>
-              <Select.Value />
-              <Select.Indicator />
-            </Select.Trigger>
-            <Select.Popover>
-              <ListBox>
-                {(options?.office ?? []).map((item) => (
-                  <ListBoxItem key={item.value} id={item.value}>
-                    {item.label}
-                  </ListBoxItem>
-                ))}
-              </ListBox>
-            </Select.Popover>
-          </Select>
-
-          <div className="grid grid-cols-2 gap-4">
-            <Select
-              variant="secondary"
-              className="flex flex-col gap-2"
-              placeholder="Choose Building"
-              selectedKey={building || null}
-              onSelectionChange={(key) => setBuilding((key as string) ?? "")}
-              isDisabled={!isCampus || optionsLoading}
-            >
-              <Label>Building</Label>
-              <Select.Trigger>
-                <Select.Value />
-                <Select.Indicator />
-              </Select.Trigger>
-              <Select.Popover>
-                <ListBox>
-                  {buildingOptions.map((item) => (
-                    <ListBoxItem key={item.value} id={item.value}>
-                      {item.label}
-                    </ListBoxItem>
-                  ))}
-                </ListBox>
-              </Select.Popover>
-            </Select>
-            <Select
-              variant="secondary"
-              className="flex flex-col gap-2"
-              placeholder="Choose Floor"
-              selectedKey={floor || null}
-              onSelectionChange={(key) => setFloor((key as string) ?? "")}
-              isDisabled={!isCampus || optionsLoading}
-            >
-              <Label>Floor</Label>
-              <Select.Trigger>
-                <Select.Value />
-                <Select.Indicator />
-              </Select.Trigger>
-              <Select.Popover>
-                <ListBox>
-                  {floorOptions.map((item) => (
-                    <ListBoxItem key={item.value} id={item.value}>
-                      {item.label}
-                    </ListBoxItem>
-                  ))}
-                </ListBox>
-              </Select.Popover>
-            </Select>
-          </div>
-
-          <Autocomplete<UserProfileOption, "multiple">
-            variant="secondary"
-            fullWidth
-            className="flex flex-col gap-2 [&_.autocomplete__trigger]:w-full"
-            placeholder="Choose Prefered Rooms (MAX: 3)"
-            selectionMode="multiple"
-            value={preferredRooms}
-            onChange={updatePreferredRooms}
-            isDisabled={!office || optionsLoading}
-          >
-            <Label>Prefered Rooms</Label>
-            <Autocomplete.Trigger>
-              <Autocomplete.Value>
-                {({ defaultChildren, isPlaceholder, state }) => {
-                  if (isPlaceholder || state.selectedItems.length === 0) {
-                    return defaultChildren;
-                  }
-
-                  const selectedItemKeys = state.selectedItems.map((item) => item.key);
-
-                  return (
-                    <TagGroup
-                      size="sm"
-                      variant="surface"
-                      onRemove={removePreferredRoomTags}
-                    >
-                      <TagGroup.List>
-                        {selectedItemKeys.map((selectedItemKey) => {
-                          const item = preferredRoomOptions.find(
-                            (room) => room.value === String(selectedItemKey)
-                          );
-
-                          if (!item) return null;
-
-                          return (
-                            <Tag key={item.value} id={item.value}>
-                              {item.label}
-                            </Tag>
-                          );
-                        })}
-                      </TagGroup.List>
-                    </TagGroup>
-                  );
-                }}
-              </Autocomplete.Value>
-              <Autocomplete.ClearButton />
-              <Autocomplete.Indicator />
-            </Autocomplete.Trigger>
-            <Autocomplete.Popover className="max-h-[248px] w-[var(--trigger-width)] overflow-y-auto">
-              <Autocomplete.Filter filter={contains}>
-                <div className="w-full px-2 py-2">
-                  <SearchField
-                    autoFocus
-                    aria-label="Search prefered rooms"
-                    name="search"
-                    variant="secondary"
-                    fullWidth
-                  >
-                    <SearchField.Group>
-                      <SearchField.SearchIcon />
-                      <SearchField.Input placeholder="Choose Prefered Rooms (MAX: 3)" />
-                      <SearchField.ClearButton />
-                    </SearchField.Group>
-                  </SearchField>
-                </div>
-                <ListBox
-                  className="max-h-[200px] overflow-y-auto"
-                  renderEmptyState={() => <EmptyState>No results found</EmptyState>}
+              <div className="grid grid-cols-[130px_1fr] gap-4">
+                <Select
+                  variant="secondary"
+                  className="flex flex-col gap-2"
+                  placeholder="Choose Floor"
+                  selectedKey={floor || null}
+                  onSelectionChange={(key) => setFloor((key as string) ?? "")}
+                  isDisabled={!isCampus || optionsLoading}
                 >
-                  {preferredRoomOptions.map((item) => (
-                    <ListBoxItem
-                      key={item.value}
-                      id={item.value}
-                      textValue={item.label}
-                      isDisabled={
-                        preferredRooms.length >= 3 && !preferredRooms.includes(item.value)
+                  <Label>Floor</Label>
+                  <Select.Trigger>
+                    <Select.Value />
+                    <Select.Indicator />
+                  </Select.Trigger>
+                  <Select.Popover>
+                    <ListBox>
+                      {floorOptions.map((item) => (
+                        <ListBoxItem key={item.value} id={item.value}>
+                          {item.label}
+                        </ListBoxItem>
+                      ))}
+                    </ListBox>
+                  </Select.Popover>
+                </Select>
+                <Select
+                  variant="secondary"
+                  className="flex flex-col gap-2"
+                  placeholder="Choose Building"
+                  selectedKey={building || null}
+                  onSelectionChange={(key) =>
+                    setBuilding((key as string) ?? "")
+                  }
+                  isDisabled={!isCampus || optionsLoading}
+                >
+                  <Label>Building</Label>
+                  <Select.Trigger>
+                    <Select.Value />
+                    <Select.Indicator />
+                  </Select.Trigger>
+                  <Select.Popover>
+                    <ListBox>
+                      {buildingOptions.map((item) => (
+                        <ListBoxItem key={item.value} id={item.value}>
+                          {item.label}
+                        </ListBoxItem>
+                      ))}
+                    </ListBox>
+                  </Select.Popover>
+                </Select>
+              </div>
+
+              <Autocomplete<UserProfileOption, "multiple">
+                variant="secondary"
+                fullWidth
+                className="flex flex-col gap-2 [&_.autocomplete__trigger]:w-full"
+                placeholder="Choose Prefered Rooms (MAX: 3)"
+                selectionMode="multiple"
+                value={preferredRooms}
+                onChange={updatePreferredRooms}
+                isDisabled={!office || optionsLoading}
+              >
+                <Label>Prefered Rooms</Label>
+                <Autocomplete.Trigger>
+                  <Autocomplete.Value>
+                    {({ defaultChildren, isPlaceholder, state }) => {
+                      if (isPlaceholder || state.selectedItems.length === 0) {
+                        return defaultChildren;
                       }
+
+                      const selectedItemKeys = state.selectedItems.map(
+                        (item) => item.key,
+                      );
+
+                      return (
+                        <TagGroup
+                          size="sm"
+                          variant="surface"
+                          onRemove={removePreferredRoomTags}
+                        >
+                          <TagGroup.List>
+                            {selectedItemKeys.map((selectedItemKey) => {
+                              const item = preferredRoomOptions.find(
+                                (room) =>
+                                  room.value === String(selectedItemKey),
+                              );
+
+                              if (!item) return null;
+
+                              return (
+                                <Tag key={item.value} id={item.value}>
+                                  {item.label}
+                                </Tag>
+                              );
+                            })}
+                          </TagGroup.List>
+                        </TagGroup>
+                      );
+                    }}
+                  </Autocomplete.Value>
+                  <Autocomplete.ClearButton />
+                  <Autocomplete.Indicator />
+                </Autocomplete.Trigger>
+                <Autocomplete.Popover className="max-h-[248px] w-[var(--trigger-width)] overflow-y-auto">
+                  <Autocomplete.Filter filter={contains}>
+                    <div className="w-full px-2 py-2">
+                      <SearchField
+                        autoFocus
+                        aria-label="Search prefered rooms"
+                        name="search"
+                        variant="secondary"
+                        fullWidth
+                      >
+                        <SearchField.Group>
+                          <SearchField.SearchIcon />
+                          <SearchField.Input placeholder="Choose Prefered Rooms (MAX: 3)" />
+                          <SearchField.ClearButton />
+                        </SearchField.Group>
+                      </SearchField>
+                    </div>
+                    <ListBox
+                      className="max-h-[200px] overflow-y-auto"
+                      renderEmptyState={() => (
+                        <EmptyState>No results found</EmptyState>
+                      )}
                     >
-                      {item.label}
-                      <ListBoxItem.Indicator />
-                    </ListBoxItem>
-                  ))}
-                </ListBox>
-              </Autocomplete.Filter>
-            </Autocomplete.Popover>
-          </Autocomplete>
+                      {preferredRoomOptions.map((item) => (
+                        <ListBoxItem
+                          key={item.value}
+                          id={item.value}
+                          textValue={item.label}
+                          isDisabled={
+                            preferredRooms.length >= 3 &&
+                            !preferredRooms.includes(item.value)
+                          }
+                        >
+                          {item.label}
+                          <ListBoxItem.Indicator />
+                        </ListBoxItem>
+                      ))}
+                    </ListBox>
+                  </Autocomplete.Filter>
+                </Autocomplete.Popover>
+              </Autocomplete>
 
-          {err && (
-            <Chip color="danger" variant="soft" size="sm" className="self-start">
-              {err}
-            </Chip>
-          )}
-        </div>
+              {err && (
+                <Chip
+                  color="danger"
+                  variant="soft"
+                  size="sm"
+                  className="self-start"
+                >
+                  {err}
+                </Chip>
+              )}
+            </div>
 
-        {/* Buttons */}
-        <div className="flex items-center justify-center gap-2 px-6 pb-6 pt-8">
-          <Button
-            variant="tertiary"
-            className="flex-1 rounded-full"
-            onPress={onLogout}
-            isDisabled={busy}
-          >
-            Cancel
-          </Button>
-          <Button
-            className="flex-1 rounded-full"
-            isDisabled={!canSave || optionsLoading}
-            isPending={busy}
-            onPress={submitProfile}
-          >
-            Save
-          </Button>
-        </div>
-      </div>
+            {/* Buttons */}
+            <div className="flex w-full items-center justify-center gap-2">
+              <Button
+                variant="tertiary"
+                className="flex-1 rounded-full"
+                onPress={onLogout}
+                isDisabled={busy}
+              >
+                Cancel
+              </Button>
+              <Button
+                className="flex-1 rounded-full"
+                isDisabled={!canSave || optionsLoading}
+                isPending={busy}
+                onPress={submitProfile}
+              >
+                Save
+              </Button>
+            </div>
+          </div>
+        </section>
+
+        <section className="relative min-h-[520px] overflow-hidden bg-default-100 lg:rounded-l-[80px]">
+          <img
+            src="/auth/vng-campus.webp"
+            alt="VNG Corporation campus"
+            className="absolute inset-0 h-full w-full object-cover object-center lg:rounded-l-[80px]"
+          />
+        </section>
+      </main>
     </div>
   );
 }
@@ -699,7 +731,9 @@ export default function Home() {
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const canEnterBooking = Boolean(me?.authenticated && me.profileComplete !== false);
+  const canEnterBooking = Boolean(
+    me?.authenticated && me.profileComplete !== false,
+  );
 
   const refreshMe = useCallback(async () => {
     try {
@@ -719,18 +753,20 @@ export default function Home() {
   // Supabase OAuth flow (only when configured).
   useEffect(() => {
     if (!supabase) return;
-    const { data: sub } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (!session) return;
-      // Supabase exposes the Microsoft refresh token only right after OAuth.
-      if (session.provider_refresh_token) {
-        try {
-          await api.link(session.provider_refresh_token);
-        } catch {
-          /* non-fatal */
+    const { data: sub } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        if (!session) return;
+        // Supabase exposes the Microsoft refresh token only right after OAuth.
+        if (session.provider_refresh_token) {
+          try {
+            await api.link(session.provider_refresh_token);
+          } catch {
+            /* non-fatal */
+          }
         }
-      }
-      if (event !== "TOKEN_REFRESHED") refreshMe();
-    });
+        if (event !== "TOKEN_REFRESHED") refreshMe();
+      },
+    );
     return () => sub.subscription.unsubscribe();
   }, [refreshMe]);
 
@@ -748,7 +784,11 @@ export default function Home() {
         setData(await api.schedule(RANGE_DAYS));
       }
     } catch (e: any) {
-      setError(e.message === "UNAUTHENTICATED" ? "Phiên đăng nhập hết hạn." : e.message);
+      setError(
+        e.message === "UNAUTHENTICATED"
+          ? "Phiên đăng nhập hết hạn."
+          : e.message,
+      );
       if (e.message === "UNAUTHENTICATED") setMe({ authenticated: false });
     } finally {
       setRefreshing(false);
@@ -806,6 +846,7 @@ export default function Home() {
     }
     if (supabase) await api.signOut();
     clearBookingHistoryCache();
+    clearChatMessagesCache();
     setMe({ authenticated: false });
     setChatThreads([]);
     setActiveThreadId(null);
@@ -815,7 +856,7 @@ export default function Home() {
     try {
       const res = await api.renameChatThread(threadId, title);
       setChatThreads((threads) =>
-        threads.map((thread) => (thread.id === threadId ? res.thread : thread))
+        threads.map((thread) => (thread.id === threadId ? res.thread : thread)),
       );
     } catch (e: any) {
       setError(e.message);
@@ -826,7 +867,10 @@ export default function Home() {
   const handleDeleteThread = async (threadId: string) => {
     try {
       await api.deleteChatThread(threadId);
-      setChatThreads((threads) => threads.filter((thread) => thread.id !== threadId));
+      deleteCachedChatThread(threadId);
+      setChatThreads((threads) =>
+        threads.filter((thread) => thread.id !== threadId),
+      );
       if (activeThreadId === threadId) setActiveThreadId(null);
     } catch (e: any) {
       setError(e.message);
@@ -849,11 +893,7 @@ export default function Home() {
 
   if (me.profileComplete === false) {
     return (
-      <ProfileInfoScreen
-        me={me}
-        onSaved={setMe}
-        onLogout={handleLogout}
-      />
+      <ProfileInfoScreen me={me} onSaved={setMe} onLogout={handleLogout} />
     );
   }
 
@@ -883,10 +923,7 @@ export default function Home() {
           {view === "bookingHistory" ? (
             <BookingHistory />
           ) : view === "settings" ? (
-            <SettingsScreen
-              me={me}
-              onSaved={setMe}
-            />
+            <SettingsScreen me={me} onSaved={setMe} />
           ) : view === "chat" ? (
             <ChatPanel
               threadId={activeThreadId}

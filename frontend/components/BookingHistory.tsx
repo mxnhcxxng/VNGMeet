@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Button,
   Chip,
+  EmptyState,
   ListBox,
   ListBoxItem,
   Pagination,
@@ -17,38 +18,38 @@ import {
   TableHeader,
   TableRow,
 } from "@heroui/react";
-import { ArrowRotateRight } from "@gravity-ui/icons";
+import { ArrowRotateRight, Magnifier } from "@gravity-ui/icons";
 import { api, type Booking } from "@/lib/api";
 
 const STATUS: Record<
   Booking["status"],
   { label: string; color: "success" | "warning" | "danger" }
 > = {
-  ok: { label: "Thành công", color: "success" },
-  pending: { label: "Đang chờ", color: "warning" },
-  failed: { label: "Thất bại", color: "danger" },
+  ok: { label: "Success", color: "success" },
+  pending: { label: "Pending", color: "warning" },
+  failed: { label: "Failed", color: "danger" },
 };
 
 // Mock filter options — wire to the backend later.
 const TIME_RANGE_OPTS = [
-  { value: "all", label: "Tất cả" },
-  { value: "this_week", label: "Tuần này" },
-  { value: "this_month", label: "Tháng này" },
+  { value: "all", label: "All" },
+  { value: "this_week", label: "This week" },
+  { value: "this_month", label: "This month" },
 ];
 const STATUS_OPTS = [
   { value: "all", label: "All" },
-  { value: "ok", label: "Thành công" },
-  { value: "pending", label: "Đang chờ" },
-  { value: "failed", label: "Thất bại" },
+  { value: "ok", label: "Success" },
+  { value: "pending", label: "Pending" },
+  { value: "failed", label: "Failed" },
 ];
 const TYPE_OPTS = [
   { value: "all", label: "All" },
-  { value: "instant", label: "Tức thì" },
-  { value: "scheduled", label: "Đặt lịch" },
+  { value: "instant", label: "Instant" },
+  { value: "scheduled", label: "Scheduled" },
 ];
 const METHOD_OPTS = [
   { value: "all", label: "All" },
-  { value: "manual", label: "Thủ công" },
+  { value: "manual", label: "Manual" },
   { value: "chatbot", label: "Chatbot" },
 ];
 const PAGE_SIZE_OPTS = [
@@ -171,7 +172,7 @@ export function BookingHistory() {
     } catch (e: any) {
       setError(
         e.message === "UNAUTHENTICATED"
-          ? "Phiên đăng nhập hết hạn."
+          ? "Your session has expired."
           : e.message
       );
     } finally {
@@ -239,8 +240,8 @@ export function BookingHistory() {
         <Button
           isIconOnly
           size="sm"
-          variant="secondary"
-          aria-label="Làm mới"
+          variant="tertiary"
+          aria-label="Refresh"
           className="ml-auto rounded-full"
           onPress={load}
           isDisabled={loading}
@@ -258,30 +259,38 @@ export function BookingHistory() {
       {loading ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-3">
           <Spinner />
-          <span className="text-sm text-default-500">Đang tải lịch sử...</span>
+          <span className="text-sm text-default-500">Loading history...</span>
         </div>
       ) : (
         <>
-          <div className="min-h-0 flex-1 overflow-auto">
-            <Table variant="secondary">
-              <TableContent aria-label="Lịch sử đặt phòng">
-                <TableHeader>
-                  <TableColumn isRowHeader>Ngày</TableColumn>
-                  <TableColumn>Phòng</TableColumn>
-                  <TableColumn>Thời gian</TableColumn>
-                  <TableColumn>Tiêu đề</TableColumn>
-                  <TableColumn>Loại</TableColumn>
-                  <TableColumn>Nguồn</TableColumn>
-                  <TableColumn>Trạng thái</TableColumn>
-                </TableHeader>
-                <TableBody
-                  items={pageItems}
-                  renderEmptyState={() => (
-                    <span className="text-sm text-default-500">
-                      Chưa có booking nào.
-                    </span>
-                  )}
-                >
+          {total === 0 ? (
+            <EmptyState className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1 py-0 text-center">
+              <Magnifier
+                width={28}
+                height={28}
+                className="mb-2 text-[#a4a7ae]"
+              />
+              <p className="text-base font-semibold text-[#181d27]">
+                No results found
+              </p>
+              <p className="text-sm text-[#71717a]">
+                Try adjusting your search or filters
+              </p>
+            </EmptyState>
+          ) : (
+            <div className="min-h-0 flex-1 overflow-auto">
+              <Table variant="secondary">
+                <TableContent aria-label="Booking history">
+                  <TableHeader>
+                    <TableColumn isRowHeader>Date</TableColumn>
+                    <TableColumn>Room</TableColumn>
+                    <TableColumn>Time</TableColumn>
+                    <TableColumn>Subject</TableColumn>
+                    <TableColumn>Type</TableColumn>
+                    <TableColumn>Method</TableColumn>
+                    <TableColumn>Status</TableColumn>
+                  </TableHeader>
+                  <TableBody items={pageItems}>
                   {(b) => (
                     <TableRow id={b.id}>
                       <TableCell>{b.date}</TableCell>
@@ -291,10 +300,10 @@ export function BookingHistory() {
                       </TableCell>
                       <TableCell>{b.subject || "—"}</TableCell>
                       <TableCell>
-                        {b.booking_type === "scheduled" ? "Đặt lịch" : "Tức thì"}
+                        {b.booking_type === "scheduled" ? "Scheduled" : "Instant"}
                       </TableCell>
                       <TableCell>
-                        {b.method === "chatbot" ? "Chatbot" : "Thủ công"}
+                        {b.method === "chatbot" ? "Chatbot" : "Manual"}
                       </TableCell>
                       <TableCell>
                         <Chip
@@ -307,10 +316,11 @@ export function BookingHistory() {
                       </TableCell>
                     </TableRow>
                   )}
-                </TableBody>
-              </TableContent>
-            </Table>
-          </div>
+                  </TableBody>
+                </TableContent>
+              </Table>
+            </div>
+          )}
 
           {/* Pagination bar — the Pagination root is the full-width row (summary left, content right). */}
           <Pagination>
@@ -318,7 +328,7 @@ export function BookingHistory() {
               <div className="flex items-center gap-2 text-sm text-[#71717a]">
                 <span>Showing</span>
                 <Select
-                  aria-label="Số dòng mỗi trang"
+                  aria-label="Rows per page"
                   variant="secondary"
                   selectedKey={String(pageSize)}
                   onSelectionChange={(k) => setPageSize(Number(k))}

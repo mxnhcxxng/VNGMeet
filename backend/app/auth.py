@@ -26,6 +26,7 @@ from .config import get_settings
 # --- manual-token path (session-scoped) ------------------------------------- #
 # session_id -> Graph access token pasted by the user.
 _MANUAL_TOKENS: dict[str, str] = {}
+_MANUAL_CLAIMS: dict[str, dict] = {}
 
 # --- supabase path ----------------------------------------------------------- #
 # user_id -> (access_token, expires_at_epoch). Rebuildable from the refresh token.
@@ -63,16 +64,54 @@ def session_id(request: Request) -> str:
     return sid
 
 
-def set_manual_token(sid: str, access_token: str) -> None:
+def set_manual_token(sid: str, access_token: str, claims: dict | None = None) -> None:
     _MANUAL_TOKENS[sid] = access_token.strip()
+    if claims is not None:
+        _MANUAL_CLAIMS[sid] = claims
 
 
 def get_manual_token(sid: str) -> str | None:
     return _MANUAL_TOKENS.get(sid)
 
 
+def get_manual_claims(sid: str) -> dict:
+    token = get_manual_token(sid)
+    if not token:
+        return {}
+    return _MANUAL_CLAIMS.get(sid) or decode_jwt_claims(token)
+
+
 def logout(sid: str) -> None:
     _MANUAL_TOKENS.pop(sid, None)
+    _MANUAL_CLAIMS.pop(sid, None)
+
+
+async def verify_manual_graph_token(access_token: str) -> dict:
+    """Validate a pasted Graph token by calling Microsoft Graph /me."""
+    token = access_token.strip()
+    if not token:
+        raise HTTPException(400, "access_token rỗng")
+
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    async with httpx.AsyncClient(timeout=20) as client:
+        try:
+            resp = await client.get("https://graph.microsoft.com/v1.0/me", headers=headers)
+        except httpx.HTTPError as e:
+            raise HTTPException(401, f"Không xác thực được Graph token: {e}") from e
+
+    if resp.status_code != 200:
+        raise HTTPException(401, "Graph token không hợp lệ hoặc đã hết hạn.")
+
+    user = resp.json()
+    email = user.get("mail") or user.get("userPrincipalName")
+    claims = {
+        "name": user.get("displayName"),
+        "email": email,
+        "preferred_username": user.get("userPrincipalName") or email,
+        "upn": user.get("userPrincipalName"),
+        "graph_user_id": user.get("id"),
+    }
+    return {key: value for key, value in claims.items() if value}
 
 
 # --------------------------------------------------------------------------- #
