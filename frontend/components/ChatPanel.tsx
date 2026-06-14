@@ -7,19 +7,15 @@ import remarkBreaks from "remark-breaks";
 import {
   Avatar,
   Button,
+  Checkbox,
   Chip,
-  Input,
-  Label,
   ScrollShadow,
   Spinner,
-  TextArea,
-  TextField,
-  Tooltip,
 } from "@heroui/react";
 import {
   ArrowDown,
+  Calendar,
   Check,
-  CircleInfo,
   Clock,
   Copy,
   PaperPlane,
@@ -176,82 +172,24 @@ function actionStatusByConfirmation(messages: ChatMessage[], confirmationId: str
   })?.metadata as any)?.booking_action;
 }
 
-function splitAttendees(value: string) {
-  return value
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function FieldInput({
-  label,
-  value,
-  onChange,
-  type,
-  placeholder,
-  isDisabled,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  type?: string;
-  placeholder?: string;
-  isDisabled?: boolean;
-}) {
-  return (
-    <TextField fullWidth isDisabled={isDisabled}>
-      <Label>{label}</Label>
-      <Input
-        variant="secondary"
-        type={type}
-        placeholder={placeholder}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-      />
-    </TextField>
-  );
-}
-
-function FieldTextArea({
-  label,
-  value,
-  onChange,
-  isDisabled,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  isDisabled?: boolean;
-}) {
-  return (
-    <TextField fullWidth isDisabled={isDisabled}>
-      <Label>{label}</Label>
-      <TextArea
-        rows={3}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-      />
-    </TextField>
-  );
-}
+type BookingOutcome = "success" | "expired" | "failed" | "cancelled" | null;
 
 function BookingConfirmationCard({
   pending,
   threadId,
   actioned,
+  outcome,
   onActionMessage,
 }: {
   pending: PendingBooking;
   threadId: string | null;
   actioned: boolean;
+  outcome: BookingOutcome;
   onActionMessage: (message: ChatMessage) => void;
 }) {
-  const [draft, setDraft] = useState<BookingRequest>(pending.booking);
-  const [attendeesText, setAttendeesText] = useState(
-    (pending.booking.attendees ?? []).join(", ")
-  );
   const [busyAction, setBusyAction] = useState<"accept" | "reject" | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
+  const [skipConfirmation, setSkipConfirmation] = useState(false);
   const [expiresAt] = useState(() => {
     const createdAt = pending.createdAt ? new Date(pending.createdAt).getTime() : NaN;
     return (Number.isFinite(createdAt) ? createdAt : Date.now()) + 60_000;
@@ -262,19 +200,11 @@ function BookingConfirmationCard({
   const expireSentRef = useRef(false);
   const expired = remainingSeconds <= 0;
   const disabled = actioned || expired || !!busyAction || !threadId;
-  const bookingType = String(draft.booking_type ?? "");
-  const schedule = bookingType === "scheduled" || bookingType === "schedule";
-  const roomName = draft.room_name || draft.room_email;
-  const initials = roomName
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((word) => word[0])
-    .join("")
-    .toUpperCase();
-
-  const update = (key: keyof BookingRequest, value: string) => {
-    setDraft((prev) => ({ ...prev, [key]: value }));
-  };
+  const booking = pending.booking;
+  const roomName = booking.room_name || booking.room_email;
+  const title = booking.subject || roomName;
+  const mm = String(Math.floor(remainingSeconds / 60)).padStart(2, "0");
+  const ss = String(remainingSeconds % 60).padStart(2, "0");
 
   useEffect(() => {
     if (actioned) return;
@@ -309,16 +239,12 @@ function BookingConfirmationCard({
     setBusyAction(action);
     setLocalError(null);
     try {
-      const booking = {
-        ...draft,
-        attendees: splitAttendees(attendeesText),
-        method: "chatbot" as const,
-      };
       const res = await api.chatBookingAction({
         thread_id: threadId,
         confirmation_id: pending.confirmationId,
         action,
-        booking: action === "accept" ? booking : undefined,
+        booking:
+          action === "accept" ? { ...booking, method: "chatbot" as const } : undefined,
       });
       onActionMessage(res.message);
     } catch (e: any) {
@@ -329,125 +255,83 @@ function BookingConfirmationCard({
   };
 
   return (
-    <div className="mt-3 flex w-full max-w-[640px] flex-col overflow-hidden rounded-2xl border border-[#e9eaeb] bg-white shadow-sm">
-      <div className="px-5 pt-5">
-        <div className="relative h-[112px] w-full overflow-hidden rounded-lg bg-default-100">
-          <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-primary to-secondary text-2xl font-bold text-white">
-            {initials}
+    <div className="mt-3 flex w-full max-w-[400px] flex-col gap-8 rounded-3xl border border-[#e9eaeb] bg-white p-6">
+      <div className="flex flex-col gap-1">
+        <div className="flex flex-col items-center gap-3 pt-1">
+          <div className="flex size-10 items-center justify-center rounded-full bg-[#fee7de]">
+            <Calendar width={16} height={16} className="text-[var(--accent)]" />
           </div>
-          {schedule && (
-            <div className="absolute bottom-2 left-2 inline-flex items-center gap-1 rounded-md bg-[var(--accent)] px-2 py-1 text-xs font-medium leading-5 text-[var(--accent-foreground)] shadow-sm">
-              <Clock width={14} height={14} />
-              <span>Scheduled Booking</span>
-            </div>
-          )}
+          <h2 className="w-full break-words text-center text-base font-semibold text-default-900">
+            {title}
+          </h2>
         </div>
+        <p className="text-center text-sm text-default-500">
+          Confirm your booking to secure this room
+        </p>
       </div>
 
-      <div className="flex items-start justify-between gap-3 px-5 pb-4 pt-5">
-        <div className="min-w-0">
-          <h2 className="truncate text-base font-semibold text-default-900">{roomName}</h2>
-          <p className="truncate text-sm text-default-500">{draft.room_email}</p>
-          <p className="mt-1 text-sm text-default-500">
-            {draft.date} · {draft.start_time}-{draft.end_time}
-          </p>
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center justify-between text-base font-medium">
+            <span className="text-muted">Room</span>
+            <span className="text-default-900">{roomName}</span>
+          </div>
+          <div className="flex items-center justify-between text-base font-medium">
+            <span className="text-muted">Meeting time</span>
+            <span className="text-default-900">
+              {booking.start_time} - {booking.end_time}
+            </span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-base font-medium text-muted">Expires in</span>
+            {outcome === "success" ? (
+              <Chip size="md" color="success" variant="soft">
+                Success
+              </Chip>
+            ) : outcome === "cancelled" ? (
+              <Chip size="md" color="default" variant="soft">
+                Cancelled
+              </Chip>
+            ) : outcome === "failed" ? (
+              <Chip size="md" color="danger" variant="soft">
+                Failed
+              </Chip>
+            ) : outcome === "expired" || expired ? (
+              <Chip size="md" color="danger" variant="soft">
+                Expired
+              </Chip>
+            ) : (
+              <Chip size="md" color="danger" variant="soft">
+                <span className="flex items-center gap-1">
+                  <Clock width={14} height={14} />
+                  {mm}:{ss}
+                </span>
+              </Chip>
+            )}
+          </div>
         </div>
-        <div className="flex shrink-0 flex-col items-end gap-1">
-        {actioned && (
-          <Chip size="sm" color="success" variant="soft">
-            Đã xử lý
+
+        <Checkbox
+          isSelected={skipConfirmation}
+          onChange={setSkipConfirmation}
+          isDisabled={disabled}
+        >
+          <span className="text-sm font-medium text-default-500">
+            Book without confirmation next time
+          </span>
+        </Checkbox>
+
+        {localError && (
+          <Chip size="sm" color="danger" variant="soft" className="self-start">
+            {localError}
           </Chip>
         )}
-          {!actioned && expired ? (
-            <Chip size="sm" color="danger" variant="soft">
-              Hết hạn
-            </Chip>
-          ) : !actioned ? (
-            <Chip size="sm" color={remainingSeconds <= 10 ? "warning" : "default"} variant="soft">
-              {remainingSeconds}s
-            </Chip>
-          ) : null}
-        </div>
       </div>
 
-      {localError && (
-        <Chip size="sm" color="danger" variant="soft" className="mx-5 mb-4 self-start">
-          {localError}
-        </Chip>
-      )}
-
-      <div className="grid gap-4 px-5">
-        <TextField fullWidth isRequired isDisabled={disabled}>
-          <Label>Meeting Title</Label>
-          <Input
-            variant="secondary"
-            placeholder="Meeting title"
-            value={draft.subject}
-            onChange={(event) => update("subject", event.target.value)}
-          />
-        </TextField>
-
-        <FieldInput
-          label="Date"
-          type="date"
-          value={draft.date}
-          onChange={(value) => update("date", value)}
-          isDisabled={disabled}
-        />
-
-        <div className="grid grid-cols-2 gap-4">
-          <FieldInput
-            label="Start time"
-            type="time"
-            value={draft.start_time}
-            onChange={(value) => update("start_time", value)}
-            isDisabled
-          />
-          <FieldInput
-            label="End time"
-            type="time"
-            value={draft.end_time}
-            onChange={(value) => update("end_time", value)}
-            isDisabled
-          />
-        </div>
-
-        <FieldInput
-          label="Attendees"
-          value={attendeesText}
-          onChange={setAttendeesText}
-          placeholder='Invite required attendees, separate by a comma ","'
-          isDisabled={disabled}
-        />
-        <FieldTextArea
-          label="Description"
-          value={draft.body ?? ""}
-          onChange={(value) => update("body", value)}
-          isDisabled={disabled}
-        />
-
-        {schedule && (
-          <div className="grid gap-3 pt-1">
-            <div className="flex items-start gap-2 text-sm leading-5 text-default-600">
-              <CircleInfo width={16} height={16} className="mt-0.5 shrink-0 text-[var(--accent)]" />
-              <p>
-                The schedule is not open for booking yet. We&apos;ll automatically book this room for you as soon as booking becomes available.
-              </p>
-            </div>
-            <div className="flex items-start gap-2 text-sm leading-5 text-default-600">
-              <CircleInfo width={16} height={16} className="mt-0.5 shrink-0 text-[var(--accent)]" />
-              <p>
-                To ensure fairness for everyone, each user can have only one active scheduled booking at a time.
-              </p>
-            </div>
-          </div>
-        )}
-      </div>
-
-      <div className="flex items-center justify-center gap-2 px-5 pb-5 pt-7">
+      <div className="flex items-center gap-2">
         <Button
           variant="tertiary"
-          className="flex-1 rounded-full"
+          className="shrink-0 rounded-full"
           isDisabled={disabled}
           isPending={busyAction === "reject"}
           onPress={() => submitAction("reject")}
@@ -456,7 +340,7 @@ function BookingConfirmationCard({
         </Button>
         <Button
           className="flex-1 rounded-full"
-          isDisabled={disabled || !draft.room_email}
+          isDisabled={disabled || !booking.room_email}
           isPending={busyAction === "accept"}
           onPress={() => submitAction("accept")}
         >
@@ -479,23 +363,16 @@ function ActionIconButton({
   children: React.ReactNode;
 }) {
   return (
-    <Tooltip>
-      <Tooltip.Trigger>
-        <Button
-          isIconOnly
-          size="sm"
-          variant="ghost"
-          aria-label={label}
-          onPress={onPress}
-          className={`size-7 rounded-lg ${
-            isActive ? "text-[#175cd3]" : "text-[#a4a7ae] hover:text-[#414651]"
-          }`}
-        >
-          {children}
-        </Button>
-      </Tooltip.Trigger>
-      <Tooltip.Content>{label}</Tooltip.Content>
-    </Tooltip>
+    <Button
+      isIconOnly
+      size="sm"
+      variant="ghost"
+      aria-label={label}
+      onPress={onPress}
+      className={`size-7 rounded-lg ${isActive ? "text-[var(--accent)]" : "text-muted"}`}
+    >
+      {children}
+    </Button>
   );
 }
 
@@ -770,6 +647,19 @@ export function ChatPanel({
                       action.status === "ok" ||
                       action.status === "expired")
                 );
+                // Persisted outcome (survives refresh — read back from message
+                // metadata stored by the backend) drives the status chip.
+                const outcome: BookingOutcome = !action
+                  ? null
+                  : action.status === "ok"
+                    ? "success"
+                    : action.status === "expired"
+                      ? "expired"
+                      : action.status === "failed"
+                        ? "failed"
+                        : action.action === "reject"
+                          ? "cancelled"
+                          : null;
 
                 if (message.role === "user") {
                   return (
@@ -791,6 +681,7 @@ export function ChatPanel({
                           pending={pending}
                           threadId={threadId}
                           actioned={actioned}
+                          outcome={outcome}
                           onActionMessage={appendActionMessage}
                         />
                       )}

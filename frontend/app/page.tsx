@@ -500,7 +500,8 @@ function ProfileInfoScreen({
                 Hi, {emailUsername}
               </h1>
               <p className="text-base leading-6 text-[#535862]">
-                Complete your details to get better room recommendations
+                Complete your details to get better room recommendations. You can
+            always change it later in Setting
               </p>
             </div>
 
@@ -724,6 +725,7 @@ function ProfileInfoScreen({
 export default function Home() {
   const [me, setMe] = useState<Me | null>(null);
   const [loading, setLoading] = useState(true);
+  const [sessionExpiredOpen, setSessionExpiredOpen] = useState(false);
   const [view, setView] = useState<View>("browse");
   const [data, setData] = useState<ScheduleResponse | null>(null);
   const [dayIndex, setDayIndex] = useState(0);
@@ -734,6 +736,27 @@ export default function Home() {
   const canEnterBooking = Boolean(
     me?.authenticated && me.profileComplete !== false,
   );
+
+  const showSessionExpiredModal = useCallback(() => {
+    setSessionExpiredOpen(true);
+    setError(null);
+  }, []);
+
+  const handleSessionExpiredLogin = async () => {
+    try {
+      await api.logout();
+    } catch {
+      /* ignore */
+    }
+    if (supabase) await api.signOut();
+    clearBookingHistoryCache();
+    clearChatMessagesCache();
+    setSessionExpiredOpen(false);
+    setMe({ authenticated: false });
+    setData(null);
+    setChatThreads([]);
+    setActiveThreadId(null);
+  };
 
   const refreshMe = useCallback(async () => {
     try {
@@ -814,12 +837,15 @@ export default function Home() {
 
   useEffect(() => {
     if (!canEnterBooking) return;
+    if (sessionExpiredOpen) return;
 
     const touch = async () => {
       try {
         await api.touchUserActivity();
-      } catch {
-        /* non-fatal */
+      } catch (e: any) {
+        if (e?.message === "UNAUTHENTICATED") {
+          showSessionExpiredModal();
+        }
       }
     };
     const touchWhenVisible = () => {
@@ -836,7 +862,7 @@ export default function Home() {
       window.removeEventListener("focus", touch);
       document.removeEventListener("visibilitychange", touchWhenVisible);
     };
-  }, [canEnterBooking]);
+  }, [canEnterBooking, sessionExpiredOpen, showSessionExpiredModal]);
 
   const handleLogout = async () => {
     try {
@@ -847,6 +873,7 @@ export default function Home() {
     if (supabase) await api.signOut();
     clearBookingHistoryCache();
     clearChatMessagesCache();
+    setSessionExpiredOpen(false);
     setMe({ authenticated: false });
     setChatThreads([]);
     setActiveThreadId(null);
@@ -887,13 +914,40 @@ export default function Home() {
     );
   }
 
+  const sessionExpiredModal = sessionExpiredOpen ? (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-[420px] rounded-2xl bg-white p-6 shadow-2xl">
+        <h2 className="text-lg font-semibold text-default-900">
+          Session expired
+        </h2>
+        <p className="mt-2 text-sm leading-6 text-default-600">
+          Your session has expired. Please log in again.
+        </p>
+        <Button
+          className="mt-6 w-full rounded-full"
+          onPress={handleSessionExpiredLogin}
+        >
+          Log in again
+        </Button>
+      </div>
+    </div>
+  ) : null;
+
   if (!me?.authenticated) {
-    return <LoginScreen onAuthed={refreshMe} />;
+    return (
+      <>
+        <LoginScreen onAuthed={refreshMe} />
+        {sessionExpiredModal}
+      </>
+    );
   }
 
   if (me.profileComplete === false) {
     return (
-      <ProfileInfoScreen me={me} onSaved={setMe} onLogout={handleLogout} />
+      <>
+        <ProfileInfoScreen me={me} onSaved={setMe} onLogout={handleLogout} />
+        {sessionExpiredModal}
+      </>
     );
   }
 
@@ -951,11 +1005,19 @@ export default function Home() {
               userOffice={me.profile?.office}
               userBuilding={me.profile?.building}
               userFloor={me.profile?.floor}
+              userDomain={
+                me.profile?.email_username ||
+                ([me.profile?.email, me.email, me.username]
+                  .find((value) => value?.includes("@"))
+                  ?.split("@", 1)[0] ??
+                  "")
+              }
               preferredRooms={me.profile?.preferred_rooms ?? []}
             />
           )}
         </div>
       </main>
+      {sessionExpiredModal}
     </div>
   );
 }

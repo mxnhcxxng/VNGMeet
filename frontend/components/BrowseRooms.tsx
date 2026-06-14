@@ -152,6 +152,7 @@ export function BrowseRooms({
   userOffice,
   userBuilding,
   userFloor,
+  userDomain,
   preferredRooms = [],
 }: {
   data: ScheduleResponse;
@@ -162,6 +163,7 @@ export function BrowseRooms({
   userOffice?: string;
   userBuilding?: string;
   userFloor?: string;
+  userDomain?: string;
   preferredRooms?: string[];
 }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -169,6 +171,10 @@ export function BrowseRooms({
   const onClose = () => setIsOpen(false);
   const [selectedSlot, setSelectedSlot] = useState<BookingSlot | null>(null);
   const [endOptions, setEndOptions] = useState<string[]>([]);
+  // Anchor for the date picker calendar. The custom DatePicker has no Group/
+  // DateInput, so react-aria has no element to position the popover against and
+  // it falls back to the top-left corner. Wiring the trigger ref fixes that.
+  const dateTriggerRef = useRef<HTMLButtonElement>(null);
 
   // Office is picked via the tabs; rooms are further narrowed by a name search.
   // Default to the user's work location, falling back to Campus.
@@ -376,7 +382,12 @@ export function BrowseRooms({
 
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-3 border-b border-[color:var(--separator)] bg-white px-6 py-4">
-        <Button variant="tertiary" className="rounded-full" onPress={() => setDayIndex(() => 0)}>
+        <Button
+          variant="tertiary"
+          className="rounded-full"
+          isDisabled={dayIndex === 0}
+          onPress={() => setDayIndex(() => 0)}
+        >
           Today
         </Button>
 
@@ -404,11 +415,14 @@ export function BrowseRooms({
                 if (idx >= 0) setDayIndex(() => idx);
               }}
             >
-              <DatePicker.Trigger className="flex h-9 items-center gap-2 px-4 text-sm font-medium outline-none transition-colors hover:bg-[var(--default-hover)]">
+              <DatePicker.Trigger
+                ref={dateTriggerRef}
+                className="flex h-9 items-center gap-2 px-4 text-sm font-medium outline-none transition-colors hover:bg-[var(--default-hover)]"
+              >
                 <CalendarIcon width={16} height={16} />
                 <span className="whitespace-nowrap">{formatDmy(data.days[dayIndex])}</span>
               </DatePicker.Trigger>
-              <DatePicker.Popover className="!max-w-none w-fit">
+              <DatePicker.Popover triggerRef={dateTriggerRef} className="!max-w-none w-fit">
                 <Calendar>
                   <Calendar.Header>
                     <Calendar.NavButton slot="previous" />
@@ -631,7 +645,7 @@ export function BrowseRooms({
                               openBooking(r, t, schedule);
                             }
                           }}
-                          className="group cursor-pointer border-r border-t border-[color:var(--separator)] bg-white px-1 outline-none transition-colors hover:bg-[var(--accent-soft)] hover:shadow-[inset_0_0_0_1px_var(--accent)] focus:bg-[var(--accent-soft)] focus:shadow-[inset_0_0_0_1px_var(--accent)]"
+                          className="accent-keep-blue group cursor-pointer border-r border-t border-[color:var(--separator)] bg-white px-1 outline-none transition-colors hover:bg-[var(--accent-soft)] hover:shadow-[inset_0_0_0_1px_var(--accent)] focus:bg-[var(--accent-soft)] focus:shadow-[inset_0_0_0_1px_var(--accent)]"
                           style={{ height: SLOT_H }}
                         >
                           <div className="flex h-full items-center justify-center">
@@ -712,7 +726,7 @@ export function BrowseRooms({
             {/* Current-time marker */}
             {showMarker && (
               <div
-                className="pointer-events-none absolute left-0 right-0 z-10 flex -translate-y-1/2 items-center"
+                className="accent-keep-blue pointer-events-none absolute left-0 right-0 z-10 flex -translate-y-1/2 items-center"
                 style={{ top: markerOffset }}
               >
                 <span
@@ -749,6 +763,7 @@ export function BrowseRooms({
         onClose={onClose}
         slot={selectedSlot}
         endOptions={endOptions}
+        userDomain={userDomain}
         onBooked={onRefresh}
       />
     </div>

@@ -28,12 +28,14 @@ export function BookingModal({
   onClose,
   slot,
   endOptions,
+  userDomain,
   onBooked,
 }: {
   isOpen: boolean;
   onClose: () => void;
   slot: BookingSlot | null;
   endOptions: string[]; // selectable end times (after startTime)
+  userDomain?: string; // email username, used to auto-fill the meeting title
   onBooked: () => void;
 }) {
   const [subject, setSubject] = useState("");
@@ -51,6 +53,15 @@ export function BookingModal({
       setError(null);
     }
   }, [endOptions, endTime, isOpen, slot]);
+
+  // Auto-fill the meeting title when the modal opens: "<Domain>'s Meeting" for
+  // instant bookings, "<Domain>'s Scheduled Meeting" for schedule bookings.
+  useEffect(() => {
+    if (!isOpen || !slot) return;
+    const kind = slot.schedule ? "Scheduled Meeting" : "Meeting";
+    setSubject(userDomain ? `${userDomain}'s ${kind}` : kind);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, slot, userDomain]);
 
   const closeFromBackdrop = (event: MouseEvent<HTMLDivElement>) => {
     if (event.target === event.currentTarget) onClose();

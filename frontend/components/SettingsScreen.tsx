@@ -91,7 +91,7 @@ function ThemeCard({
       <div
         className={`relative h-[132px] w-[200px] overflow-hidden rounded-[10px] bg-[#f5f5f5] transition-shadow ${
           selected
-            ? "shadow-[0px_0px_0px_2px_#ffffff,0px_0px_0px_4px_#2e90fa]"
+            ? "shadow-[0px_0px_0px_2px_#ffffff,0px_0px_0px_4px_#f05a22]"
             : "ring-1 ring-inset ring-[#d5d7da]"
         }`}
       >
@@ -110,7 +110,7 @@ function ThemeCard({
           )}
         </div>
         {selected && (
-          <span className="absolute bottom-2 left-2 flex h-5 w-5 items-center justify-center rounded-full bg-[#1570ef]">
+          <span className="absolute bottom-2 left-2 flex h-5 w-5 items-center justify-center rounded-full bg-[#f05a22]">
             <span className="h-1.5 w-1.5 rounded-full bg-white" />
           </span>
         )}

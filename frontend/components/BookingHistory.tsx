@@ -18,7 +18,7 @@ import {
   TableHeader,
   TableRow,
 } from "@heroui/react";
-import { ArrowRotateRight, Magnifier } from "@gravity-ui/icons";
+import { ArrowsRotateRight, Magnifier } from "@gravity-ui/icons";
 import { api, type Booking } from "@/lib/api";
 
 const STATUS: Record<
@@ -246,7 +246,7 @@ export function BookingHistory() {
           onPress={load}
           isDisabled={loading}
         >
-          <ArrowRotateRight width={16} height={16} />
+          <ArrowsRotateRight width={16} height={16} />
         </Button>
       </div>
 

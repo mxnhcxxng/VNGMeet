@@ -12,6 +12,11 @@ body {
   color: #181d27;
 }
 
+/* Brand color comes solely from --accent (set below). The `primary` button
+   variant already reads var(--accent) / var(--accent-hover) / var(--accent-foreground),
+   so it picks up the orange automatically. All other variants (tertiary, ghost,
+   secondary, danger…) keep their default HeroUI styling — do NOT override them here. */
+
 /* Hide the browser-native password reveal "eye" / clear controls (Edge/IE). */
 input[type="password"]::-ms-reveal,
 input[type="password"]::-ms-clear {
@@ -52,4 +57,24 @@ input[type="password"]::-ms-clear {
   border-radius: 9999px;
   background-color: #717680;
   animation: typing-dot 1.2s infinite ease-in-out both;
+}
+
+/* Brand: switch the global HeroUI accent from blue to orange. Everything that
+   reads var(--accent) — primary buttons, office tabs, badges, spinners, icons,
+   plus the soft/hover shades derived from it via color-mix — follows along. */
+:root,
+.light,
+.default,
+[data-theme="light"],
+[data-theme="default"] {
+  --accent: #f05a22;
+}
+
+/* Opt-out helper: keep the original blue accent on specific spots (the NOW
+   time marker and the in-grid Book / Schedule Book cells). Scoped locally so
+   the derived soft/hover shades re-mix from the blue base, not the orange one. */
+.accent-keep-blue {
+  --accent: oklch(62.04% 0.195 253.83);
+  --accent-soft: color-mix(in oklab, var(--accent) 15%, transparent);
+  --accent-soft-hover: color-mix(in oklab, var(--accent) 20%, transparent);
 }

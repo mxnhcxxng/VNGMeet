@@ -1070,7 +1070,7 @@ Nguyên tắc phản hồi:
 - Trả lời cùng ngôn ngữ với người dùng. Nếu user hỏi tiếng Việt, toàn bộ câu trả lời nên là tiếng Việt tự nhiên, kể cả hướng dẫn đường đi lấy từ metadata tiếng Anh.
 - Không bịa phòng, giờ trống hoặc trạng thái booking nếu chưa có dữ liệu từ API.
 - Nếu API không trả về phòng phù hợp, gợi ý người dùng đổi thời gian, địa điểm hoặc tiêu chí.
-- Nếu người dùng không nói tên cuộc họp, đặt subject là "Meeting".
+- Nếu người dùng không nói tên cuộc họp, để trống subject; hệ thống sẽ tự điền tên mặc định.
 - Nếu đặt lịch ngoài vùng live availability/schedule-bookable, truyền booking_type="scheduled"; còn đặt tức thì thì booking_type="instant".
 - Trả nhiều option hữu ích nhưng tối đa 5 option. Nếu room có map_link, hiển thị ảnh map bằng Markdown image ngay dưới option đó.
 - Không hỏi thêm về thiết bị phòng họp.
@@ -1143,7 +1143,7 @@ CHAT_TOOLS = [
                     "date": {"type": "string", "description": "Ngày đặt, định dạng YYYY-MM-DD."},
                     "start_time": {"type": "string", "description": "Giờ bắt đầu HH:MM."},
                     "end_time": {"type": "string", "description": "Giờ kết thúc HH:MM."},
-                    "subject": {"type": "string", "description": "Tiêu đề cuộc họp."},
+                    "subject": {"type": "string", "description": "Tiêu đề cuộc họp; để trống nếu user không nói tên, hệ thống sẽ tự điền."},
                     "attendees": {
                         "type": "array",
                         "items": {"type": "string"},
@@ -1173,7 +1173,7 @@ CHAT_TOOLS = [
                     "date": {"type": "string", "description": "Ngày đặt, định dạng YYYY-MM-DD."},
                     "start_time": {"type": "string", "description": "Giờ bắt đầu HH:MM."},
                     "end_time": {"type": "string", "description": "Giờ kết thúc HH:MM."},
-                    "subject": {"type": "string", "description": "Tiêu đề cuộc họp; nếu thiếu sẽ dùng Meeting."},
+                    "subject": {"type": "string", "description": "Tiêu đề cuộc họp; để trống nếu user không nói tên, hệ thống sẽ tự điền."},
                     "attendees": {
                         "type": "array",
                         "items": {"type": "string"},
@@ -2063,10 +2063,18 @@ async def _tool_book_room(
     user_profile_id: str | None,
     auth_user_id: str | None,
 ) -> dict:
-    _ = (request, graph_token, user_profile_id, auth_user_id)
+    _ = (request, graph_token, auth_user_id)
     booking_type = str(args.get("booking_type") or "instant").strip()
     if booking_type not in {"instant", "schedule", "scheduled"}:
         booking_type = "instant"
+    # Auto-fill the subject when the user didn't name the meeting:
+    # "<Domain>'s Meeting" for instant, "<Domain>'s Scheduled Meeting" otherwise.
+    subject = str(args.get("subject") or "").strip()
+    if not subject:
+        profile = _read_user_profile(user_profile_id) if user_profile_id else None
+        domain = (_profile_payload(profile) or {}).get("email_username") or ""
+        kind = "Meeting" if booking_type == "instant" else "Scheduled Meeting"
+        subject = f"{domain}'s {kind}" if domain else kind
     payload = BookingRequest(
         room_email=str(args.get("room_email") or "").strip(),
         room_name=(args.get("room_name") or None),
@@ -2074,7 +2082,7 @@ async def _tool_book_room(
         start_time=str(args.get("start_time") or "").strip(),
         end_time=str(args.get("end_time") or "").strip(),
         booking_type=booking_type,
-        subject=str(args.get("subject") or "Meeting").strip() or "Meeting",
+        subject=subject,
         attendees=args.get("attendees") or [],
         body=args.get("body") or None,
         method="chatbot",
