@@ -7,6 +7,7 @@ import {
   Chip,
   EmptyState,
   Input,
+  InputGroup,
   type Key,
   Label,
   ListBox,
@@ -33,6 +34,7 @@ import { Sidebar, type View } from "@/components/Sidebar";
 import { BrowseRooms } from "@/components/BrowseRooms";
 import { ChatPanel } from "@/components/ChatPanel";
 import { SettingsScreen } from "@/components/SettingsScreen";
+import { BrandIcon } from "@/components/BrandIcon";
 import { BookingHistory, clearBookingHistoryCache } from "@/components/BookingHistory";
 
 // Keep the browse range aligned with backend availability_days.
@@ -250,45 +252,66 @@ function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
     }
   };
 
+  const handlePaste = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text.trim()) {
+        setToken(text.trim());
+        setErr(null);
+      }
+    } catch {
+      setErr("Không đọc được clipboard. Hãy dán thủ công bằng Cmd/Ctrl+V.");
+    }
+  };
+
   return (
     <div className="min-h-screen bg-white">
       <main className="grid min-h-screen lg:grid-cols-[1fr_1.04fr]">
-        <section className="flex items-center justify-center px-6 py-12 sm:px-10 lg:px-16">
-          <div className="w-full max-w-[480px]">
-            <img
-              src="/icon.svg"
-              alt="VNG Meet"
-              className="mb-16 h-14 w-14 rounded-2xl"
-            />
+        <section className="flex items-center justify-center px-8 py-12">
+          <form
+            className="flex w-full max-w-[360px] flex-col items-start gap-6"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (token.trim()) submitToken();
+            }}
+          >
+            <BrandIcon size={64} />
 
-            <div>
-              <h1 className="text-2xl font-bold leading-8 tracking-tight text-default-900">
+            <div className="flex w-full flex-col gap-3">
+              <h1 className="text-2xl font-bold leading-8 text-[#181d27]">
                 Welcome back
               </h1>
-              <p className="mt-5 max-w-md text-base leading-6 text-default-500">
+              <p className="text-base leading-6 text-[#535862]">
                 Please read the instruction on the right side to get the
                 Microsoft Graph Access Token
               </p>
+
+              <TextField fullWidth>
+                <InputGroup variant="secondary">
+                  <InputGroup.Input
+                    placeholder="Paste access token here"
+                    type="password"
+                    autoComplete="off"
+                    data-1p-ignore
+                    data-lpignore="true"
+                    value={token}
+                    onChange={(event) => setToken(event.target.value)}
+                  />
+                  <InputGroup.Suffix>
+                    <button
+                      type="button"
+                      onClick={handlePaste}
+                      className="inline-flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-sm font-medium text-[#535862] transition-colors hover:bg-black/5 hover:text-[#181d27]"
+                    >
+                      <Copy width={14} height={14} />
+                      Paste
+                    </button>
+                  </InputGroup.Suffix>
+                </InputGroup>
+              </TextField>
             </div>
 
-            <form
-              className="mt-12 flex flex-col gap-8"
-              onSubmit={(event) => {
-                event.preventDefault();
-                if (token.trim()) submitToken();
-              }}
-            >
-              <TextField fullWidth>
-                <Label>Access Token</Label>
-                <Input
-                  variant="secondary"
-                  placeholder="Paste access token here"
-                  type="password"
-                  value={token}
-                  onChange={(event) => setToken(event.target.value)}
-                />
-              </TextField>
-
+            <div className="flex w-full flex-col gap-3">
               <Button
                 type="submit"
                 size="lg"
@@ -304,8 +327,8 @@ function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
                   {err}
                 </Chip>
               )}
-            </form>
-          </div>
+            </div>
+          </form>
         </section>
 
         <section className="relative min-h-[520px] overflow-hidden bg-default-100 text-white lg:rounded-l-[80px]">

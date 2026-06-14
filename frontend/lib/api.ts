@@ -71,6 +71,7 @@ export interface Room {
   zone?: string;
   office?: string;
   thumbnail_link?: string;
+  direction?: string;
 }
 
 export interface ScheduleRoom extends Room {

@@ -28,6 +28,7 @@ const SLOT_H = 48; // px per slot row (half hour → 96px per hour)
 const TIME_COL = 72; // px width of the left time-label column
 const DEFAULT_DAY_START = "09:00";
 const DEFAULT_DAY_END = "18:00";
+const SCHEDULE_MAX_DURATION_MINUTES = 3 * 60;
 
 function addLabel(time: string, slotMinutes: number) {
   const [h, m] = time.split(":").map(Number);
@@ -187,17 +188,8 @@ export function BrowseRooms({
 
   const times = data.times;
   const slotMinutes = data.slotMinutes;
-  const dayStart = times[0] ?? DEFAULT_DAY_START;
-  const dayEnd = times.length
-    ? addLabel(times[times.length - 1], slotMinutes)
-    : DEFAULT_DAY_END;
-  const [windowStart, setWindowStart] = useState(dayStart);
-  const [windowEnd, setWindowEnd] = useState(dayEnd);
-
-  useEffect(() => {
-    setWindowStart(dayStart);
-    setWindowEnd(dayEnd);
-  }, [dayStart, dayEnd]);
+  const [windowStart, setWindowStart] = useState(DEFAULT_DAY_START);
+  const [windowEnd, setWindowEnd] = useState(DEFAULT_DAY_END);
 
   const windowStartMinutes = timeToMinutes(windowStart);
   const windowEndMinutes = timeToMinutes(windowEnd);
@@ -283,30 +275,59 @@ export function BrowseRooms({
   ]);
   const cols = `${TIME_COL}px repeat(${rooms.length}, minmax(155px, 1fr))`;
 
-  function endOptionsFor(ti: number): string[] {
-    const lastEnd = addLabel(times[times.length - 1], slotMinutes);
-    return [...times.slice(ti + 1), lastEnd].filter(
-      (time) => timeToMinutes(time) <= windowEndMinutes
-    );
+  function statusFor(room: ScheduleRoom, time: string) {
+    const businessIndex = businessIndexByTime.get(time);
+    return businessIndex === undefined ? 0 : room.grid[businessIndex]?.[dayIndex] ?? 0;
+  }
+
+  function isBookableSlot(room: ScheduleRoom, time: string) {
+    const startMinutes = timeToMinutes(time);
+    const endMinutes = startMinutes + slotMinutes;
+    if (!hasValidWindow || startMinutes < windowStartMinutes || endMinutes > windowEndMinutes) {
+      return false;
+    }
+    return isFreeStatus(statusFor(room, time));
+  }
+
+  function endOptionsFor(room: ScheduleRoom, startTime: string, schedule?: boolean): string[] {
+    const startMinutes = timeToMinutes(startTime);
+    const latestEndMinutes = schedule
+      ? Math.min(windowEndMinutes, startMinutes + SCHEDULE_MAX_DURATION_MINUTES)
+      : windowEndMinutes;
+    const options: string[] = [];
+
+    for (const time of allTimes) {
+      const minutes = timeToMinutes(time);
+      if (minutes <= startMinutes) continue;
+      if (minutes > latestEndMinutes) break;
+
+      const previousSlotStart = minutes - slotMinutes;
+      const previousSlotTime = `${String(Math.floor(previousSlotStart / 60)).padStart(
+        2,
+        "0"
+      )}:${String(previousSlotStart % 60).padStart(2, "0")}`;
+
+      if (!isBookableSlot(room, previousSlotTime)) break;
+      options.push(time);
+    }
+
+    return options;
   }
 
   function openBooking(
-    roomEmail: string,
-    roomName: string,
+    room: ScheduleRoom,
     t: string,
-    ti: number,
-    thumbnail?: string,
     schedule?: boolean
   ) {
     setSelectedSlot({
-      roomEmail,
-      roomName,
+      roomEmail: room.email,
+      roomName: room.name,
       date: data.days[dayIndex],
       startTime: t,
-      thumbnail,
+      thumbnail: room.thumbnail_link,
       schedule,
     });
-    setEndOptions(endOptionsFor(ti));
+    setEndOptions(endOptionsFor(room, t, schedule));
     onOpen();
   }
 
@@ -329,7 +350,7 @@ export function BrowseRooms({
     const anchorMinutes = currentMinutes < 13 * 60 ? 9 * 60 : 13 * 60;
     const anchorBlock = Math.floor(anchorMinutes / slotMinutes);
     el.scrollTop = Math.max(0, (anchorBlock - 1) * SLOT_H);
-  }, [selectedDay, slotMinutes]);
+  }, [slotMinutes]);
 
   return (
     <div className="flex h-full flex-col bg-white">
@@ -564,8 +585,8 @@ export function BrowseRooms({
                     </div>
 
                   {rooms.map((r) => {
-                    // Outside the selected/business-hours window → disabled, not bookable.
-                    if (bi === undefined || outsideWindow) {
+                    // Outside the selected window → disabled, not bookable.
+                    if (outsideWindow) {
                       return (
                         <div
                           key={r.email}
@@ -579,15 +600,21 @@ export function BrowseRooms({
                       );
                     }
 
-                    const status = r.grid[bi]?.[dayIndex] ?? 0;
+                    // Slots outside the backend availability window have no
+                    // busy/free cache, but should still follow the user's
+                    // visible From/To filter.
+                    const status = bi === undefined ? 0 : r.grid[bi]?.[dayIndex] ?? 0;
                     // Schedule days (status 3/4/5) sit beyond the live Graph
                     // window — bookings there are "schedule" bookings.
                     const schedule = status >= 3;
                     const free = status === 0 || status === 3;
                     const myBooking = status === 2 || status === 5;
                     const prevBusy =
-                      bi > 0 && (r.grid[bi - 1]?.[dayIndex] ?? 0) === status;
+                      bi !== undefined &&
+                      bi > 0 &&
+                      (r.grid[bi - 1]?.[dayIndex] ?? 0) === status;
                     const nextBusy =
+                      bi !== undefined &&
                       bi < times.length - 1 &&
                       (r.grid[bi + 1]?.[dayIndex] ?? 0) === status;
 
@@ -597,11 +624,11 @@ export function BrowseRooms({
                           key={r.email}
                           role="button"
                           tabIndex={0}
-                          onClick={() => openBooking(r.email, r.name, t, bi, r.thumbnail_link, schedule)}
+                          onClick={() => openBooking(r, t, schedule)}
                           onKeyDown={(event) => {
                             if (event.key === "Enter" || event.key === " ") {
                               event.preventDefault();
-                              openBooking(r.email, r.name, t, bi, r.thumbnail_link, schedule);
+                              openBooking(r, t, schedule);
                             }
                           }}
                           className="group cursor-pointer border-r border-t border-[color:var(--separator)] bg-white px-1 outline-none transition-colors hover:bg-[var(--accent-soft)] hover:shadow-[inset_0_0_0_1px_var(--accent)] focus:bg-[var(--accent-soft)] focus:shadow-[inset_0_0_0_1px_var(--accent)]"
@@ -689,7 +716,7 @@ export function BrowseRooms({
                 style={{ top: markerOffset }}
               >
                 <span
-                  className="flex shrink-0 justify-end pr-1.5"
+                  className="sticky left-0 z-20 flex shrink-0 items-center justify-end bg-white pr-1.5"
                   style={{ width: TIME_COL }}
                 >
                   <span
@@ -701,11 +728,11 @@ export function BrowseRooms({
                   >
                     {nowLabel}
                   </span>
+                  <span
+                    className="-mr-2 ml-1 h-2 w-2 shrink-0 rounded-full"
+                    style={{ backgroundColor: "var(--accent)" }}
+                  />
                 </span>
-                <span
-                  className="-ml-1 h-2 w-2 shrink-0 rounded-full"
-                  style={{ backgroundColor: "var(--accent)" }}
-                />
                 <span
                   className="-ml-1 h-px flex-1"
                   style={{ backgroundColor: "var(--accent)" }}

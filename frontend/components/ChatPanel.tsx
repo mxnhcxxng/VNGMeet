@@ -21,11 +21,11 @@ import {
   Check,
   Copy,
   PaperPlane,
-  Sparkles,
   ThumbsDown,
   ThumbsUp,
 } from "@gravity-ui/icons";
 import { api, type BookingRequest, type ChatMessage, type ChatThread } from "@/lib/api";
+import { BrandIcon } from "./BrandIcon";
 
 const SUGGESTIONS = [
   "I need a room for 6 people from 2 to 4 this afternoon",
@@ -442,9 +442,9 @@ function AssistantActions({ content }: { content: string }) {
 
 function AssistantAvatar() {
   return (
-    <Avatar size="sm" color="accent" className="mt-0.5 shrink-0">
-      <Avatar.Fallback color="accent">
-        <Sparkles width={16} />
+    <Avatar size="sm" className="mt-0.5 shrink-0 bg-[#FEEAE2]">
+      <Avatar.Fallback className="bg-[#FEEAE2]">
+        <BrandIcon size={18} />
       </Avatar.Fallback>
     </Avatar>
   );
@@ -596,9 +596,9 @@ export function ChatPanel({
             </div>
           ) : empty ? (
             <div className="flex h-[60vh] flex-col items-center justify-center text-center">
-              <Avatar size="lg" color="accent" className="mb-5">
-                <Avatar.Fallback color="accent">
-                  <Sparkles width={24} />
+              <Avatar size="lg" className="mb-5 bg-[#FEEAE2]">
+                <Avatar.Fallback className="bg-[#FEEAE2]">
+                  <BrandIcon size={28} />
                 </Avatar.Fallback>
               </Avatar>
               <h1 className="text-2xl font-semibold tracking-tight text-[#181d27]">
@@ -687,7 +687,7 @@ export function ChatPanel({
           </div>
         )}
 
-        <div className="flex items-end gap-2 rounded-2xl border border-[#e9eaeb] bg-white p-3 shadow-sm transition focus-within:border-[#d5d7da]">
+        <div className="flex flex-col gap-2 rounded-2xl border border-[#e9eaeb] bg-[var(--default)] p-3 transition focus-within:bg-[var(--default-hover)]">
           <textarea
             ref={textareaRef}
             rows={2}
@@ -699,7 +699,7 @@ export function ChatPanel({
               el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
             }}
             placeholder="Describe your meeting requirements..."
-            className="block max-h-[200px] min-h-[52px] w-full flex-1 resize-none bg-transparent px-1 py-1.5 text-sm leading-6 text-[#181d27] outline-none placeholder:text-[#a4a7ae]"
+            className="block max-h-[200px] min-h-[60px] w-full resize-none bg-transparent px-1 py-1.5 text-sm leading-6 text-[#181d27] outline-none placeholder:text-[#a4a7ae]"
             onKeyDown={(e) => {
               // Ignore Enter while an IME composition is active (Vietnamese / CJK
               // input methods on macOS, etc.). The Enter that commits the
@@ -716,7 +716,7 @@ export function ChatPanel({
             isIconOnly
             variant="primary"
             aria-label="Send"
-            className="size-10 shrink-0 rounded-full"
+            className="size-10 shrink-0 self-end rounded-full"
             isDisabled={!input.trim()}
             isPending={sending}
             onPress={() => send()}

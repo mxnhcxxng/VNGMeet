@@ -1,0 +1,43 @@
+export function BrandIcon({
+  size = 32,
+  className,
+}: {
+  size?: number;
+  className?: string;
+}) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 32 32"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      className={className}
+    >
+      <path
+        d="M16.6438 3.02669C17.5801 2.69862 18.5597 3.39296 18.5598 4.38509V26.8568C18.5596 27.7285 17.7909 28.4004 16.927 28.2835L7.96704 27.0677C7.25315 26.9708 6.71997 26.3604 6.71997 25.64V7.52669C6.71999 6.91507 7.10666 6.36968 7.68384 6.16732L16.6438 3.02669ZM14.72 14.3997C14.1014 14.3997 13.5999 15.1158 13.5999 15.9993C13.5999 16.883 14.1014 17.5999 14.72 17.5999C15.3385 17.5999 15.8401 16.883 15.8401 15.9993C15.84 15.1158 15.3385 14.3997 14.72 14.3997Z"
+        fill="#F05A22"
+      />
+      <path
+        d="M19.84 7.35999H23.84C23.9283 7.35999 24 7.43162 24 7.51999V25.6C24 25.6884 23.9283 25.76 23.84 25.76H19.84"
+        stroke="url(#brand_icon_grad)"
+        strokeWidth="2.56"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <defs>
+        <linearGradient
+          id="brand_icon_grad"
+          x1="24"
+          y1="16.56"
+          x2="19.84"
+          y2="16.56"
+          gradientUnits="userSpaceOnUse"
+        >
+          <stop stopColor="#F05A22" />
+          <stop offset="1" stopColor="#F05A22" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+    </svg>
+  );
+}

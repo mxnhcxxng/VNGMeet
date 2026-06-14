@@ -14,6 +14,7 @@ import {
 } from "@gravity-ui/icons";
 import { Button, Dropdown, Label } from "@heroui/react";
 import type { ChatThread } from "@/lib/api";
+import { BrandIcon } from "./BrandIcon";
 
 export type View = "browse" | "chat" | "settings" | "bookingHistory";
 
@@ -199,14 +200,7 @@ export function Sidebar({
       {/* Brand + collapse */}
       <div className="flex items-center justify-between px-5 pt-5">
         <div className="flex items-center gap-[7.5px]">
-          <div
-            className="flex h-6 w-6 items-center justify-center rounded-lg text-white"
-            style={{ backgroundImage: "linear-gradient(225deg, #ff9f81 0%, #f2460e 100%)" }}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M5 4v16M12 4v10M19 4v16" />
-            </svg>
-          </div>
+          <BrandIcon size={24} className="shrink-0" />
           <span className="text-[18px] font-bold leading-6 text-[#181d27]">VNG MEET</span>
         </div>
         <button

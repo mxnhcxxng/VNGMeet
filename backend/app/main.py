@@ -31,6 +31,7 @@ from .config import get_settings
 log = logging.getLogger("vngmeet")
 settings = get_settings()
 AVAILABILITY_CACHE_TTL = timedelta(minutes=5)
+SCHEDULE_MAX_DURATION_MINUTES = 3 * 60
 _AVAILABILITY_REFRESH_LOCK = None
 
 
@@ -511,7 +512,10 @@ def _room_metadata() -> dict[str, dict]:
         rows = (
             get_supabase()
             .table("meeting_room_metadata")
-            .select("email, office, building, floor, zone, capacity, capacity_size, thumbnail_link")
+            .select(
+                "email, office, building, floor, zone, capacity, capacity_size, "
+                "thumbnail_link, direction"
+            )
             .execute()
             .data
         )
@@ -548,6 +552,7 @@ def _enrich_rooms(rooms: list[dict]) -> list[dict]:
                 "zone": m.get("zone"),
                 "office": m.get("office"),
                 "thumbnail_link": m.get("thumbnail_link"),
+                "direction": m.get("direction"),
             }
         enriched.append(r)
     return enriched
@@ -826,7 +831,10 @@ async def availability_grid(
         r
         for r in (
             sb.table("meeting_room_metadata")
-            .select("id, name, email, building, floor, zone, capacity, capacity_size, office, thumbnail_link")
+            .select(
+                "id, name, email, building, floor, zone, capacity, capacity_size, "
+                "office, thumbnail_link, direction"
+            )
             .eq("in_use", True)
             .execute()
             .data
@@ -1053,7 +1061,7 @@ Luồng xử lý:
 
 Luồng chỉ đường:
 - Khi user hỏi "chỉ đường", "đường đến", "map", "ở đâu", "vị trí" kèm tên phòng, gọi function get_room_directions.
-- Nếu tìm thấy phòng và có map_link, trả tên phòng, office/building/floor/zone nếu có, link và ảnh map bằng Markdown image.
+- Nếu tìm thấy phòng, trả tên phòng, office/building/floor/zone nếu có, direction nếu có, link và ảnh map nếu có map_link.
 - Nếu user chỉ nói tên như "Chỉ đường đến Tokyo", hiểu Tokyo là tên phòng.
 
 Nguyên tắc phản hồi:
@@ -1446,6 +1454,7 @@ def _room_result(room: dict) -> dict:
         "capacity": room.get("capacity"),
         "capacity_size": _effective_capacity_size(room),
         "map_link": room.get("map_link"),
+        "direction": room.get("direction"),
         "booking_type": room.get("_booking_type") or "instant",
     }
 
@@ -1453,7 +1462,10 @@ def _room_result(room: dict) -> dict:
 def _rows_for_chat_availability(sb, capacity: object, location: str, profile: dict | None) -> list[dict]:
     rows = (
         sb.table("meeting_room_metadata")
-        .select("id, name, email, building, floor, zone, capacity, capacity_size, office, map_link")
+        .select(
+            "id, name, email, building, floor, zone, capacity, capacity_size, "
+            "office, map_link, direction"
+        )
         .eq("in_use", True)
         .execute()
         .data
@@ -1651,7 +1663,10 @@ def _find_room_metadata(room_name: object = None, room_email: object = None) -> 
     rows = (
         get_supabase()
         .table("meeting_room_metadata")
-        .select("id, name, email, office, building, floor, zone, capacity, capacity_size, map_link")
+        .select(
+            "id, name, email, office, building, floor, zone, capacity, capacity_size, "
+            "map_link, direction"
+        )
         .eq("in_use", True)
         .execute()
         .data
@@ -1782,6 +1797,9 @@ def _room_direction_reply(result: dict) -> str:
     lines = [f"Đây là chỉ đường đến {name}."]
     if details:
         lines.append(f"Vị trí: {', '.join(details)}.")
+    direction = str(room.get("direction") or "").strip()
+    if direction:
+        lines.append(f"Hướng dẫn: {direction}")
     map_link = str(room.get("map_link") or "").strip()
     if map_link:
         lines.append(f"[Mở map]({map_link})")
@@ -1943,6 +1961,7 @@ async def _tool_check_room_availability_live(
                             "capacity": room.get("capacity"),
                             "capacity_size": _effective_capacity_size(room),
                             "map_link": room.get("map_link"),
+                            "direction": room.get("direction"),
                         }
                     )
     except httpx.HTTPStatusError as e:
@@ -2411,6 +2430,17 @@ def _payload_is_scheduled(payload: BookingRequest) -> bool:
     return _booking_type_for_db(payload.booking_type) == "scheduled"
 
 
+def _booking_duration_minutes(payload: BookingRequest) -> int | None:
+    try:
+        start_hour, start_minute = payload.start_time.split(":")
+        end_hour, end_minute = payload.end_time.split(":")
+        start = int(start_hour) * 60 + int(start_minute)
+        end = int(end_hour) * 60 + int(end_minute)
+        return end - start
+    except (TypeError, ValueError):
+        return None
+
+
 def _scheduled_token_fernet() -> Fernet:
     raw_key = settings.scheduled_token_encryption_key.strip()
     if raw_key:
@@ -2730,6 +2760,18 @@ async def create_booking(request: Request, payload: BookingRequest):
         _log_user_booking_activity(user_profile_id, payload, "failed", "invalid_time_range")
         raise HTTPException(400, "Giờ kết thúc phải sau giờ bắt đầu")
     if _payload_is_scheduled(payload):
+        duration = _booking_duration_minutes(payload)
+        if duration is None:
+            _log_user_booking_activity(user_profile_id, payload, "failed", "invalid_time_range")
+            raise HTTPException(400, "Thời gian booking không hợp lệ")
+        if duration > SCHEDULE_MAX_DURATION_MINUTES:
+            _log_user_booking_activity(
+                user_profile_id,
+                payload,
+                "failed",
+                "scheduled_duration_too_long",
+            )
+            raise HTTPException(400, "Scheduled booking chỉ được đặt tối đa 3 tiếng.")
         return _create_pending_scheduled_booking(auth_user_id, user_profile_id, token, payload)
 
     start_iso = f"{payload.date}T{payload.start_time}:00"

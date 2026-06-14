@@ -12,6 +12,12 @@ body {
   color: #181d27;
 }
 
+/* Hide the browser-native password reveal "eye" / clear controls (Edge/IE). */
+input[type="password"]::-ms-reveal,
+input[type="password"]::-ms-clear {
+  display: none;
+}
+
 @keyframes auth-caption-in {
   from {
     opacity: 0;
