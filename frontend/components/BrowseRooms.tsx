@@ -61,13 +61,13 @@ function formatDmy(iso: string) {
 
 // Event palettes lifted from the design's utility colour ramps.
 const EVENT_BOOKED = {
-  bg: "#fef3f2",
-  border: "#fecdca",
+  bg: "var(--event-booked-bg)",
+  border: "var(--event-booked-border)",
   title: "#b42318",
 };
 const EVENT_MINE = {
-  bg: "#edfcf2",
-  border: "#aaf0c4",
+  bg: "var(--event-mine-bg)",
+  border: "var(--event-mine-border)",
   title: "#087443",
   time: "#099250",
   dot: "#16b364",

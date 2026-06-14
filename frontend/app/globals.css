@@ -24,6 +24,22 @@ html.dark body {
   color: #f7f7f7;
 }
 
+/* Browse-grid booked-cell backgrounds — set via inline style on the cells, so
+   they can't use a `dark:` class. Drive them off these variables instead, which
+   flip to deep tints in dark mode. */
+:root {
+  --event-booked-bg: #fef3f2;
+  --event-booked-border: #fecdca;
+  --event-mine-bg: #edfcf2;
+  --event-mine-border: #aaf0c4;
+}
+html.dark {
+  --event-booked-bg: #3e1209;
+  --event-booked-border: #690802;
+  --event-mine-bg: #07411f;
+  --event-mine-border: #17823f;
+}
+
 /* Brand color comes solely from --accent (set below). The `primary` button
    variant already reads var(--accent) / var(--accent-hover) / var(--accent-foreground),
    so it picks up the orange automatically. All other variants (tertiary, ghost,
