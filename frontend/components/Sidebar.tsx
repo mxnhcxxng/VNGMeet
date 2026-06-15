@@ -40,6 +40,7 @@ function ChatThreadRow({
   const [editing, setEditing] = useState(false);
   const [draftTitle, setDraftTitle] = useState(thread.title || "Chat mới");
   const [busy, setBusy] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -83,13 +84,12 @@ function ChatThreadRow({
     }
   };
 
-  const deleteThread = async () => {
+  const performDelete = async () => {
     if (!onDelete || busy) return;
-    const ok = window.confirm("Xoá chat này?");
-    if (!ok) return;
     setBusy(true);
     try {
       await onDelete(thread.id);
+      setConfirmOpen(false);
     } finally {
       setBusy(false);
     }
@@ -144,7 +144,7 @@ function ChatThreadRow({
             <Dropdown.Menu
               onAction={(key) => {
                 if (key === "rename-chat") startRename();
-                if (key === "delete-chat") deleteThread();
+                if (key === "delete-chat") setConfirmOpen(true);
               }}
             >
               <Dropdown.Item id="rename-chat" textValue="Rename">
@@ -158,6 +158,47 @@ function ChatThreadRow({
             </Dropdown.Menu>
           </Dropdown.Popover>
         </Dropdown>
+      )}
+
+      {confirmOpen && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget && !busy) setConfirmOpen(false);
+          }}
+        >
+          <div className="w-full max-w-[420px] rounded-2xl bg-white p-6 shadow-2xl dark:bg-[#0c0e12]">
+            <h2 className="text-lg font-semibold text-default-900">
+              Delete chat
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-default-600">
+              This will permanently delete
+              {" "}
+              <span className="font-medium text-default-900">
+                “{thread.title || "Chat mới"}”
+              </span>
+              . This action cannot be undone.
+            </p>
+            <div className="mt-6 flex items-center justify-end gap-2">
+              <Button
+                variant="tertiary"
+                className="rounded-full"
+                isDisabled={busy}
+                onPress={() => setConfirmOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="danger"
+                className="rounded-full"
+                isPending={busy}
+                onPress={performDelete}
+              >
+                Delete
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -213,10 +254,7 @@ export function Sidebar({
       <div className="mt-5 flex flex-col gap-0.5 px-4">
         <button
           type="button"
-          onClick={() => {
-            onChange("chat");
-            onNewChat?.();
-          }}
+          onClick={() => onNewChat?.()}
           className={`${ROW} ${view === "chat" && !activeThreadId ? "bg-[var(--default)]" : "hover:bg-[#f5f5f5] dark:hover:bg-[#22262f]"}`}
         >
           <PencilToSquare width={16} height={16} />
@@ -251,10 +289,7 @@ export function Sidebar({
                 key={thread.id}
                 thread={thread}
                 active={active}
-                onClick={() => {
-                  onChange("chat");
-                  onSelectThread?.(thread.id);
-                }}
+                onClick={() => onSelectThread?.(thread.id)}
                 onPrefetch={
                   onPrefetchThread
                     ? () => onPrefetchThread(thread.id)

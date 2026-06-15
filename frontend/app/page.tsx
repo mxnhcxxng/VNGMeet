@@ -1,6 +1,12 @@
 "use client";
 
-import { type ReactNode, useCallback, useEffect, useState } from "react";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   Autocomplete,
   Button,
@@ -736,6 +742,33 @@ export default function Home() {
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  // Unsaved-changes guard for the Settings screen. `settingsDirty` is reported
+  // by SettingsScreen; `pendingNav` holds the navigation to run if the user
+  // confirms leaving; `settingsDiscardRef` reverts the form (and live theme).
+  const [settingsDirty, setSettingsDirty] = useState(false);
+  const [pendingNav, setPendingNav] = useState<(() => void) | null>(null);
+  const settingsDiscardRef = useRef<(() => void) | null>(null);
+
+  // Run a navigation, but if there are unsaved Settings changes, stash it and
+  // surface the confirm modal instead.
+  const guardNav = (action: () => void) => {
+    if (view === "settings" && settingsDirty) {
+      setPendingNav(() => action);
+      return;
+    }
+    action();
+  };
+  const requestView = (next: View) => {
+    if (next === view) return;
+    guardNav(() => setView(next));
+  };
+  const confirmLeave = () => {
+    settingsDiscardRef.current?.();
+    setSettingsDirty(false);
+    pendingNav?.();
+    setPendingNav(null);
+  };
+  const cancelLeave = () => setPendingNav(null);
   const canEnterBooking = Boolean(
     me?.authenticated && me.profileComplete !== false,
   );
@@ -914,7 +947,11 @@ export default function Home() {
       setChatThreads((threads) =>
         threads.filter((thread) => thread.id !== threadId),
       );
-      if (activeThreadId === threadId) setActiveThreadId(null);
+      // After deleting, drop back to the default chat hero UI.
+      guardNav(() => {
+        setActiveThreadId(null);
+        setView("chat");
+      });
     } catch (e: any) {
       setError(e.message);
       throw e;
@@ -949,6 +986,39 @@ export default function Home() {
     </div>
   ) : null;
 
+  const unsavedChangesModal = pendingNav ? (
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4"
+      onMouseDown={(e) => e.target === e.currentTarget && cancelLeave()}
+    >
+      <div className="w-full max-w-[420px] rounded-2xl bg-white p-6 shadow-2xl dark:bg-[#0c0e12]">
+        <h2 className="text-lg font-semibold text-default-900">
+          Unsaved changes
+        </h2>
+        <p className="mt-2 text-sm leading-6 text-default-600">
+          You have unsaved changes. If you leave, your changes will be
+          discarded.
+        </p>
+        <div className="mt-6 flex items-center justify-end gap-2">
+          <Button
+            variant="tertiary"
+            className="rounded-full"
+            onPress={cancelLeave}
+          >
+            Stay
+          </Button>
+          <Button
+            variant="danger"
+            className="rounded-full"
+            onPress={confirmLeave}
+          >
+            Leave
+          </Button>
+        </div>
+      </div>
+    </div>
+  ) : null;
+
   if (!me?.authenticated) {
     return (
       <>
@@ -971,13 +1041,23 @@ export default function Home() {
     <div className="flex h-screen gap-2 overflow-hidden bg-[#f0f0f1] p-2 dark:bg-[#13161b]">
       <Sidebar
         view={view}
-        onChange={setView}
+        onChange={requestView}
         username={me.username}
         onLogout={handleLogout}
         chatThreads={chatThreads}
         activeThreadId={activeThreadId}
-        onNewChat={() => setActiveThreadId(null)}
-        onSelectThread={setActiveThreadId}
+        onNewChat={() =>
+          guardNav(() => {
+            setView("chat");
+            setActiveThreadId(null);
+          })
+        }
+        onSelectThread={(threadId) =>
+          guardNav(() => {
+            setView("chat");
+            setActiveThreadId(threadId);
+          })
+        }
         onPrefetchThread={prefetchChatThread}
         onRenameThread={handleRenameThread}
         onDeleteThread={handleDeleteThread}
@@ -994,7 +1074,12 @@ export default function Home() {
           {view === "bookingHistory" ? (
             <BookingHistory />
           ) : view === "settings" ? (
-            <SettingsScreen me={me} onSaved={setMe} />
+            <SettingsScreen
+              me={me}
+              onSaved={setMe}
+              onDirtyChange={setSettingsDirty}
+              discardRef={settingsDiscardRef}
+            />
           ) : view === "chat" ? (
             <ChatPanel
               threadId={activeThreadId}
@@ -1036,6 +1121,7 @@ export default function Home() {
         </div>
       </main>
       {sessionExpiredModal}
+      {unsavedChangesModal}
     </div>
   );
 }

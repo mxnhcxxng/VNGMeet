@@ -106,9 +106,13 @@ function SectionLabel({ title, description }: { title: string; description: stri
 export function SettingsScreen({
   me,
   onSaved,
+  onDirtyChange,
+  discardRef,
 }: {
   me: Me;
   onSaved: (me: Me) => void;
+  onDirtyChange?: (dirty: boolean) => void;
+  discardRef?: { current: (() => void) | null };
 }) {
   const [office, setOffice] = useState(me.profile?.office ?? "");
   const [floor, setFloor] = useState(me.profile?.floor ?? "");
@@ -185,6 +189,23 @@ export function SettingsScreen({
     setLanguage(initial.current.language);
     setErr(null);
   };
+
+  // Expose the latest reset closure so the parent can discard unsaved changes
+  // (including the live-applied theme) before navigating away from Settings.
+  const resetFormRef = useRef(resetForm);
+  resetFormRef.current = resetForm;
+  useEffect(() => {
+    if (discardRef) discardRef.current = () => resetFormRef.current();
+    return () => {
+      if (discardRef) discardRef.current = null;
+    };
+  }, [discardRef]);
+
+  // Report dirty state up so the parent can warn before leaving Settings.
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
+  useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
 
   useEffect(() => {
     const loadOptions = async () => {

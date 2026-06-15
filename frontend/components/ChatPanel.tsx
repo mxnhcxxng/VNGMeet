@@ -353,6 +353,7 @@ function BookingConfirmationCard({
         </div>
 
         <Checkbox
+          variant="secondary"
           isSelected={skipConfirmation}
           onChange={setSkipConfirmation}
           isDisabled={disabled}
