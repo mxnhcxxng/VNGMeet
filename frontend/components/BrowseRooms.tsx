@@ -18,6 +18,8 @@ import {
   ChevronRight,
   ArrowsRotateRight,
   Magnifier,
+  HeartFill,
+  PersonFill,
 } from "@gravity-ui/icons";
 import { I18nProvider } from "react-aria-components";
 import { parseDate, parseTime } from "@internationalized/date";
@@ -98,6 +100,23 @@ function capacityRank(room: ScheduleRoom) {
   if (room.capacity_size) return CAPACITY_RANK[room.capacity_size] ?? 3;
   return 3;
 }
+
+function capacitySize(
+  room: ScheduleRoom
+): "small" | "medium" | "large" | null {
+  if (typeof room.capacity === "number") {
+    if (room.capacity <= 4) return "small";
+    if (room.capacity <= 12) return "medium";
+    return "large";
+  }
+  return room.capacity_size ?? null;
+}
+
+const CAPACITY_LABEL: Record<"small" | "medium" | "large", { label: string; range: string }> = {
+  small: { label: "Small", range: "4-" },
+  medium: { label: "Medium", range: "5-12" },
+  large: { label: "Large", range: "13+" },
+};
 
 function numericFloor(floor?: string) {
   if (!floor) return null;
@@ -284,6 +303,10 @@ export function BrowseRooms({
     userBuilding,
     userFloor,
   ]);
+  const favoriteEmails = useMemo(
+    () => new Set(preferredRooms.map((room) => room.trim().toLowerCase())),
+    [preferredRooms]
+  );
   const cols = `${TIME_COL}px repeat(${rooms.length}, minmax(155px, 1fr))`;
 
   function statusFor(room: ScheduleRoom, time: string) {
@@ -682,19 +705,38 @@ export function BrowseRooms({
               style={{ gridTemplateColumns: cols }}
             >
               <div className="sticky left-0 z-30 border-r border-[color:var(--separator)] bg-white dark:bg-[#0c0e12]" />
-              {rooms.map((r) => (
-                <div
-                  key={r.email}
-                  className="flex items-center justify-center border-r border-[color:var(--separator)] p-2"
-                >
-                  <p
-                    className="truncate text-xs font-semibold text-default-700"
-                    title={r.name}
+              {rooms.map((r) => {
+                const isFavorite = favoriteEmails.has(r.email.toLowerCase());
+                const size = capacitySize(r);
+                const cap = size ? CAPACITY_LABEL[size] : null;
+                return (
+                  <div
+                    key={r.email}
+                    className="flex flex-col items-center justify-center gap-1 border-r border-[color:var(--separator)] p-2"
                   >
-                    {r.name}
-                  </p>
-                </div>
-              ))}
+                    <div className="flex w-full items-center justify-center gap-1">
+                      {isFavorite && (
+                        <HeartFill className="shrink-0 text-[#f97316]" width={14} height={14} />
+                      )}
+                      <p
+                        className="truncate text-xs font-semibold text-default-700"
+                        title={r.name}
+                      >
+                        {r.name}
+                      </p>
+                    </div>
+                    {cap && (
+                      <div className="flex items-center gap-0.5 text-[10px] text-default-500">
+                        <span>
+                          {cap.label} ({cap.range}
+                        </span>
+                        <PersonFill className="shrink-0" width={10} height={10} />
+                        <span>)</span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
 
             {/* Rows */}
