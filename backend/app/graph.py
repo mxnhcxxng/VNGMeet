@@ -324,3 +324,34 @@ async def delete_event(access_token: str, event_id: str) -> None:
         if resp.status_code == 404:
             return
         resp.raise_for_status()
+
+
+async def send_mail(
+    access_token: str,
+    to_email: str,
+    subject: str,
+    html_body: str,
+) -> None:
+    """Send a notification from the signed-in user's mailbox via Graph.
+
+    Needs the Mail.Send delegated permission. In manual-token mode the pasted
+    Graph token must include that scope.
+    """
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+    }
+    body = {
+        "message": {
+            "subject": subject,
+            "body": {"contentType": "HTML", "content": html_body},
+            "toRecipients": [
+                {"emailAddress": {"address": to_email}},
+            ],
+        },
+        "saveToSentItems": False,
+    }
+    url = f"{GRAPH_BASE}/me/sendMail"
+    async with httpx.AsyncClient(timeout=60) as client:
+        resp = await client.post(url, headers=headers, json=body)
+        resp.raise_for_status()

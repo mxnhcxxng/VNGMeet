@@ -51,6 +51,7 @@ import {
   BookingHistory,
   clearBookingHistoryCache,
 } from "@/components/BookingHistory";
+import { RoomScout } from "@/components/RoomScout";
 
 // Keep the browse range aligned with backend availability_days.
 const RANGE_DAYS = 18;
@@ -740,6 +741,7 @@ export default function Home() {
   const [data, setData] = useState<ScheduleResponse | null>(null);
   const [dayIndex, setDayIndex] = useState(0);
   const [chatThreads, setChatThreads] = useState<ChatThread[]>([]);
+  const [profileOptions, setProfileOptions] = useState<UserProfileOptions | null>(null);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -884,6 +886,13 @@ export default function Home() {
   useEffect(() => {
     if (canEnterBooking) loadChatThreads();
   }, [canEnterBooking, loadChatThreads]);
+
+  useEffect(() => {
+    if (!canEnterBooking) return;
+    api.userProfileOptions()
+      .then(setProfileOptions)
+      .catch(() => setProfileOptions(null));
+  }, [canEnterBooking]);
 
   useEffect(() => {
     if (!canEnterBooking) return;
@@ -1083,6 +1092,11 @@ export default function Home() {
         <div className="min-h-0 flex-1">
           {view === "bookingHistory" ? (
             <BookingHistory />
+          ) : view === "roomScout" ? (
+            <RoomScout
+              userOffice={me.profile?.office}
+              officeOptions={profileOptions?.office ?? []}
+            />
           ) : view === "settings" ? (
             <SettingsScreen
               me={me}

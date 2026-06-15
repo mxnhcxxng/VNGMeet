@@ -10,13 +10,14 @@ import {
   LayoutSideContentLeft,
   ArrowRightFromSquare,
   ClockArrowRotateLeft,
+  Magnifier,
   TrashBin,
 } from "@gravity-ui/icons";
 import { Button, Dropdown, Label } from "@heroui/react";
 import type { ChatThread } from "@/lib/api";
 import { BrandIcon } from "./BrandIcon";
 
-export type View = "browse" | "chat" | "settings" | "bookingHistory";
+export type View = "browse" | "chat" | "settings" | "bookingHistory" | "roomScout";
 
 // Shared pill-button layout for the nav / setting rows (matches the design).
 const ROW =
@@ -275,6 +276,14 @@ export function Sidebar({
         >
           <ClockArrowRotateLeft width={16} height={16} />
           Booking History
+        </button>
+        <button
+          type="button"
+          onClick={() => onChange("roomScout")}
+          className={`${ROW} ${view === "roomScout" ? "bg-[var(--default)]" : "hover:bg-[#f5f5f5] dark:hover:bg-[#22262f]"}`}
+        >
+          <Magnifier width={16} height={16} />
+          Room Scout
         </button>
       </div>
 

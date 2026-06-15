@@ -33,11 +33,13 @@ class Settings(BaseSettings):
     # Place.Read.All  -> list meeting rooms
     # Calendars.Read.Shared -> read other people's / rooms' free-busy via getSchedule
     # Calendars.ReadWrite -> create events (book a room) on the signed-in user's calendar
+    # Mail.Send -> send Room Scout notifications from the signed-in user's mailbox
     scopes: list[str] = [
         "offline_access",
         "Place.Read.All",
         "Calendars.Read.Shared",
         "Calendars.ReadWrite",
+        "Mail.Send",
         "User.Read",
     ]
 

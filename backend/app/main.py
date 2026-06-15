@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
+import html
 import json
 import logging
 from contextlib import asynccontextmanager
@@ -64,12 +65,20 @@ async def lifespan(app: FastAPI):
             coalesce=True,
             misfire_grace_time=300,
         )
+        scheduler.add_job(
+            _safe_process_room_scouts,
+            CronTrigger(minute="1,31", second=0, timezone=settings.timezone),
+            id="process_room_scouts",
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=120,
+        )
         if settings.graph_app_enabled:
             # Prime the cache shortly after boot so the grid isn't empty on first load.
             scheduler.add_job(_safe_refresh, "date", run_date=None)
         scheduler.start()
         log.warning(
-            "Background scheduler started (availability=%s, scheduled_bookings=True, cron minute=%s).",
+            "Background scheduler started (availability=%s, scheduled_bookings=True, room_scouts=True, cron minute=%s).",
             settings.graph_app_enabled,
             settings.availability_refresh_minutes,
         )
@@ -78,7 +87,7 @@ async def lifespan(app: FastAPI):
             "Background scheduler NOT started "
             "(supabase_enabled=%s, disabled=%s). "
             "Cache will refresh on demand from the requesting user's delegated token; "
-            "scheduled bookings will not run automatically.",
+            "scheduled bookings and room scouts will not run automatically.",
             settings.supabase_enabled,
             settings.availability_refresh_disabled,
         )
@@ -103,6 +112,14 @@ async def _safe_process_scheduled_bookings() -> None:
         await process_scheduled_bookings()
     except Exception as e:  # noqa: BLE001
         log.exception("process_scheduled_bookings failed: %s", e)
+
+
+async def _safe_process_room_scouts() -> None:
+    """Scheduler entry point for Room Scout notifications."""
+    try:
+        await process_room_scouts()
+    except Exception as e:  # noqa: BLE001
+        log.exception("process_room_scouts failed: %s", e)
 
 
 app = FastAPI(title="VNG Meet — Meeting Room Availability", lifespan=lifespan)
@@ -942,6 +959,281 @@ async def availability_refresh(request: Request):
         raise HTTPException(503, str(e))
     except httpx.HTTPStatusError as e:
         raise HTTPException(e.response.status_code, e.response.text)
+    return {"ok": True, **summary}
+
+
+# --------------------------------------------------------------------------- #
+# Room Scout
+# --------------------------------------------------------------------------- #
+class RoomScoutRequest(BaseModel):
+    duration_minutes: int = Field(ge=15, le=480)
+    min_capacity: int = Field(ge=1, le=200)
+    office: str | None = None
+
+
+def _end_of_today(tz: ZoneInfo) -> datetime:
+    tomorrow = datetime.now(tz).date() + timedelta(days=1)
+    return datetime.combine(tomorrow, datetime.min.time(), tzinfo=tz)
+
+
+def _current_scout_window(tz: ZoneInfo, duration_minutes: int) -> tuple[int, int, str, str]:
+    now = datetime.now(tz)
+    slot = settings.slot_minutes
+    total = now.hour * 60 + now.minute
+    start_minutes = (total // slot) * slot
+    start_idx = start_minutes // settings.availability_slot_minutes
+    duration_slots = max(
+        1,
+        (duration_minutes + settings.availability_slot_minutes - 1)
+        // settings.availability_slot_minutes,
+    )
+    end_idx = min(availability.SLOTS_PER_DAY, start_idx + duration_slots)
+    end_minutes = end_idx * settings.availability_slot_minutes
+    return (
+        start_idx,
+        end_idx,
+        f"{start_minutes // 60:02d}:{start_minutes % 60:02d}",
+        f"{end_minutes // 60:02d}:{end_minutes % 60:02d}",
+    )
+
+
+def _room_scout_token_for_create(token: str | None, auth_user_id: str | None) -> str | None:
+    # Supabase/Azure users can be refreshed from provider_tokens. Manual-token
+    # users need an encrypted copy so the scheduler can send mail later.
+    if auth_user_id:
+        return None
+    return _encrypt_scheduled_graph_token(token)
+
+
+def _available_room_scout_matches(sb, scout: dict, day: str) -> tuple[list[dict], str, str]:
+    tz = ZoneInfo(settings.timezone)
+    start_idx, end_idx, start_time, end_time = _current_scout_window(
+        tz, int(scout.get("duration_minutes") or 30)
+    )
+    if start_idx >= end_idx:
+        return [], start_time, end_time
+
+    query = (
+        sb.table("meeting_room_metadata")
+        .select("id, name, email, capacity, building, floor, office")
+        .eq("in_use", True)
+        .gte("capacity", int(scout.get("min_capacity") or 1))
+        .order("capacity")
+    )
+    office = str(scout.get("office") or "").strip()
+    if office:
+        query = query.eq("office", office)
+    rooms = [r for r in (query.execute().data or []) if r.get("id") and r.get("email")]
+    if not rooms:
+        return [], start_time, end_time
+
+    cache = _read_availability_cache(sb, [r["id"] for r in rooms], [day])
+    matches: list[dict] = []
+    for room in rooms:
+        row = cache.get((room["id"], day))
+        slots = row.get("slots") if row else []
+        if len(slots) != availability.SLOTS_PER_DAY:
+            continue
+        if all(slots[idx] == 0 for idx in range(start_idx, end_idx)):
+            matches.append(room)
+    return matches, start_time, end_time
+
+
+def _room_scout_signature(day: str, start_time: str, end_time: str, rooms: list[dict]) -> str:
+    emails = ",".join(sorted(str(r.get("email") or "").lower() for r in rooms))
+    return f"{day}|{start_time}|{end_time}|{emails}"
+
+
+def _room_scout_email_body(scout: dict, rooms: list[dict], day: str, start_time: str, end_time: str) -> str:
+    rows = "\n".join(
+        "<tr>"
+        f"<td style='padding:8px 12px;border-bottom:1px solid #eee'>{html.escape(str(room.get('name') or room.get('email') or 'Room'))}</td>"
+        f"<td style='padding:8px 12px;border-bottom:1px solid #eee'>{html.escape(str(room.get('capacity') or ''))}</td>"
+        f"<td style='padding:8px 12px;border-bottom:1px solid #eee'>{html.escape(str(room.get('building') or ''))}</td>"
+        f"<td style='padding:8px 12px;border-bottom:1px solid #eee'>{html.escape(str(room.get('floor') or ''))}</td>"
+        "</tr>"
+        for room in rooms[:12]
+    )
+    extra = "" if len(rooms) <= 12 else f"<p>And {len(rooms) - 12} more room(s).</p>"
+    return f"""
+    <div style="font-family:Arial,sans-serif;color:#18181b;line-height:1.5">
+      <h2 style="margin:0 0 12px">Room Scout found available rooms</h2>
+      <p>Window: <strong>{html.escape(day)} {html.escape(start_time)} - {html.escape(end_time)}</strong></p>
+      <p>Duration: {int(scout.get("duration_minutes") or 0)} minutes. Minimum capacity: {int(scout.get("min_capacity") or 1)}.</p>
+      <table style="border-collapse:collapse;margin-top:12px">
+        <thead>
+          <tr>
+            <th align="left" style="padding:8px 12px;border-bottom:2px solid #ddd">Room</th>
+            <th align="left" style="padding:8px 12px;border-bottom:2px solid #ddd">Capacity</th>
+            <th align="left" style="padding:8px 12px;border-bottom:2px solid #ddd">Building</th>
+            <th align="left" style="padding:8px 12px;border-bottom:2px solid #ddd">Floor</th>
+          </tr>
+        </thead>
+        <tbody>{rows}</tbody>
+      </table>
+      {extra}
+      <p style="margin-top:16px"><a href="{html.escape(settings.frontend_url)}">Open VNG Meet to book</a></p>
+    </div>
+    """
+
+
+async def _room_scout_graph_token(row: dict) -> str:
+    auth_user_id = str(row.get("auth_user_id") or "").strip()
+    if auth_user_id:
+        return await auth.get_graph_token(auth_user_id)
+    return _decrypt_scheduled_graph_token(row.get("graph_access_token"))
+
+
+async def process_room_scouts() -> dict:
+    if not settings.supabase_enabled:
+        raise RuntimeError("Supabase not configured; cannot process room scouts.")
+    from .supabase_client import get_supabase
+
+    sb = get_supabase()
+    tz = ZoneInfo(settings.timezone)
+    now = datetime.now(timezone.utc)
+    today = datetime.now(tz).date().isoformat()
+
+    sb.table("room_scouts").update(
+        {"status": "expired", "updated_at": now.isoformat()}
+    ).eq("status", "active").lte("expires_at", now.isoformat()).execute()
+
+    scouts = (
+        sb.table("room_scouts")
+        .select(
+            "id, user_id, auth_user_id, email, duration_minutes, min_capacity, office, "
+            "graph_access_token, last_notified_signature"
+        )
+        .eq("status", "active")
+        .gt("expires_at", now.isoformat())
+        .execute()
+        .data
+        or []
+    )
+    if not scouts:
+        return {"checked": 0, "notified": 0, "matches": 0, "errors": 0}
+
+    errors = 0
+    notified = 0
+    total_matches = 0
+    try:
+        if settings.graph_app_enabled:
+            await availability.refresh_availability()
+        else:
+            token = await _room_scout_graph_token(scouts[0])
+            await availability.refresh_availability_delegated(token)
+    except Exception as e:  # noqa: BLE001 - stale cache can still be useful
+        errors += 1
+        log.warning("room scout availability refresh failed: %s", e)
+
+    for scout in scouts:
+        scout_id = scout["id"]
+        checked_at = datetime.now(timezone.utc).isoformat()
+        try:
+            rooms, start_time, end_time = _available_room_scout_matches(sb, scout, today)
+            total_matches += len(rooms)
+            update = {"last_checked_at": checked_at, "updated_at": checked_at}
+            if rooms:
+                signature = _room_scout_signature(today, start_time, end_time, rooms)
+                if signature != scout.get("last_notified_signature"):
+                    token = await _room_scout_graph_token(scout)
+                    await graph.send_mail(
+                        token,
+                        scout["email"],
+                        f"Room Scout: {len(rooms)} room(s) available at {start_time}",
+                        _room_scout_email_body(scout, rooms, today, start_time, end_time),
+                    )
+                    update["last_notified_at"] = checked_at
+                    update["last_notified_signature"] = signature
+                    notified += 1
+            sb.table("room_scouts").update(update).eq("id", scout_id).execute()
+        except Exception as e:  # noqa: BLE001 - one scout must not block others
+            errors += 1
+            log.warning("room scout failed for %s: %s", scout_id, e)
+            sb.table("room_scouts").update(
+                {"last_checked_at": checked_at, "updated_at": checked_at}
+            ).eq("id", scout_id).execute()
+
+    return {
+        "checked": len(scouts),
+        "notified": notified,
+        "matches": total_matches,
+        "errors": errors,
+    }
+
+
+@app.get("/api/room-scouts")
+async def list_room_scouts(request: Request):
+    _token, _auth_user_id, user_profile_id, _email = await _booking_auth_context(request)
+    if not user_profile_id or not settings.supabase_enabled:
+        return {"scouts": []}
+    from .supabase_client import get_supabase
+
+    rows = (
+        get_supabase()
+        .table("room_scouts")
+        .select(
+            "id, email, duration_minutes, min_capacity, office, status, last_checked_at, "
+            "last_notified_at, expires_at, created_at"
+        )
+        .eq("user_id", user_profile_id)
+        .order("created_at", desc=True)
+        .limit(20)
+        .execute()
+        .data
+        or []
+    )
+    return {"scouts": rows}
+
+
+@app.post("/api/room-scouts")
+async def create_room_scout(request: Request, payload: RoomScoutRequest):
+    token, auth_user_id, user_profile_id, email = await _booking_auth_context(request)
+    if not settings.supabase_enabled or not user_profile_id or not email:
+        raise HTTPException(503, "Room Scout requires Supabase and a user profile email.")
+    from .supabase_client import get_supabase
+
+    profile = _read_user_profile(user_profile_id, email) or {}
+    office = (payload.office or profile.get("office") or "").strip() or None
+    tz = ZoneInfo(settings.timezone)
+    now = datetime.now(timezone.utc).isoformat()
+    row = {
+        "user_id": user_profile_id,
+        "auth_user_id": auth_user_id,
+        "email": email,
+        "duration_minutes": payload.duration_minutes,
+        "min_capacity": payload.min_capacity,
+        "office": office,
+        "status": "active",
+        "graph_access_token": _room_scout_token_for_create(token, auth_user_id),
+        "expires_at": _end_of_today(tz).astimezone(timezone.utc).isoformat(),
+        "updated_at": now,
+    }
+    res = get_supabase().table("room_scouts").insert(row).execute()
+    return {"ok": True, "scout": res.data[0] if res.data else row}
+
+
+@app.delete("/api/room-scouts/{scout_id}")
+async def stop_room_scout(request: Request, scout_id: str):
+    _token, _auth_user_id, user_profile_id, _email = await _booking_auth_context(request)
+    if not user_profile_id or not settings.supabase_enabled:
+        raise HTTPException(503, "Room Scout requires Supabase.")
+    from .supabase_client import get_supabase
+
+    now = datetime.now(timezone.utc).isoformat()
+    get_supabase().table("room_scouts").update(
+        {"status": "stopped", "updated_at": now}
+    ).eq("id", scout_id).eq("user_id", user_profile_id).execute()
+    return {"ok": True}
+
+
+@app.post("/api/room-scouts/process")
+async def run_room_scouts_now(request: Request):
+    _require_auth(request)
+    try:
+        summary = await process_room_scouts()
+    except RuntimeError as e:
+        raise HTTPException(503, str(e))
     return {"ok": True, **summary}
 
 

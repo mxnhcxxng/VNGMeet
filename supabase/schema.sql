@@ -337,6 +337,41 @@ alter table room_availability enable row level security;
 create policy "authenticated_can_read_availability" on room_availability
   for select to authenticated using (true);
 
+-- Room Scout: user asks the app to watch today's availability and email them
+-- when a room is free for the desired duration/capacity.
+create table if not exists room_scouts (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references public.user_profiles(id) on delete cascade,
+  auth_user_id uuid references auth.users on delete cascade,
+  email text not null,
+  duration_minutes integer not null,
+  min_capacity integer not null default 1,
+  office text,
+  status text not null default 'active',
+  graph_access_token text,
+  last_checked_at timestamptz,
+  last_notified_at timestamptz,
+  last_notified_signature text,
+  expires_at timestamptz not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint room_scouts_duration_check check (duration_minutes between 15 and 480),
+  constraint room_scouts_capacity_check check (min_capacity between 1 and 200),
+  constraint room_scouts_status_check check (status in ('active', 'stopped', 'expired', 'failed'))
+);
+alter table room_scouts add column if not exists auth_user_id uuid references auth.users on delete cascade;
+alter table room_scouts add column if not exists graph_access_token text;
+alter table room_scouts add column if not exists office text;
+alter table room_scouts add column if not exists last_notified_signature text;
+create index if not exists idx_room_scouts_user_status on room_scouts(user_id, status);
+create index if not exists idx_room_scouts_active_expires on room_scouts(status, expires_at);
+alter table room_scouts enable row level security;
+create policy "users can read own room scouts" on room_scouts
+  for select to authenticated using ((select auth.uid()) = auth_user_id);
+create policy "users can stop own room scouts" on room_scouts
+  for update to authenticated using ((select auth.uid()) = auth_user_id)
+  with check ((select auth.uid()) = auth_user_id);
+
 -- Supabase-native midnight seed job for room_availability.
 -- Runs at 17:00 UTC, which is 00:00 Asia/Ho_Chi_Minh (GMT+7). The function
 -- creates missing rows only, so existing availability data is never overwritten.

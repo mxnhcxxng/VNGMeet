@@ -26,7 +26,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 const SCOPES =
-  "offline_access openid email profile Place.Read.All Calendars.Read.Shared Calendars.ReadWrite User.Read";
+  "offline_access openid email profile Place.Read.All Calendars.Read.Shared Calendars.ReadWrite Mail.Send User.Read";
 
 export interface Me {
   authenticated: boolean;
@@ -142,6 +142,25 @@ export interface Booking {
   created_at: string;
 }
 
+export interface RoomScout {
+  id: string;
+  email: string;
+  duration_minutes: number;
+  min_capacity: number;
+  office?: string | null;
+  status: "active" | "stopped" | "expired" | "failed";
+  last_checked_at?: string | null;
+  last_notified_at?: string | null;
+  expires_at: string;
+  created_at: string;
+}
+
+export interface RoomScoutPayload {
+  duration_minutes: number;
+  min_capacity: number;
+  office?: string | null;
+}
+
 export interface ChatThread {
   id: string;
   title?: string;
@@ -239,6 +258,20 @@ export const api = {
   // Cancel/delete a booking. Instant bookings are cancelled on the calendar.
   deleteBooking: (id: string) =>
     req<{ ok: boolean }>(`/api/bookings/${id}`, { method: "DELETE" }),
+  roomScouts: () => req<{ scouts: RoomScout[] }>("/api/room-scouts"),
+  createRoomScout: (payload: RoomScoutPayload) =>
+    req<{ ok: boolean; scout: RoomScout }>("/api/room-scouts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+  stopRoomScout: (id: string) =>
+    req<{ ok: boolean }>(`/api/room-scouts/${id}`, { method: "DELETE" }),
+  processRoomScouts: () =>
+    req<{ ok: boolean; checked: number; notified: number; matches: number; errors: number }>(
+      "/api/room-scouts/process",
+      { method: "POST" }
+    ),
   chatThreads: () => req<{ threads: ChatThread[] }>("/api/chat/threads"),
   renameChatThread: (threadId: string, title: string) =>
     req<{ thread: ChatThread }>(`/api/chat/threads/${threadId}`, {
