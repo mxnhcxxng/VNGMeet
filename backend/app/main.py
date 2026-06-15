@@ -967,7 +967,10 @@ async def availability_refresh(request: Request):
 # --------------------------------------------------------------------------- #
 class RoomScoutRequest(BaseModel):
     duration_minutes: int = Field(ge=15, le=480)
-    min_capacity: int = Field(ge=1, le=200)
+    capacity_size: Literal["small", "medium", "large"] | None = None
+    scout_start_time: str | None = None  # "HH:MM"
+    scout_end_time: str | None = None  # "HH:MM"
+    ignore_lunch_break: bool = False
     office: str | None = None
 
 
@@ -976,25 +979,50 @@ def _end_of_today(tz: ZoneInfo) -> datetime:
     return datetime.combine(tomorrow, datetime.min.time(), tzinfo=tz)
 
 
-def _current_scout_window(tz: ZoneInfo, duration_minutes: int) -> tuple[int, int, str, str]:
-    now = datetime.now(tz)
-    slot = settings.slot_minutes
-    total = now.hour * 60 + now.minute
-    start_minutes = (total // slot) * slot
-    start_idx = start_minutes // settings.availability_slot_minutes
+def _time_to_minutes(value: object) -> int | None:
+    try:
+        hour, minute = str(value).split(":")
+        total = int(hour) * 60 + int(minute)
+    except (ValueError, AttributeError):
+        return None
+    if 0 <= total <= 24 * 60:
+        return total
+    return None
+
+
+def _minutes_to_label(minutes: int) -> str:
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
+
+
+def _scout_scan_window(tz: ZoneInfo, scout: dict) -> tuple[int, int, int]:
+    """Slot range to scan today for a free `duration` block.
+
+    Returns (scan_start_idx, scan_end_idx, duration_slots). We scan the whole
+    configured scout range [scout_start_time, scout_end_time) and report a match
+    if any room is free for the duration *anywhere* inside it — e.g. scout range
+    14:00-18:00, duration 2h, a room free 15:00-17:00 counts. If the range is
+    missing we fall back to the full day.
+    """
+    avail = settings.availability_slot_minutes
+
+    start_minutes = _time_to_minutes(scout.get("scout_start_time"))
+    end_minutes = _time_to_minutes(scout.get("scout_end_time"))
+    start_idx = (start_minutes // avail) if start_minutes is not None else 0
+    end_idx = (
+        (end_minutes + avail - 1) // avail
+        if end_minutes is not None
+        else availability.SLOTS_PER_DAY
+    )
+    if end_idx <= start_idx:
+        end_idx = availability.SLOTS_PER_DAY
+
     duration_slots = max(
         1,
-        (duration_minutes + settings.availability_slot_minutes - 1)
-        // settings.availability_slot_minutes,
+        (int(scout.get("duration_minutes") or 30) + avail - 1) // avail,
     )
-    end_idx = min(availability.SLOTS_PER_DAY, start_idx + duration_slots)
-    end_minutes = end_idx * settings.availability_slot_minutes
-    return (
-        start_idx,
-        end_idx,
-        f"{start_minutes // 60:02d}:{start_minutes % 60:02d}",
-        f"{end_minutes // 60:02d}:{end_minutes % 60:02d}",
-    )
+    scan_start = max(0, start_idx)
+    scan_end = min(end_idx, availability.SLOTS_PER_DAY)
+    return scan_start, scan_end, duration_slots
 
 
 def _room_scout_token_for_create(token: str | None, auth_user_id: str | None) -> str | None:
@@ -1005,27 +1033,49 @@ def _room_scout_token_for_create(token: str | None, auth_user_id: str | None) ->
     return _encrypt_scheduled_graph_token(token)
 
 
+def _has_free_block(slots: list, scan_start: int, scan_end: int, duration_slots: int) -> bool:
+    """True when there's a free (all-zero) block of `duration_slots` consecutive
+    slots somewhere inside [scan_start, scan_end)."""
+    run = 0
+    for idx in range(scan_start, scan_end):
+        if slots[idx] == 0:
+            run += 1
+            if run >= duration_slots:
+                return True
+        else:
+            run = 0
+    return False
+
+
 def _available_room_scout_matches(sb, scout: dict, day: str) -> tuple[list[dict], str, str]:
     tz = ZoneInfo(settings.timezone)
-    start_idx, end_idx, start_time, end_time = _current_scout_window(
-        tz, int(scout.get("duration_minutes") or 30)
-    )
-    if start_idx >= end_idx:
+    scan_start, scan_end, duration_slots = _scout_scan_window(tz, scout)
+    start_time = _minutes_to_label(scan_start * settings.availability_slot_minutes)
+    end_time = _minutes_to_label(scan_end * settings.availability_slot_minutes)
+    if scan_start + duration_slots > scan_end:
         return [], start_time, end_time
 
     query = (
         sb.table("meeting_room_metadata")
-        .select("id, name, email, capacity, building, floor, office")
+        .select("id, name, email, capacity, capacity_size, building, floor, office")
         .eq("in_use", True)
-        .gte("capacity", int(scout.get("min_capacity") or 1))
         .order("capacity")
     )
     office = str(scout.get("office") or "").strip()
     if office:
         query = query.eq("office", office)
     rooms = [r for r in (query.execute().data or []) if r.get("id") and r.get("email")]
+
+    wanted_size = str(scout.get("capacity_size") or "").strip().lower()
+    if wanted_size:
+        rooms = [r for r in rooms if _effective_capacity_size(r) == wanted_size]
     if not rooms:
         return [], start_time, end_time
+
+    # Lunch break 12:00-13:00 → slot indices [48, 52) at 15-min granularity.
+    ignore_lunch = bool(scout.get("ignore_lunch_break"))
+    avail = settings.availability_slot_minutes
+    lunch_slots = range((12 * 60) // avail, (13 * 60) // avail)
 
     cache = _read_availability_cache(sb, [r["id"] for r in rooms], [day])
     matches: list[dict] = []
@@ -1034,7 +1084,12 @@ def _available_room_scout_matches(sb, scout: dict, day: str) -> tuple[list[dict]
         slots = row.get("slots") if row else []
         if len(slots) != availability.SLOTS_PER_DAY:
             continue
-        if all(slots[idx] == 0 for idx in range(start_idx, end_idx)):
+        if ignore_lunch:
+            # Treat the lunch window as free/skippable so a block may span it.
+            slots = list(slots)
+            for idx in lunch_slots:
+                slots[idx] = 0
+        if _has_free_block(slots, scan_start, scan_end, duration_slots):
             matches.append(room)
     return matches, start_time, end_time
 
@@ -1055,11 +1110,12 @@ def _room_scout_email_body(scout: dict, rooms: list[dict], day: str, start_time:
         for room in rooms[:12]
     )
     extra = "" if len(rooms) <= 12 else f"<p>And {len(rooms) - 12} more room(s).</p>"
+    size = str(scout.get("capacity_size") or "any").strip().lower() or "any"
     return f"""
     <div style="font-family:Arial,sans-serif;color:#18181b;line-height:1.5">
       <h2 style="margin:0 0 12px">Room Scout found available rooms</h2>
       <p>Window: <strong>{html.escape(day)} {html.escape(start_time)} - {html.escape(end_time)}</strong></p>
-      <p>Duration: {int(scout.get("duration_minutes") or 0)} minutes. Minimum capacity: {int(scout.get("min_capacity") or 1)}.</p>
+      <p>Free for {int(scout.get("duration_minutes") or 0)} minutes. Capacity: {html.escape(size)}.</p>
       <table style="border-collapse:collapse;margin-top:12px">
         <thead>
           <tr>
@@ -1101,7 +1157,8 @@ async def process_room_scouts() -> dict:
     scouts = (
         sb.table("room_scouts")
         .select(
-            "id, user_id, auth_user_id, email, duration_minutes, min_capacity, office, "
+            "id, user_id, auth_user_id, email, duration_minutes, capacity_size, "
+            "scout_start_time, scout_end_time, ignore_lunch_break, office, "
             "graph_access_token, last_notified_signature"
         )
         .eq("status", "active")
@@ -1134,7 +1191,11 @@ async def process_room_scouts() -> dict:
             total_matches += len(rooms)
             update = {"last_checked_at": checked_at, "updated_at": checked_at}
             if rooms:
-                signature = _room_scout_signature(today, start_time, end_time, rooms)
+                # Dedup on the configured range (not the now-clamped scan window),
+                # so we don't re-email the same match set as the day advances.
+                sig_start = scout.get("scout_start_time") or start_time
+                sig_end = scout.get("scout_end_time") or end_time
+                signature = _room_scout_signature(today, sig_start, sig_end, rooms)
                 if signature != scout.get("last_notified_signature"):
                     token = await _room_scout_graph_token(scout)
                     await graph.send_mail(
@@ -1173,8 +1234,9 @@ async def list_room_scouts(request: Request):
         get_supabase()
         .table("room_scouts")
         .select(
-            "id, email, duration_minutes, min_capacity, office, status, last_checked_at, "
-            "last_notified_at, expires_at, created_at"
+            "id, email, duration_minutes, capacity_size, scout_start_time, scout_end_time, "
+            "ignore_lunch_break, office, status, last_checked_at, last_notified_at, "
+            "expires_at, created_at"
         )
         .eq("user_id", user_profile_id)
         .order("created_at", desc=True)
@@ -1195,6 +1257,14 @@ async def create_room_scout(request: Request, payload: RoomScoutRequest):
 
     profile = _read_user_profile(user_profile_id, email) or {}
     office = (payload.office or profile.get("office") or "").strip() or None
+
+    start_minutes = _time_to_minutes(payload.scout_start_time)
+    end_minutes = _time_to_minutes(payload.scout_end_time)
+    if start_minutes is None or end_minutes is None or end_minutes <= start_minutes:
+        raise HTTPException(422, "Scout range must have a valid start and end time.")
+    if end_minutes - start_minutes < payload.duration_minutes:
+        raise HTTPException(422, "Scout range must be at least as long as the duration.")
+
     tz = ZoneInfo(settings.timezone)
     now = datetime.now(timezone.utc).isoformat()
     row = {
@@ -1202,7 +1272,10 @@ async def create_room_scout(request: Request, payload: RoomScoutRequest):
         "auth_user_id": auth_user_id,
         "email": email,
         "duration_minutes": payload.duration_minutes,
-        "min_capacity": payload.min_capacity,
+        "capacity_size": payload.capacity_size,
+        "scout_start_time": _minutes_to_label(start_minutes),
+        "scout_end_time": _minutes_to_label(end_minutes),
+        "ignore_lunch_break": payload.ignore_lunch_break,
         "office": office,
         "status": "active",
         "graph_access_token": _room_scout_token_for_create(token, auth_user_id),
@@ -1214,17 +1287,19 @@ async def create_room_scout(request: Request, payload: RoomScoutRequest):
 
 
 @app.delete("/api/room-scouts/{scout_id}")
-async def stop_room_scout(request: Request, scout_id: str):
+async def stop_room_scout(request: Request, scout_id: str, outcome: str = "canceled"):
+    # outcome: "canceled" (user gave up) or "success" (user found a room).
     _token, _auth_user_id, user_profile_id, _email = await _booking_auth_context(request)
     if not user_profile_id or not settings.supabase_enabled:
         raise HTTPException(503, "Room Scout requires Supabase.")
+    status = "success" if outcome == "success" else "canceled"
     from .supabase_client import get_supabase
 
     now = datetime.now(timezone.utc).isoformat()
     get_supabase().table("room_scouts").update(
-        {"status": "stopped", "updated_at": now}
+        {"status": status, "updated_at": now}
     ).eq("id", scout_id).eq("user_id", user_profile_id).execute()
-    return {"ok": True}
+    return {"ok": True, "status": status}
 
 
 @app.post("/api/room-scouts/process")
@@ -1372,6 +1447,7 @@ Luồng xử lý:
 1. Người dùng hỏi có phòng phù hợp không.
 2. Kiểm tra thông tin đã có: ngày, giờ bắt đầu, giờ kết thúc hoặc thời lượng, nhu cầu phòng (nhỏ/vừa/lớn), địa điểm/khu vực.
 3. Nếu thiếu thông tin cần thiết, hỏi bổ sung ngắn gọn.
+   Nếu user chỉ nhập con số hoặc khoảng số mơ hồ (ví dụ "2-4", "3", "2 đến 4") mà không nói rõ đó là ngày (mùng mấy), thứ trong tuần, hay khung giờ, KHÔNG được tự đoán; hãy hỏi lại để làm rõ ý của user là ngày, thứ hay giờ.
 4. Khi đủ thông tin, gọi function kiểm tra lịch/phòng trống.
 5. Trả về danh sách phòng và khung giờ có thể đặt theo đúng thứ tự API trả về.
    Nếu không có phòng trống trọn khoảng thời gian, dùng split_suggestions để gợi ý tách phòng.
@@ -1380,14 +1456,15 @@ Luồng xử lý:
 7. Khi người dùng muốn đặt phòng, gọi function book_room cho đặt tức thì hoặc schedule_room cho scheduled booking để tạo card xác nhận với các thông tin đã điền.
 8. Xử lý kết quả book_room/schedule_room theo trường trả về:
    - Nếu trả về requires_confirmation=true: KHÔNG nói đã đặt phòng; chỉ nói người dùng kiểm tra card và bấm Đồng ý hoặc Từ chối.
-   - Nếu trả về booked=true (user đã bật chế độ đặt phòng không cần xác nhận): báo luôn kết quả. Nếu pending=true thì nói scheduled booking đã được tạo và sẽ tự đặt khi lịch mở; nếu không thì nói đặt phòng thành công. Sau đó gọi get_room_directions cho phòng vừa đặt để đính kèm map.
+   - Nếu trả về booked=true (user đã bật chế độ đặt phòng không cần xác nhận): báo luôn kết quả. Nếu pending=true thì nói scheduled booking đã được tạo và sẽ tự đặt khi lịch mở; nếu không thì chỉ cần báo đặt phòng thành công. KHÔNG trả link Outlook/calendar hay bất kỳ link xác nhận nào. Sau đó BẮT BUỘC gọi get_room_directions cho phòng vừa đặt và đính kèm map dưới dạng ẢNH (không phải link).
    - Nếu ok=false: báo thất bại kèm lý do và đề xuất phòng/giờ khác.
 9. Báo kết quả đặt phòng thành công hoặc thất bại sau khi hệ thống nhận action từ card.
 
 Luồng chỉ đường:
 - Khi user hỏi "chỉ đường", "đường đến", "map", "ở đâu", "vị trí" kèm tên phòng, gọi function get_room_directions.
-- Nếu tìm thấy phòng, trả tên phòng, office/building/floor/zone nếu có, direction nếu có, link và ảnh map nếu có map_link.
+- Nếu tìm thấy phòng, trả tên phòng, office/building/floor/zone nếu có, direction nếu có, và ẢNH map nếu có map_link. KHÔNG trả map dưới dạng link, chỉ trả dưới dạng ảnh.
 - Nếu user chỉ nói tên như "Chỉ đường đến Tokyo", hiểu Tokyo là tên phòng.
+- Nếu user nhập một tên có vẻ là tên phòng nhưng sai chính tả hoặc gần giống một tên phòng đã biết (ví dụ "Tokio" thay vì "Tokyo", "Singapor" thay vì "Singapore"), đừng tự đoán chắc chắn; hãy hỏi lại để xác nhận có phải user muốn nói đến phòng đó không trước khi tra cứu hoặc đặt.
 - Nếu dữ liệu direction/map note trong DB là tiếng Anh nhưng user hỏi bằng tiếng Việt, hãy dịch/diễn đạt lại phần hướng dẫn sang tiếng Việt tự nhiên; không trả nguyên văn tiếng Anh trừ tên riêng, tầng, toà nhà, khu vực hoặc landmark.
 
 Nguyên tắc phản hồi:
@@ -1401,7 +1478,7 @@ Nguyên tắc phản hồi:
 - Nếu người dùng không nói tên cuộc họp, để trống subject; hệ thống sẽ tự điền tên mặc định.
 - Nếu đặt lịch ngoài vùng live availability/schedule-bookable, truyền booking_type="scheduled"; còn đặt tức thì thì booking_type="instant".
 - Trả nhiều option hữu ích nhưng tối đa 5 option.
-- Khi liệt kê/gợi ý phòng, KHÔNG hiển thị map hay ảnh map. Chỉ hiển thị map trong 2 trường hợp: (1) user hỏi vị trí/chỉ đường (gọi get_room_directions), hoặc (2) sau khi đặt phòng thành công thì gọi get_room_directions cho phòng vừa đặt để đính kèm map.
+- Khi liệt kê/gợi ý phòng, KHÔNG hiển thị map hay ảnh map. Chỉ hiển thị map trong 2 trường hợp: (1) user hỏi vị trí/chỉ đường (gọi get_room_directions), hoặc (2) sau khi đặt phòng thành công thì gọi get_room_directions cho phòng vừa đặt để đính kèm map. Trong cả 2 trường hợp, map phải được trả dưới dạng ẢNH map, không trả dưới dạng link.
 - Không hỏi thêm về thiết bị phòng họp.
 - Nếu book thất bại, giải thích lý do nếu API có trả về và đề xuất thử phòng/giờ khác.
 - Nếu người dùng muốn đổi lịch hoặc huỷ lịch, hiện app chưa có API đổi/huỷ; hãy xin thông tin và nói ngắn gọn rằng bạn chưa thể thực hiện tự động trong phiên bản này.

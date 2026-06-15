@@ -1,75 +1,91 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import {
   Button,
-  Chip,
-  EmptyState,
+  Checkbox,
+  Label,
   ListBox,
   ListBoxItem,
   Select,
   Spinner,
   toast,
 } from "@heroui/react";
-import { ArrowsRotateRight, TrashBin } from "@gravity-ui/icons";
+import { CircleInfo, Magnifier } from "@gravity-ui/icons";
 import {
   api,
+  type CapacitySize,
   type RoomScout as RoomScoutRow,
   type UserProfileOption,
 } from "@/lib/api";
+import { BrandIcon } from "./BrandIcon";
+
+const SCOUT_SUBTITLE =
+  "We'll check for available rooms every 30 minutes and notify you by email when a matching room is found.";
 
 const DURATION_OPTIONS = [
   { value: "30", label: "30 min" },
   { value: "60", label: "1 hour" },
   { value: "90", label: "1.5 hours" },
   { value: "120", label: "2 hours" },
+  { value: "150", label: "2.5 hours" },
   { value: "180", label: "3 hours" },
 ];
 
-function formatDateTime(value?: string | null) {
-  if (!value) return "-";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "-";
-  return new Intl.DateTimeFormat("en-GB", {
-    hour: "2-digit",
-    minute: "2-digit",
-    day: "2-digit",
-    month: "2-digit",
-  }).format(date);
+const CAPACITY_OPTIONS: { value: CapacitySize; label: string }[] = [
+  { value: "small", label: "Small (≤4)" },
+  { value: "medium", label: "Medium (5–12)" },
+  { value: "large", label: "Large (13+)" },
+];
+
+// Business hours 09:00–18:00, 30-minute steps (matches backend slot_minutes).
+const TIME_OPTIONS = (() => {
+  const out: string[] = [];
+  for (let m = 9 * 60; m <= 18 * 60; m += 30) {
+    out.push(`${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`);
+  }
+  return out;
+})();
+
+function timeToMinutes(value: string) {
+  const [h, m] = value.split(":");
+  return Number(h) * 60 + Number(m);
 }
 
-function statusColor(status: RoomScoutRow["status"]) {
-  if (status === "active") return "success";
-  if (status === "failed") return "danger";
-  return "default";
+function durationLabel(minutes: number) {
+  return DURATION_OPTIONS.find((o) => o.value === String(minutes))?.label ?? `${minutes} min`;
+}
+
+function capacityLabel(size?: CapacitySize | null) {
+  if (!size) return "Any";
+  return CAPACITY_OPTIONS.find((o) => o.value === size)?.label ?? size;
+}
+
+function pickRandom<T>(list: T[]): T | undefined {
+  if (!list.length) return undefined;
+  return list[Math.floor(Math.random() * list.length)];
 }
 
 export function RoomScout({
+  userName,
   userOffice,
   officeOptions = [],
+  roomThumbnails = [],
 }: {
+  userName?: string;
   userOffice?: string;
   officeOptions?: UserProfileOption[];
+  roomThumbnails?: string[];
 }) {
   const [scouts, setScouts] = useState<RoomScoutRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [running, setRunning] = useState(false);
-  const [duration, setDuration] = useState("60");
-  const [capacity, setCapacity] = useState("4");
-  const [office, setOffice] = useState(userOffice || "");
-
-  useEffect(() => {
-    setOffice(userOffice || "");
-  }, [userOffice]);
-
-  const activeScout = useMemo(
-    () => scouts.find((scout) => scout.status === "active"),
-    [scouts],
-  );
 
   const load = useCallback(async () => {
-    setLoading(true);
     try {
       const res = await api.roomScouts();
       setScouts(res.scouts);
@@ -86,228 +102,385 @@ export function RoomScout({
     load();
   }, [load]);
 
-  const createScout = async () => {
-    const minCapacity = Number(capacity);
-    const durationMinutes = Number(duration);
-    if (!Number.isFinite(minCapacity) || minCapacity < 1) {
-      toast.warning("Capacity must be at least 1.");
+  const activeScout = useMemo(
+    () => scouts.find((s) => s.status === "active") ?? null,
+    [scouts],
+  );
+
+  return (
+    <div className="flex h-full min-h-0 flex-col overflow-y-auto">
+      <div className="flex min-h-full w-full flex-col items-center justify-center px-6 py-10">
+        <div className="w-full max-w-[480px]">
+          {loading ? (
+            <div className="flex justify-center py-10">
+              <Spinner />
+            </div>
+          ) : activeScout ? (
+            <ScoutingCard
+              scout={activeScout}
+              thumbnails={roomThumbnails}
+              onChanged={load}
+            />
+          ) : (
+            <ScoutForm
+              userName={userName}
+              userOffice={userOffice}
+              officeOptions={officeOptions}
+              onCreated={load}
+            />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ScoutForm({
+  userName,
+  userOffice,
+  officeOptions,
+  onCreated,
+}: {
+  userName?: string;
+  userOffice?: string;
+  officeOptions: UserProfileOption[];
+  onCreated: () => void | Promise<void>;
+}) {
+  const [office, setOffice] = useState(userOffice || "");
+  const [startTime, setStartTime] = useState("");
+  const [endTime, setEndTime] = useState("");
+  const [duration, setDuration] = useState("");
+  const [capacity, setCapacity] = useState<string>("");
+  const [ignoreLunch, setIgnoreLunch] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setOffice(userOffice || "");
+  }, [userOffice]);
+
+  const startOptions = useMemo(
+    () => TIME_OPTIONS.slice(0, -1).map((t) => ({ value: t, label: t })),
+    [],
+  );
+  const endOptions = useMemo(() => {
+    const after = startTime ? timeToMinutes(startTime) : -Infinity;
+    return TIME_OPTIONS.filter((t) => timeToMinutes(t) > after).map((t) => ({
+      value: t,
+      label: t,
+    }));
+  }, [startTime]);
+
+  const submit = async () => {
+    if (!office) {
+      toast.warning("Please choose an office.");
+      return;
+    }
+    if (!startTime || !endTime) {
+      toast.warning("Please choose a scout range.");
+      return;
+    }
+    if (!duration) {
+      toast.warning("Please choose a duration.");
+      return;
+    }
+    if (!capacity) {
+      toast.warning("Please choose a capacity.");
+      return;
+    }
+    if (timeToMinutes(endTime) - timeToMinutes(startTime) < Number(duration)) {
+      toast.warning("Scout range must be at least as long as the duration.");
       return;
     }
     setSaving(true);
     try {
       await api.createRoomScout({
-        duration_minutes: durationMinutes,
-        min_capacity: Math.round(minCapacity),
+        duration_minutes: Number(duration),
+        capacity_size: capacity as CapacitySize,
+        scout_start_time: startTime,
+        scout_end_time: endTime,
+        ignore_lunch_break: ignoreLunch,
         office: office || null,
       });
-      toast.success("Room Scout started");
-      await load();
-    } catch (e: any) {
-      toast.danger("Could not start Room Scout", {
-        description: e.message,
+      toast.success("Room Scout started", {
+        description: "We'll email you when a matching room opens up.",
       });
+      await onCreated();
+    } catch (e: any) {
+      toast.danger("Could not start Room Scout", { description: e.message });
     } finally {
       setSaving(false);
-    }
-  };
-
-  const stopScout = async (id: string) => {
-    setSaving(true);
-    try {
-      await api.stopRoomScout(id);
-      toast.success("Room Scout stopped");
-      await load();
-    } catch (e: any) {
-      toast.danger("Could not stop Room Scout", {
-        description: e.message,
-      });
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const runNow = async () => {
-    setRunning(true);
-    try {
-      const res = await api.processRoomScouts();
-      toast.success("Room Scout check completed", {
-        description: `${res.checked} checked, ${res.notified} emailed, ${res.matches} match(es).`,
-      });
-      await load();
-    } catch (e: any) {
-      toast.danger("Room Scout check failed", {
-        description: e.message,
-      });
-    } finally {
-      setRunning(false);
     }
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden">
-      <div className="flex shrink-0 items-center justify-between border-b border-default-200 px-6 py-4">
+    <div>
+      <div className="mb-1 flex items-center gap-1.5">
+        <BrandIcon size={34} />
+        <Magnifier className="size-7 text-[#F05A22]" />
+      </div>
+      <h1 className="mt-3 text-2xl font-bold text-default-900">
+        Hi, {userName || "there"}
+      </h1>
+      <p className="mt-1.5 text-sm leading-5 text-default-500">{SCOUT_SUBTITLE}</p>
+
+      <div className="mt-6 grid gap-4">
+        <SelectField
+          label="Office"
+          placeholder="Select Office"
+          value={office}
+          onChange={setOffice}
+          options={officeOptions.map((o) => ({ value: o.value, label: o.label }))}
+        />
+
         <div>
-          <h1 className="text-xl font-semibold text-default-900">Room Scout</h1>
-          <p className="mt-1 text-sm text-default-500">Runs at :01 and :31</p>
+          <Label className="mb-1.5 block">Scout range</Label>
+          <div className="grid grid-cols-2 gap-4">
+            <SelectField
+              placeholder="Start Time"
+              value={startTime}
+              onChange={(value) => {
+                setStartTime(value);
+                if (endTime && timeToMinutes(endTime) <= timeToMinutes(value)) {
+                  setEndTime("");
+                }
+              }}
+              options={startOptions}
+              maxRows={5}
+            />
+            <SelectField
+              placeholder="End Time"
+              value={endTime}
+              onChange={setEndTime}
+              options={endOptions}
+              maxRows={5}
+            />
+          </div>
         </div>
-        <Button
+
+        <Checkbox
           variant="secondary"
-          className="rounded-full"
-          isPending={running}
-          onPress={runNow}
+          isSelected={ignoreLunch}
+          onChange={setIgnoreLunch}
         >
-          <ArrowsRotateRight className="size-4" />
-          Run check
+          <Checkbox.Control>
+            <Checkbox.Indicator />
+          </Checkbox.Control>
+          <Checkbox.Content>
+            <span className="text-sm font-medium text-default-700">
+              Ignore lunch break
+            </span>
+          </Checkbox.Content>
+        </Checkbox>
+
+        <SelectField
+          label="Duration"
+          placeholder="Select Duration"
+          value={duration}
+          onChange={setDuration}
+          options={DURATION_OPTIONS}
+        />
+
+        <SelectField
+          label="Capacity"
+          placeholder="Select Capacity"
+          value={capacity}
+          onChange={setCapacity}
+          options={CAPACITY_OPTIONS}
+        />
+
+        <div className="flex items-start gap-1.5 text-sm leading-5 text-default-500">
+          <CircleInfo className="mt-0.5 size-4 shrink-0 text-[#F05A22]" />
+          <span>Room scouting is currently limited to same-day bookings.</span>
+        </div>
+
+        <Button className="mt-2 w-full rounded-full" onPress={submit} isPending={saving}>
+          Start Room Scout
         </Button>
       </div>
+    </div>
+  );
+}
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-0 overflow-y-auto lg:grid-cols-[360px_1fr]">
-        <section className="border-b border-default-200 p-6 lg:border-b-0 lg:border-r">
-          <div className="space-y-5">
-            <div>
-              <label className="mb-2 block text-sm font-medium text-default-700">
-                Duration
-              </label>
-              <Select
-                aria-label="Duration"
-                variant="secondary"
-                selectedKey={duration}
-                onSelectionChange={(key) => setDuration(String(key))}
-              >
-                <Select.Trigger>
-                  <Select.Value />
-                  <Select.Indicator />
-                </Select.Trigger>
-                <Select.Popover>
-                  <ListBox>
-                    {DURATION_OPTIONS.map((item) => (
-                      <ListBoxItem key={item.value} id={item.value}>
-                        {item.label}
-                      </ListBoxItem>
-                    ))}
-                  </ListBox>
-                </Select.Popover>
-              </Select>
-            </div>
+function ScoutingCard({
+  scout,
+  thumbnails,
+  onChanged,
+}: {
+  scout: RoomScoutRow;
+  thumbnails: string[];
+  onChanged: () => void | Promise<void>;
+}) {
+  const [busy, setBusy] = useState<"cancel" | "found" | null>(null);
 
-            <div>
-              <label className="mb-2 block text-sm font-medium text-default-700">
-                Capacity
-              </label>
-              <input
-                value={capacity}
-                inputMode="numeric"
-                type="number"
-                min={1}
-                max={200}
-                onChange={(event) => setCapacity(event.target.value)}
-                className="h-10 w-full rounded-lg border border-default-200 bg-white px-3 text-sm text-default-900 outline-none transition focus:border-default-400 dark:bg-[#0c0e12]"
-              />
-            </div>
+  // Random thumbnail that crossfades to another random one every 5s.
+  const [pair, setPair] = useState<{ cur?: string; prev?: string }>(() => ({
+    cur: pickRandom(thumbnails),
+  }));
+  useEffect(() => {
+    if (thumbnails.length === 0) return;
+    if (!pair.cur) setPair({ cur: pickRandom(thumbnails) });
+    if (thumbnails.length < 2) return;
+    const t = setInterval(() => {
+      setPair((p) => ({ cur: pickRandom(thumbnails) ?? p.cur, prev: p.cur }));
+    }, 5000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [thumbnails]);
 
-            <div>
-              <label className="mb-2 block text-sm font-medium text-default-700">
-                Office
-              </label>
-              <Select
-                aria-label="Office"
-                variant="secondary"
-                selectedKey={office || "all"}
-                onSelectionChange={(key) =>
-                  setOffice(String(key) === "all" ? "" : String(key))
-                }
-              >
-                <Select.Trigger>
-                  <Select.Value />
-                  <Select.Indicator />
-                </Select.Trigger>
-                <Select.Popover>
-                  <ListBox>
-                    <ListBoxItem id="all">All offices</ListBoxItem>
-                    {officeOptions.map((item) => (
-                      <ListBoxItem key={item.value} id={item.value}>
-                        {item.label}
-                      </ListBoxItem>
-                    ))}
-                  </ListBox>
-                </Select.Popover>
-              </Select>
-            </div>
+  // Sequential blinking dots: "." → ".." → "..." → repeat.
+  const [dots, setDots] = useState(1);
+  useEffect(() => {
+    const t = setInterval(() => setDots((d) => (d % 3) + 1), 450);
+    return () => clearInterval(t);
+  }, []);
 
-            <Button
-              className="w-full rounded-full"
-              isPending={saving}
-              isDisabled={Boolean(activeScout)}
-              onPress={createScout}
-            >
-              Start Room Scout
-            </Button>
+  const stop = async (kind: "cancel" | "found") => {
+    setBusy(kind);
+    try {
+      await api.stopRoomScout(scout.id, kind === "found" ? "success" : "canceled");
+      if (kind === "found") {
+        toast.success("Nice! Room Scout stopped", {
+          description: "Glad you found a room.",
+        });
+      } else {
+        toast.success("Room Scout cancelled");
+      }
+      await onChanged();
+    } catch (e: any) {
+      toast.danger("Could not stop Room Scout", { description: e.message });
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div>
+      <div className="relative h-[150px] w-full overflow-hidden rounded-xl bg-default-100">
+        {pair.prev && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={pair.prev}
+            alt=""
+            className="absolute inset-0 h-full w-full object-cover"
+          />
+        )}
+        {pair.cur ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            key={pair.cur}
+            src={pair.cur}
+            alt="Scouting room"
+            className="scout-thumb-fade absolute inset-0 h-full w-full object-cover"
+          />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-primary to-secondary text-2xl font-bold text-white">
+            Room Scout
           </div>
-        </section>
+        )}
+      </div>
 
-        <section className="min-h-0 p-6">
-          {loading ? (
-            <div className="flex h-full items-center justify-center">
-              <Spinner />
-            </div>
-          ) : scouts.length === 0 ? (
-            <EmptyState className="flex h-full flex-col items-center justify-center text-center">
-              <div className="text-sm font-medium text-default-600">No Room Scout yet</div>
-            </EmptyState>
-          ) : (
-            <div className="space-y-3">
-              {scouts.map((scout) => (
-                <div
-                  key={scout.id}
-                  className="grid gap-4 rounded-lg border border-default-200 p-4 md:grid-cols-[1fr_auto]"
-                >
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h2 className="text-base font-semibold text-default-900">
-                        {scout.duration_minutes} min for {scout.min_capacity}+ people
-                      </h2>
-                      <Chip color={statusColor(scout.status) as any} size="sm" variant="soft">
-                        <Chip.Label>{scout.status}</Chip.Label>
-                      </Chip>
-                    </div>
-                    <div className="mt-3 grid gap-2 text-sm text-default-600 sm:grid-cols-2 xl:grid-cols-4">
-                      <div>
-                        <span className="block text-default-400">Office</span>
-                        {scout.office || "All"}
-                      </div>
-                      <div>
-                        <span className="block text-default-400">Last checked</span>
-                        {formatDateTime(scout.last_checked_at)}
-                      </div>
-                      <div>
-                        <span className="block text-default-400">Last email</span>
-                        {formatDateTime(scout.last_notified_at)}
-                      </div>
-                      <div>
-                        <span className="block text-default-400">Expires</span>
-                        {formatDateTime(scout.expires_at)}
-                      </div>
-                    </div>
-                  </div>
+      <h1 className="mt-5 text-2xl font-bold text-default-900">
+        Scouting
+        <span className="ml-0.5 inline-block w-6 text-left align-baseline">
+          {".".repeat(dots)}
+        </span>
+      </h1>
+      <p className="mt-1.5 text-sm leading-5 text-default-500">{SCOUT_SUBTITLE}</p>
 
-                  {scout.status === "active" && (
-                    <Button
-                      isIconOnly
-                      aria-label="Stop Room Scout"
-                      variant="danger"
-                      className="size-10 rounded-full"
-                      isDisabled={saving}
-                      onPress={() => stopScout(scout.id)}
-                    >
-                      <TrashBin className="size-4" />
-                    </Button>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
+      <dl className="mt-5 grid gap-2.5 text-sm">
+        <DetailRow label="Office" value={scout.office || "All"} />
+        <DetailRow label="Duration" value={durationLabel(scout.duration_minutes)} />
+        <DetailRow
+          label="Scout Range"
+          value={
+            scout.scout_start_time && scout.scout_end_time
+              ? `${scout.scout_start_time} - ${scout.scout_end_time}`
+              : "-"
+          }
+        />
+        <DetailRow label="Capacity" value={capacityLabel(scout.capacity_size)} />
+      </dl>
+
+      <div className="mt-4 flex items-start gap-1.5 text-sm leading-5 text-default-500">
+        <CircleInfo className="mt-0.5 size-4 shrink-0 text-[#F05A22]" />
+        <span>Room scouting is currently limited to same-day bookings.</span>
+      </div>
+
+      <div className="mt-5 flex items-center gap-2">
+        <Button
+          variant="tertiary"
+          className="rounded-full"
+          isPending={busy === "cancel"}
+          isDisabled={busy === "found"}
+          onPress={() => stop("cancel")}
+        >
+          Cancel Scouting
+        </Button>
+        <Button
+          className="flex-1 rounded-full"
+          isPending={busy === "found"}
+          isDisabled={busy === "cancel"}
+          onPress={() => stop("found")}
+        >
+          I already found a room
+        </Button>
       </div>
     </div>
+  );
+}
+
+function DetailRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between gap-4">
+      <dt className="text-default-500">{label}</dt>
+      <dd className="font-medium text-default-900">{value}</dd>
+    </div>
+  );
+}
+
+function SelectField({
+  label,
+  placeholder,
+  value,
+  onChange,
+  options,
+  className,
+  maxRows,
+}: {
+  label?: string;
+  placeholder: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: { value: string; label: string }[];
+  className?: string;
+  // When set, the dropdown shows at most this many rows before scrolling.
+  maxRows?: number;
+}) {
+  return (
+    <Select
+      variant="secondary"
+      className={`flex flex-col gap-1.5 ${className ?? ""}`}
+      placeholder={placeholder}
+      selectedKey={value || null}
+      onSelectionChange={(key) => onChange(key ? String(key) : "")}
+      aria-label={label ?? placeholder}
+    >
+      {label && <Label>{label}</Label>}
+      <Select.Trigger>
+        <Select.Value />
+        <Select.Indicator />
+      </Select.Trigger>
+      <Select.Popover>
+        <ListBox
+          className={maxRows ? "overflow-y-auto" : undefined}
+          style={maxRows ? { maxHeight: `${maxRows * 2.5}rem` } : undefined}
+        >
+          {options.map((item) => (
+            <ListBoxItem key={item.value} id={item.value}>
+              {item.label}
+            </ListBoxItem>
+          ))}
+        </ListBox>
+      </Select.Popover>
+    </Select>
   );
 }

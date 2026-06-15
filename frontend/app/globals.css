@@ -87,6 +87,21 @@ input[type="password"]::-ms-clear {
   animation: typing-dot 1.2s infinite ease-in-out both;
 }
 
+/* Room Scout: crossfade the random room thumbnail every few seconds. The new
+   image fades in on top of the previous one. */
+@keyframes scout-thumb-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.scout-thumb-fade {
+  animation: scout-thumb-fade 1s ease forwards;
+}
+
 /* Brand: switch the global HeroUI accent from blue to orange. Everything that
    reads var(--accent) — primary buttons, office tabs, badges, spinners, icons,
    plus the soft/hover shades derived from it via color-mix — follows along. */

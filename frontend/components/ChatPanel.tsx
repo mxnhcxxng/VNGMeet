@@ -535,11 +535,13 @@ export function ChatPanel({
   onThreadSelected,
   onThreadsChanged,
   userRole = "user",
+  userDomain = "",
 }: {
   threadId: string | null;
   onThreadSelected: (threadId: string) => void;
   onThreadsChanged: (threads: ChatThread[]) => void;
   userRole?: UserRole;
+  userDomain?: string;
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>(() =>
     threadId ? cachedMessagesByThread.get(threadId) ?? [] : []
@@ -734,7 +736,7 @@ export function ChatPanel({
                 </Avatar.Fallback>
               </Avatar>
               <h1 className="text-2xl font-semibold tracking-tight text-[#181d27] dark:text-[#f7f7f7]">
-                When would you like to book a room?
+                {userDomain ? `How can I help, ${userDomain}?` : "How can I help?"}
               </h1>
               <p className="mt-2 max-w-md text-sm text-[#535862] dark:text-[#94979c]">
                 Describe your meeting and I&apos;ll suggest the best available rooms.
@@ -847,7 +849,7 @@ export function ChatPanel({
           </div>
         )}
 
-        <div className="flex flex-col gap-2 rounded-2xl border border-[#e9eaeb] dark:border-[#373a41] bg-[var(--default)] p-3 transition focus-within:bg-[var(--default-hover)]">
+        <div className="flex flex-col gap-2 rounded-2xl border border-[#e9eaeb] dark:border-[#373a41] bg-[var(--default)] p-3">
           <textarea
             ref={textareaRef}
             rows={2}
@@ -884,6 +886,9 @@ export function ChatPanel({
             <PaperPlane width={18} />
           </Button>
         </div>
+        <p className="mt-2 text-center text-xs text-[#a4a7ae] dark:text-[#94979c]">
+          AI can make mistakes. Check important info.
+        </p>
       </div>
     </div>
   );

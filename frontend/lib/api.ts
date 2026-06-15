@@ -142,13 +142,18 @@ export interface Booking {
   created_at: string;
 }
 
+export type CapacitySize = "small" | "medium" | "large";
+
 export interface RoomScout {
   id: string;
   email: string;
   duration_minutes: number;
-  min_capacity: number;
+  capacity_size?: CapacitySize | null;
+  scout_start_time?: string | null; // "HH:MM"
+  scout_end_time?: string | null; // "HH:MM"
+  ignore_lunch_break?: boolean;
   office?: string | null;
-  status: "active" | "stopped" | "expired" | "failed";
+  status: "active" | "stopped" | "expired" | "failed" | "canceled" | "success";
   last_checked_at?: string | null;
   last_notified_at?: string | null;
   expires_at: string;
@@ -157,7 +162,10 @@ export interface RoomScout {
 
 export interface RoomScoutPayload {
   duration_minutes: number;
-  min_capacity: number;
+  capacity_size: CapacitySize;
+  scout_start_time: string; // "HH:MM"
+  scout_end_time: string; // "HH:MM"
+  ignore_lunch_break?: boolean;
   office?: string | null;
 }
 
@@ -265,8 +273,11 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     }),
-  stopRoomScout: (id: string) =>
-    req<{ ok: boolean }>(`/api/room-scouts/${id}`, { method: "DELETE" }),
+  stopRoomScout: (id: string, outcome: "canceled" | "success" = "canceled") =>
+    req<{ ok: boolean; status: string }>(
+      `/api/room-scouts/${id}?outcome=${outcome}`,
+      { method: "DELETE" },
+    ),
   processRoomScouts: () =>
     req<{ ok: boolean; checked: number; notified: number; matches: number; errors: number }>(
       "/api/room-scouts/process",

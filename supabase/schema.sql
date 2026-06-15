@@ -345,7 +345,10 @@ create table if not exists room_scouts (
   auth_user_id uuid references auth.users on delete cascade,
   email text not null,
   duration_minutes integer not null,
-  min_capacity integer not null default 1,
+  min_capacity integer default 1,
+  capacity_size text,
+  scout_start_time text,
+  scout_end_time text,
   office text,
   status text not null default 'active',
   graph_access_token text,
@@ -356,13 +359,19 @@ create table if not exists room_scouts (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint room_scouts_duration_check check (duration_minutes between 15 and 480),
-  constraint room_scouts_capacity_check check (min_capacity between 1 and 200),
-  constraint room_scouts_status_check check (status in ('active', 'stopped', 'expired', 'failed'))
+  constraint room_scouts_capacity_check check (min_capacity is null or min_capacity between 1 and 200),
+  constraint room_scouts_capacity_size_check check (capacity_size is null or capacity_size in ('small', 'medium', 'large')),
+  constraint room_scouts_status_check check (status in ('active', 'stopped', 'expired', 'failed', 'canceled', 'success'))
 );
 alter table room_scouts add column if not exists auth_user_id uuid references auth.users on delete cascade;
 alter table room_scouts add column if not exists graph_access_token text;
 alter table room_scouts add column if not exists office text;
 alter table room_scouts add column if not exists last_notified_signature text;
+alter table room_scouts add column if not exists capacity_size text;
+alter table room_scouts add column if not exists scout_start_time text;
+alter table room_scouts add column if not exists scout_end_time text;
+-- When true, scouting treats the 12:00-13:00 lunch window as free/skippable.
+alter table room_scouts add column if not exists ignore_lunch_break boolean not null default false;
 create index if not exists idx_room_scouts_user_status on room_scouts(user_id, status);
 create index if not exists idx_room_scouts_active_expires on room_scouts(status, expires_at);
 alter table room_scouts enable row level security;

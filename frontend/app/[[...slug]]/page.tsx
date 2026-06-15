@@ -87,7 +87,7 @@ function parseRoute(pathname: string | null): {
   const [first, second] = (pathname ?? "/").split("/").filter(Boolean);
   if (first === "chat") return { view: "chat", threadId: second ?? null };
   const view = first ? SEGMENT_TO_VIEW[first] : undefined;
-  return { view: view ?? "browse", threadId: null };
+  return { view: view ?? "chat", threadId: null };
 }
 const GRAPH_EXPLORER_URL =
   "https://developer.microsoft.com/en-us/graph/graph-explorer";
@@ -1164,8 +1164,19 @@ export default function Home() {
             <BookingHistory />
           ) : view === "roomScout" ? (
             <RoomScout
+              userName={
+                me.profile?.email_username ||
+                ([me.profile?.email, me.email, me.username]
+                  .find((value) => value?.includes("@"))
+                  ?.split("@", 1)[0] ??
+                  me.username ??
+                  "")
+              }
               userOffice={me.profile?.office}
               officeOptions={profileOptions?.office ?? []}
+              roomThumbnails={(data?.rooms ?? [])
+                .map((r) => r.thumbnail_link)
+                .filter((t): t is string => Boolean(t))}
             />
           ) : view === "settings" ? (
             <SettingsScreen
@@ -1180,6 +1191,13 @@ export default function Home() {
               onThreadSelected={setActiveThreadId}
               onThreadsChanged={setChatThreads}
               userRole={me.profile?.role}
+              userDomain={
+                me.profile?.email_username ||
+                ([me.profile?.email, me.email, me.username]
+                  .find((value) => value?.includes("@"))
+                  ?.split("@", 1)[0] ??
+                  "")
+              }
             />
           ) : refreshing && !data ? (
             <div className="flex h-full flex-col items-center justify-center gap-3">
