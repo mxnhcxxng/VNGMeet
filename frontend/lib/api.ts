@@ -109,6 +109,15 @@ export interface BookingRequest {
   body?: string;
 }
 
+export interface UpdateBookingPayload {
+  date?: string; // "2026-06-11"
+  start_time?: string; // "09:00"
+  end_time?: string; // "10:00"
+  subject?: string;
+  attendees?: string[];
+  body?: string;
+}
+
 export interface BookingResult {
   ok: boolean;
   id: string;
@@ -126,6 +135,8 @@ export interface Booking {
   booking_type: "instant" | "scheduled";
   method: "manual" | "chatbot";
   subject?: string | null;
+  attendees?: string[] | null;
+  body?: string | null;
   status: "ok" | "failed" | "pending";
   web_link?: string | null;
   created_at: string;
@@ -217,6 +228,17 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     }),
+  // Edit a booking. Instant bookings update the real calendar event via Graph;
+  // scheduled (pending) bookings only update the stored request.
+  updateBooking: (id: string, payload: UpdateBookingPayload) =>
+    req<{ ok: boolean; booking: Booking }>(`/api/bookings/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+  // Cancel/delete a booking. Instant bookings are cancelled on the calendar.
+  deleteBooking: (id: string) =>
+    req<{ ok: boolean }>(`/api/bookings/${id}`, { method: "DELETE" }),
   chatThreads: () => req<{ threads: ChatThread[] }>("/api/chat/threads"),
   renameChatThread: (threadId: string, title: string) =>
     req<{ thread: ChatThread }>(`/api/chat/threads/${threadId}`, {

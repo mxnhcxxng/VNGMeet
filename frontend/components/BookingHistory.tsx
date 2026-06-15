@@ -18,8 +18,9 @@ import {
   TableHeader,
   TableRow,
 } from "@heroui/react";
-import { ArrowsRotateRight, Magnifier } from "@gravity-ui/icons";
+import { ArrowsRotateRight, Magnifier, Pencil, TrashBin } from "@gravity-ui/icons";
 import { api, type Booking } from "@/lib/api";
+import { EditBookingModal } from "./EditBookingModal";
 
 const STATUS: Record<
   Booking["status"],
@@ -162,6 +163,15 @@ export function BookingHistory() {
   const [pageSize, setPageSize] = useState(10);
   const [page, setPage] = useState(1);
 
+  // Room thumbnails (email → thumbnail_link) so the edit card can show the photo.
+  const [roomThumbs, setRoomThumbs] = useState<Record<string, string>>({});
+
+  // Row actions.
+  const [editing, setEditing] = useState<Booking | null>(null);
+  const [deleting, setDeleting] = useState<Booking | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -183,6 +193,38 @@ export function BookingHistory() {
   useEffect(() => {
     if (cachedBookings === null) load();
   }, [load]);
+
+  // Load room thumbnails once so the edit card can render the room photo.
+  useEffect(() => {
+    api
+      .rooms()
+      .then((rooms) => {
+        const map: Record<string, string> = {};
+        for (const r of rooms) {
+          if (r.thumbnail_link) map[r.email.toLowerCase()] = r.thumbnail_link;
+        }
+        setRoomThumbs(map);
+      })
+      .catch(() => {});
+  }, []);
+
+  const confirmDelete = useCallback(async () => {
+    if (!deleting) return;
+    setDeleteLoading(true);
+    setDeleteError(null);
+    try {
+      await api.deleteBooking(deleting.id);
+      setDeleting(null);
+      await load();
+    } catch (e: any) {
+      const msg = String(e?.message ?? e);
+      setDeleteError(
+        msg === "UNAUTHENTICATED" ? "Bạn cần đăng nhập lại." : `Xoá lịch thất bại: ${msg}`
+      );
+    } finally {
+      setDeleteLoading(false);
+    }
+  }, [deleting, load]);
 
   const filtered = useMemo(
     () =>
@@ -289,6 +331,7 @@ export function BookingHistory() {
                     <TableColumn>Type</TableColumn>
                     <TableColumn>Method</TableColumn>
                     <TableColumn>Status</TableColumn>
+                    <TableColumn>Actions</TableColumn>
                   </TableHeader>
                   <TableBody items={pageItems}>
                   {(b) => (
@@ -298,7 +341,11 @@ export function BookingHistory() {
                       <TableCell>
                         {b.start_time} – {b.end_time}
                       </TableCell>
-                      <TableCell>{b.subject || "—"}</TableCell>
+                      <TableCell className="max-w-[200px]">
+                        <span className="block truncate" title={b.subject || undefined}>
+                          {b.subject || "—"}
+                        </span>
+                      </TableCell>
                       <TableCell>
                         {b.booking_type === "scheduled" ? "Scheduled" : "Instant"}
                       </TableCell>
@@ -313,6 +360,34 @@ export function BookingHistory() {
                         >
                           {STATUS[b.status]?.label ?? b.status}
                         </Chip>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-1">
+                          <Button
+                            isIconOnly
+                            size="sm"
+                            variant="ghost"
+                            aria-label="Edit booking"
+                            className="rounded-full"
+                            isDisabled={b.status === "failed"}
+                            onPress={() => setEditing(b)}
+                          >
+                            <Pencil width={16} height={16} />
+                          </Button>
+                          <Button
+                            isIconOnly
+                            size="sm"
+                            variant="ghost"
+                            aria-label="Delete booking"
+                            className="rounded-full text-danger"
+                            onPress={() => {
+                              setDeleteError(null);
+                              setDeleting(b);
+                            }}
+                          >
+                            <TrashBin width={16} height={16} />
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   )}
@@ -388,6 +463,59 @@ export function BookingHistory() {
               </Pagination.Content>
             </Pagination>
         </>
+      )}
+
+      <EditBookingModal
+        isOpen={editing !== null}
+        booking={editing}
+        thumbnail={editing ? roomThumbs[editing.room_email.toLowerCase()] : undefined}
+        onClose={() => setEditing(null)}
+        onSaved={load}
+      />
+
+      {deleting && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget && !deleteLoading) setDeleting(null);
+          }}
+        >
+          <div className="flex w-full max-w-[440px] flex-col gap-4 rounded-2xl bg-white p-6 shadow-2xl dark:bg-[#0c0e12]">
+            <div className="flex flex-col gap-1">
+              <h2 className="text-base font-semibold text-default-900">Delete booking?</h2>
+              <p className="text-sm text-default-500">
+                {deleting.booking_type === "scheduled"
+                  ? "Scheduled booking này chưa được đặt — huỷ sẽ xoá yêu cầu đặt phòng."
+                  : "Sẽ huỷ cuộc họp trên lịch và xoá khỏi lịch sử. Hành động này không thể hoàn tác."}
+              </p>
+            </div>
+            <div className="rounded-lg bg-default-100 px-3 py-2 text-sm text-default-700">
+              <div className="font-medium">{deleting.room_name || deleting.room_email}</div>
+              <div className="text-default-500">
+                {deleting.date} · {deleting.start_time} – {deleting.end_time}
+              </div>
+            </div>
+            {deleteError && <p className="text-sm text-danger">{deleteError}</p>}
+            <div className="flex items-center justify-center gap-2 pt-2">
+              <Button
+                variant="tertiary"
+                className="flex-1 rounded-full"
+                onPress={() => setDeleting(null)}
+                isDisabled={deleteLoading}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="danger"
+                className="flex-1 rounded-full"
+                onPress={confirmDelete}
+                isPending={deleteLoading}
+              >
+                Delete
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

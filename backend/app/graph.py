@@ -244,3 +244,83 @@ async def create_event(
         "start": data.get("start"),
         "end": data.get("end"),
     }
+
+
+async def update_event(
+    access_token: str,
+    event_id: str,
+    timezone: str,
+    subject: str | None = None,
+    start_iso: str | None = None,
+    end_iso: str | None = None,
+    body_text: str | None = None,
+    attendees: list[str] | None = None,
+    room_email: str | None = None,
+    room_name: str | None = None,
+) -> dict:
+    """Patch an existing event on the signed-in user's calendar.
+
+    Only the fields supplied are changed (Graph PATCH semantics). When `attendees`
+    is given, the whole attendee collection is rewritten — so the room resource is
+    re-added first to avoid dropping the booked room. Pass attendees=None to leave
+    attendees (and the room) untouched. Needs Calendars.ReadWrite delegated.
+    """
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+        "Prefer": f'outlook.timezone="{timezone}"',
+    }
+    body: dict = {}
+    if subject is not None:
+        body["subject"] = subject
+    if start_iso is not None:
+        body["start"] = {"dateTime": start_iso, "timeZone": timezone}
+    if end_iso is not None:
+        body["end"] = {"dateTime": end_iso, "timeZone": timezone}
+    if body_text is not None:
+        body["body"] = {"contentType": "text", "content": body_text}
+    if attendees is not None:
+        event_attendees: list[dict] = []
+        if room_email:
+            event_attendees.append(
+                {
+                    "emailAddress": {"address": room_email, "name": room_name or room_email},
+                    "type": "resource",
+                }
+            )
+        for email in attendees:
+            email = email.strip()
+            if email:
+                event_attendees.append(
+                    {"emailAddress": {"address": email}, "type": "required"}
+                )
+        body["attendees"] = event_attendees
+
+    url = f"{GRAPH_BASE}/me/events/{event_id}"
+    async with httpx.AsyncClient(timeout=60) as client:
+        resp = await client.patch(url, headers=headers, json=body)
+        resp.raise_for_status()
+        data = resp.json()
+
+    return {
+        "id": data.get("id"),
+        "webLink": data.get("webLink"),
+        "subject": data.get("subject"),
+        "start": data.get("start"),
+        "end": data.get("end"),
+    }
+
+
+async def delete_event(access_token: str, event_id: str) -> None:
+    """Delete (cancel) an event on the signed-in user's calendar.
+
+    A 404 is treated as success — the event is already gone. Needs the
+    Calendars.ReadWrite delegated permission.
+    """
+    headers = {"Authorization": f"Bearer {access_token}"}
+    url = f"{GRAPH_BASE}/me/events/{event_id}"
+    async with httpx.AsyncClient(timeout=60) as client:
+        resp = await client.delete(url, headers=headers)
+        if resp.status_code == 404:
+            return
+        resp.raise_for_status()

@@ -961,6 +961,17 @@ class BookingRequest(BaseModel):
     body: str | None = None
 
 
+class UpdateBookingRequest(BaseModel):
+    """Editable fields of an existing booking. All optional — only sent fields change."""
+
+    date: str | None = None  # "2026-06-11"
+    start_time: str | None = None  # "09:00"
+    end_time: str | None = None  # "10:00"
+    subject: str | None = None
+    attendees: list[str] | None = None
+    body: str | None = None
+
+
 class ChatSendRequest(BaseModel):
     content: str
     thread_id: str | None = None
@@ -2584,6 +2595,8 @@ def _log_user_booking_activity(
     status: Literal["ok", "failed", "pending"],
     error_message: str | None = None,
     auth_user_id: str | None = None,
+    graph_event_id: str | None = None,
+    web_link: str | None = None,
 ) -> None:
     if not user_profile_id or not settings.supabase_enabled:
         return
@@ -2606,6 +2619,8 @@ def _log_user_booking_activity(
                 "body": payload.body,
                 "status": status,
                 "error_message": error_message,
+                "graph_event_id": graph_event_id,
+                "web_link": web_link,
             }
         ).execute()
     except Exception as e:  # noqa: BLE001 - booking log must not block booking flow
@@ -2923,6 +2938,76 @@ def _mark_room_availability_owner(
         log.warning("could not mark room_availability owner: %s", e)
 
 
+def _release_room_availability_owner(
+    user_profile_id: str | None,
+    room_email: str,
+    date: str,
+    start_time: str,
+    end_time: str,
+) -> None:
+    """Free up the slots this user previously owned (reverse of _mark_...)."""
+    if not user_profile_id or not settings.supabase_enabled:
+        return
+
+    start = _availability_slot_index(start_time)
+    end = _availability_slot_index(end_time)
+    if start is None or end is None or end <= start:
+        return
+
+    try:
+        from .supabase_client import get_supabase
+
+        sb = get_supabase()
+        room_rows = (
+            sb.table("meeting_room_metadata").select("id, email").execute().data or []
+        )
+        target = room_email.strip().lower()
+        room = next(
+            (r for r in room_rows if (r.get("email") or "").strip().lower() == target),
+            None,
+        )
+        if not room:
+            return
+        room_id = room["id"]
+        rows = (
+            sb.table("room_availability")
+            .select("slots, slot_owner_ids")
+            .eq("room_id", room_id)
+            .eq("date", date)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+        if not rows:
+            return
+        slots = list(rows[0].get("slots") or [])
+        slot_owner_ids = list(rows[0].get("slot_owner_ids") or [])
+        if len(slots) != availability.SLOTS_PER_DAY:
+            return
+        if len(slot_owner_ids) != availability.SLOTS_PER_DAY:
+            slot_owner_ids = [None] * availability.SLOTS_PER_DAY
+
+        for idx in range(start, min(end, availability.SLOTS_PER_DAY)):
+            # Only release slots this user actually owns.
+            if str(slot_owner_ids[idx] or "") == user_profile_id:
+                slots[idx] = 0
+                slot_owner_ids[idx] = None
+
+        sb.table("room_availability").upsert(
+            {
+                "room_id": room_id,
+                "date": date,
+                "slots": slots,
+                "slot_owner_ids": slot_owner_ids,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            },
+            on_conflict="room_id,date",
+        ).execute()
+    except Exception as e:  # noqa: BLE001 - availability cache must not block the edit
+        log.warning("could not release room_availability owner: %s", e)
+
+
 @app.get("/api/bookings")
 async def list_my_bookings(request: Request):
     """Return the caller's own booking history.
@@ -2942,7 +3027,7 @@ async def list_my_bookings(request: Request):
         .table("user_activity")
         .select(
             "id, room_email, room_name, date, start_time, end_time, "
-            "booking_type, method, subject, status, web_link, created_at"
+            "booking_type, method, subject, attendees, body, status, web_link, created_at"
         )
         .eq("user_id", user_profile_id)
         .order("created_at", desc=True)
@@ -3003,7 +3088,14 @@ async def create_booking(request: Request, payload: BookingRequest):
         _log_user_booking_activity(user_profile_id, payload, "failed", str(e), auth_user_id)
         raise
 
-    _log_user_booking_activity(user_profile_id, payload, "ok", auth_user_id=auth_user_id)
+    _log_user_booking_activity(
+        user_profile_id,
+        payload,
+        "ok",
+        auth_user_id=auth_user_id,
+        graph_event_id=ev.get("id"),
+        web_link=ev.get("webLink"),
+    )
     _mark_room_availability_owner(user_profile_id, payload)
 
     # Mirror booking metadata into Supabase when available (Supabase path only).
@@ -3028,6 +3120,204 @@ async def create_booking(request: Request, payload: BookingRequest):
             pass
 
     return {"ok": True, **ev}
+
+
+def _fetch_own_booking(user_profile_id: str, booking_id: str) -> dict:
+    """Load a booking row owned by this user, or raise 404. Ownership is enforced
+    server-side via user_id so a user can never touch someone else's booking."""
+    from .supabase_client import get_supabase
+
+    rows = (
+        get_supabase()
+        .table("user_activity")
+        .select(
+            "id, room_email, room_name, date, start_time, end_time, booking_type, "
+            "method, subject, attendees, body, status, graph_event_id, web_link"
+        )
+        .eq("id", booking_id)
+        .eq("user_id", user_profile_id)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    if not rows:
+        raise HTTPException(404, "Không tìm thấy booking.")
+    return rows[0]
+
+
+@app.patch("/api/bookings/{booking_id}")
+async def update_booking(request: Request, booking_id: str, payload: UpdateBookingRequest):
+    """Edit a booking.
+
+    Instant bookings (already on the calendar) are updated for real via the Graph
+    API. Scheduled bookings are still pending — nothing has been booked yet — so we
+    only update the stored request row and re-mark the availability cache.
+    """
+    token, _auth_user_id, user_profile_id, _email = await _booking_auth_context(request)
+    if not user_profile_id or not settings.supabase_enabled:
+        raise HTTPException(503, "Booking storage is not configured.")
+
+    row = _fetch_own_booking(user_profile_id, booking_id)
+    if row.get("status") == "failed":
+        raise HTTPException(400, "Không thể sửa booking đã thất bại.")
+
+    # Resolve the new values, falling back to the existing ones.
+    new_date = (payload.date or row["date"]).strip()
+    new_start = (payload.start_time or row["start_time"]).strip()
+    new_end = (payload.end_time or row["end_time"]).strip()
+    new_subject = (
+        payload.subject.strip() if payload.subject is not None else (row.get("subject") or "")
+    ) or "Meeting"
+    new_body = payload.body if payload.body is not None else row.get("body")
+    new_attendees = (
+        [a.strip() for a in payload.attendees if a and a.strip()]
+        if payload.attendees is not None
+        else (row.get("attendees") or [])
+    )
+
+    if new_end <= new_start:
+        raise HTTPException(400, "Giờ kết thúc phải sau giờ bắt đầu")
+
+    from .supabase_client import get_supabase
+
+    sb = get_supabase()
+    is_scheduled = _booking_type_for_db(row.get("booking_type") or "") == "scheduled"
+    slot_changed = (
+        new_date != row["date"]
+        or new_start != row["start_time"]
+        or new_end != row["end_time"]
+    )
+
+    if is_scheduled:
+        if row.get("status") != "pending":
+            raise HTTPException(400, "Scheduled booking này không còn ở trạng thái pending.")
+        if slot_changed:
+            probe = _activity_to_booking_request(
+                {**row, "date": new_date, "start_time": new_start, "end_time": new_end}
+            )
+            if _scheduled_slot_has_conflict(user_profile_id, probe):
+                raise HTTPException(409, "Slot mới không còn khả dụng để scheduled booking.")
+            _release_room_availability_owner(
+                user_profile_id,
+                row["room_email"],
+                row["date"],
+                row["start_time"],
+                row["end_time"],
+            )
+            _mark_room_availability_owner(user_profile_id, probe)
+    else:
+        # Instant booking: push the change to the real calendar event.
+        event_id = (row.get("graph_event_id") or "").strip()
+        if not event_id:
+            raise HTTPException(
+                400,
+                "Booking này không có event id trên lịch nên không thể sửa.",
+            )
+        start_iso = f"{new_date}T{new_start}:00"
+        end_iso = f"{new_date}T{new_end}:00"
+        try:
+            await graph.update_event(
+                token,
+                event_id,
+                settings.timezone,
+                subject=new_subject,
+                start_iso=start_iso,
+                end_iso=end_iso,
+                body_text=new_body,
+                attendees=(new_attendees if payload.attendees is not None else None),
+                room_email=row["room_email"],
+                room_name=row.get("room_name"),
+            )
+        except httpx.HTTPStatusError as e:
+            raise HTTPException(e.response.status_code, e.response.text)
+        if slot_changed:
+            _release_room_availability_owner(
+                user_profile_id,
+                row["room_email"],
+                row["date"],
+                row["start_time"],
+                row["end_time"],
+            )
+            _mark_room_availability_owner(
+                user_profile_id,
+                _activity_to_booking_request(
+                    {**row, "date": new_date, "start_time": new_start, "end_time": new_end}
+                ),
+            )
+
+    try:
+        updated = (
+            sb.table("user_activity")
+            .update(
+                {
+                    "date": new_date,
+                    "start_time": new_start,
+                    "end_time": new_end,
+                    "subject": new_subject,
+                    "attendees": new_attendees,
+                    "body": new_body,
+                }
+            )
+            .eq("id", booking_id)
+            .eq("user_id", user_profile_id)
+            .execute()
+            .data[0]
+        )
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"Could not update booking: {e}")
+
+    return {"ok": True, "booking": updated}
+
+
+@app.delete("/api/bookings/{booking_id}")
+async def delete_booking(request: Request, booking_id: str):
+    """Cancel/delete a booking.
+
+    Instant bookings are cancelled on the real calendar via Graph, then the row is
+    removed. Scheduled bookings are only pending — we drop the stored request, free
+    the user's active-booking slot, and release the availability cache.
+    """
+    token, _auth_user_id, user_profile_id, _email = await _booking_auth_context(request)
+    if not user_profile_id or not settings.supabase_enabled:
+        raise HTTPException(503, "Booking storage is not configured.")
+
+    row = _fetch_own_booking(user_profile_id, booking_id)
+    is_scheduled = _booking_type_for_db(row.get("booking_type") or "") == "scheduled"
+    was_ok = row.get("status") == "ok"
+
+    # Instant + actually booked → cancel the real calendar event first.
+    if not is_scheduled and was_ok:
+        event_id = (row.get("graph_event_id") or "").strip()
+        if event_id:
+            try:
+                await graph.delete_event(token, event_id)
+            except httpx.HTTPStatusError as e:
+                raise HTTPException(e.response.status_code, e.response.text)
+
+    from .supabase_client import get_supabase
+
+    try:
+        get_supabase().table("user_activity").delete().eq("id", booking_id).eq(
+            "user_id", user_profile_id
+        ).execute()
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"Could not delete booking: {e}")
+
+    # Release the slots this booking occupied in the availability cache.
+    if row.get("status") in ("ok", "pending"):
+        _release_room_availability_owner(
+            user_profile_id,
+            row["room_email"],
+            row["date"],
+            row["start_time"],
+            row["end_time"],
+        )
+    # A cancelled scheduled booking frees the user's single active-booking slot.
+    if is_scheduled and row.get("status") == "pending":
+        _set_active_booking(user_profile_id, False)
+
+    return {"ok": True}
 
 
 async def process_scheduled_bookings() -> dict:

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import {
   Button,
   Calendar,
@@ -21,8 +21,10 @@ import {
 } from "@gravity-ui/icons";
 import { I18nProvider } from "react-aria-components";
 import { parseDate, parseTime } from "@internationalized/date";
-import type { ScheduleResponse, ScheduleRoom } from "@/lib/api";
+import { api, type Booking, type ScheduleResponse, type ScheduleRoom } from "@/lib/api";
 import { BookingModal, type BookingSlot } from "./BookingModal";
+import { EditBookingModal } from "./EditBookingModal";
+import { clearBookingHistoryCache } from "./BookingHistory";
 
 const SLOT_H = 48; // px per slot row (half hour → 96px per hour)
 const TIME_COL = 72; // px width of the left time-label column
@@ -340,6 +342,52 @@ export function BrowseRooms({
     setEndOptions(endOptionsFor(room, t, schedule));
     setInitialEndTime(desiredEnd ?? null);
     onOpen();
+  }
+
+  // --- Edit an existing booking straight from the grid --------------------
+  // The grid only carries status codes, not booking ids, so we keep the user's
+  // own bookings around and match a clicked "my booking" cell to its record by
+  // room + date + the slot falling inside [start, end).
+  const [myBookings, setMyBookings] = useState<Booking[]>([]);
+  const [editingBooking, setEditingBooking] = useState<Booking | null>(null);
+  const [editingThumbnail, setEditingThumbnail] = useState<string | undefined>(undefined);
+
+  const loadMyBookings = () => {
+    api
+      .myBookings()
+      .then((res) => setMyBookings(res.bookings))
+      .catch(() => {});
+  };
+
+  useEffect(() => {
+    loadMyBookings();
+  }, []);
+
+  function findMyBooking(
+    roomEmail: string,
+    date: string,
+    time: string,
+    schedule: boolean
+  ): Booking | null {
+    const wantType = schedule ? "scheduled" : "instant";
+    return (
+      myBookings.find(
+        (b) =>
+          b.room_email.toLowerCase() === roomEmail.toLowerCase() &&
+          b.date === date &&
+          b.booking_type === wantType &&
+          time >= b.start_time &&
+          time < b.end_time
+      ) ?? null
+    );
+  }
+
+  function openEditForSlot(room: ScheduleRoom, time: string, schedule: boolean) {
+    const booking = findMyBooking(room.email, data.days[dayIndex], time, schedule);
+    if (booking) {
+      setEditingThumbnail(room.thumbnail_link);
+      setEditingBooking(booking);
+    }
   }
 
   // --- Drag-to-select start/end across a single room column ----------------
@@ -776,7 +824,23 @@ export function BrowseRooms({
                       <div
                         key={r.email}
                         onMouseEnter={() => extendDrag(r.email, ti, false)}
-                        className="border-r border-t border-[color:var(--separator)] bg-white dark:bg-[#0c0e12]"
+                        {...(myBooking
+                          ? {
+                              role: "button",
+                              tabIndex: 0,
+                              title: "Edit booking",
+                              onClick: () => openEditForSlot(r, t, schedule),
+                              onKeyDown: (event: KeyboardEvent) => {
+                                if (event.key === "Enter" || event.key === " ") {
+                                  event.preventDefault();
+                                  openEditForSlot(r, t, schedule);
+                                }
+                              },
+                            }
+                          : {})}
+                        className={`border-r border-t border-[color:var(--separator)] bg-white dark:bg-[#0c0e12] outline-none ${
+                          myBooking ? "cursor-pointer" : ""
+                        }`}
                         style={{ height: SLOT_H }}
                       >
                         <div
@@ -878,7 +942,22 @@ export function BrowseRooms({
         endOptions={endOptions}
         initialEndTime={initialEndTime}
         userDomain={userDomain}
-        onBooked={onRefresh}
+        onBooked={() => {
+          onRefresh();
+          loadMyBookings();
+        }}
+      />
+
+      <EditBookingModal
+        isOpen={editingBooking !== null}
+        booking={editingBooking}
+        thumbnail={editingThumbnail}
+        onClose={() => setEditingBooking(null)}
+        onSaved={() => {
+          clearBookingHistoryCache();
+          onRefresh();
+          loadMyBookings();
+        }}
       />
     </div>
   );
