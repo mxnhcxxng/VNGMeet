@@ -52,9 +52,43 @@ import {
   clearBookingHistoryCache,
 } from "@/components/BookingHistory";
 import { RoomScout } from "@/components/RoomScout";
+import { usePathname } from "next/navigation";
 
 // Keep the browse range aligned with backend availability_days.
 const RANGE_DAYS = 18;
+
+// URL <-> view mapping. The whole app lives on a single client page, so instead
+// of separate route files we mirror the active `view` into the path (and a
+// chat thread id into /chat/<id>) so links are shareable and survive a refresh.
+// The optional catch-all route ([[...slug]]) resolves every path back to here.
+const VIEW_TO_PATH: Record<Exclude<View, "chat">, string> = {
+  browse: "/browse",
+  settings: "/settings",
+  bookingHistory: "/booking-history",
+  roomScout: "/room-scout",
+};
+const SEGMENT_TO_VIEW: Record<string, View> = {
+  browse: "browse",
+  settings: "settings",
+  "booking-history": "bookingHistory",
+  "room-scout": "roomScout",
+  chat: "chat",
+};
+
+function routeForView(view: View, threadId: string | null): string {
+  if (view === "chat") return threadId ? `/chat/${threadId}` : "/chat";
+  return VIEW_TO_PATH[view];
+}
+
+function parseRoute(pathname: string | null): {
+  view: View;
+  threadId: string | null;
+} {
+  const [first, second] = (pathname ?? "/").split("/").filter(Boolean);
+  if (first === "chat") return { view: "chat", threadId: second ?? null };
+  const view = first ? SEGMENT_TO_VIEW[first] : undefined;
+  return { view: view ?? "browse", threadId: null };
+}
 const GRAPH_EXPLORER_URL =
   "https://developer.microsoft.com/en-us/graph/graph-explorer";
 
@@ -737,12 +771,19 @@ export default function Home() {
   const [me, setMe] = useState<Me | null>(null);
   const [loading, setLoading] = useState(true);
   const [sessionExpiredOpen, setSessionExpiredOpen] = useState(false);
-  const [view, setView] = useState<View>("browse");
+  // Seed the initial view + thread from the current URL so a deep link / hard
+  // refresh lands on the right screen. usePathname() is stable across the
+  // server and first client render, so this won't cause a hydration mismatch.
+  const pathname = usePathname();
+  const initialRoute = useRef(parseRoute(pathname)).current;
+  const [view, setView] = useState<View>(initialRoute.view);
   const [data, setData] = useState<ScheduleResponse | null>(null);
   const [dayIndex, setDayIndex] = useState(0);
   const [chatThreads, setChatThreads] = useState<ChatThread[]>([]);
   const [profileOptions, setProfileOptions] = useState<UserProfileOptions | null>(null);
-  const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
+  const [activeThreadId, setActiveThreadId] = useState<string | null>(
+    initialRoute.threadId,
+  );
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   // Unsaved-changes guard for the Settings screen. `settingsDirty` is reported
@@ -775,6 +816,35 @@ export default function Home() {
   const canEnterBooking = Boolean(
     me?.authenticated && me.profileComplete !== false,
   );
+
+  // Mirror the active view/thread into the URL. We only sync once the user is
+  // past auth/profile gating (those screens own the URL otherwise). The first
+  // reconciliation uses replaceState (e.g. "/" -> "/browse") so it doesn't add
+  // a spurious history entry; later changes pushState so Back works.
+  const urlSyncedRef = useRef(false);
+  useEffect(() => {
+    if (!canEnterBooking) return;
+    const target = routeForView(view, activeThreadId);
+    if (window.location.pathname === target) {
+      urlSyncedRef.current = true;
+      return;
+    }
+    const method = urlSyncedRef.current ? "pushState" : "replaceState";
+    window.history[method](window.history.state, "", target);
+    urlSyncedRef.current = true;
+  }, [view, activeThreadId, canEnterBooking]);
+
+  // Keep state in sync when the user navigates with the browser Back/Forward
+  // buttons. (This bypasses the unsaved-Settings guard; acceptable for now.)
+  useEffect(() => {
+    const onPopState = () => {
+      const next = parseRoute(window.location.pathname);
+      setView(next.view);
+      setActiveThreadId(next.threadId);
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
 
   const showSessionExpiredModal = useCallback(() => {
     setSessionExpiredOpen(true);
