@@ -409,11 +409,17 @@ export function BrowseRooms({
     setDrag(next);
   }
 
-  function rangeBookable(room: ScheduleRoom, from: number, to: number) {
-    for (let i = from; i <= to; i += 1) {
-      if (!isBookableSlot(room, allTimes[i])) return false;
+  // Furthest row reachable from `anchor` toward `target` (either direction)
+  // while every slot in between stays bookable in `room`. Stops at the first
+  // busy/disabled slot, so the selection never spans an unbookable gap.
+  function clampHead(room: ScheduleRoom, anchor: number, target: number) {
+    const step = target >= anchor ? 1 : -1;
+    let head = anchor;
+    for (let i = anchor + step; step > 0 ? i <= target : i >= target; i += step) {
+      if (!isBookableSlot(room, allTimes[i])) break;
+      head = i;
     }
-    return true;
+    return head;
   }
 
   function beginDrag(room: ScheduleRoom, ti: number) {
@@ -434,24 +440,16 @@ export function BrowseRooms({
     openBooking(d.room, startTime, schedule, desiredEnd);
   }
 
-  // Called as the cursor enters a cell mid-drag. Crossing into another column
-  // or a non-bookable (disabled/busy) cell stops the drag and opens the modal
-  // with whatever was selected so far.
-  function extendDrag(roomEmail: string, ti: number, bookable: boolean) {
+  // Called as the cursor enters any cell mid-drag. The selection tracks only the
+  // cursor's row (`ti`) — column and the hovered cell's own state are ignored,
+  // so dragging over another column or a disabled cell still moves the
+  // selection up/down. It's clamped to the bookable run in the anchor's column.
+  // The modal only opens when the mouse is released.
+  function extendDrag(ti: number) {
     const d = dragRef.current;
     if (!d) return;
-    if (roomEmail !== d.roomEmail) {
-      finishDrag();
-      return;
-    }
-    if (ti === d.headIndex) return;
-    const lo = Math.min(d.anchorIndex, ti);
-    const hi = Math.max(d.anchorIndex, ti);
-    if (!bookable || !rangeBookable(d.room, lo, hi)) {
-      finishDrag();
-      return;
-    }
-    setDragState({ ...d, headIndex: ti });
+    const head = clampHead(d.room, d.anchorIndex, ti);
+    if (head !== d.headIndex) setDragState({ ...d, headIndex: head });
   }
 
   // Releasing the mouse anywhere ends the drag and opens the modal.
@@ -731,7 +729,7 @@ export function BrowseRooms({
                         <div
                           key={r.email}
                           aria-disabled
-                          onMouseEnter={() => extendDrag(r.email, ti, false)}
+                          onMouseEnter={() => extendDrag(ti)}
                           // Off-hours/disabled. In dark mode --background-secondary
                           // is only ~4% off the page bg, so the cell reads the same
                           // as a free slot — lift it a touch to set it apart, but
@@ -784,7 +782,7 @@ export function BrowseRooms({
                             event.preventDefault();
                             beginDrag(r, ti);
                           }}
-                          onMouseEnter={() => extendDrag(r.email, ti, true)}
+                          onMouseEnter={() => extendDrag(ti)}
                           onKeyDown={(event) => {
                             if (event.key === "Enter" || event.key === " ") {
                               event.preventDefault();
@@ -794,7 +792,9 @@ export function BrowseRooms({
                           className={`accent-keep-blue group cursor-pointer border-r border-t border-[color:var(--separator)] px-1 outline-none transition-colors ${
                             selected
                               ? "bg-[var(--accent-soft)]"
-                              : "bg-white dark:bg-[#0c0e12] hover:bg-[var(--accent-soft)] hover:shadow-[inset_0_0_0_1px_var(--accent)] focus:bg-[var(--accent-soft)] focus:shadow-[inset_0_0_0_1px_var(--accent)]"
+                              : drag
+                                ? "bg-white dark:bg-[#0c0e12]"
+                                : "bg-white dark:bg-[#0c0e12] hover:bg-[var(--accent-soft)] hover:shadow-[inset_0_0_0_1px_var(--accent)] focus:bg-[var(--accent-soft)] focus:shadow-[inset_0_0_0_1px_var(--accent)]"
                           }`}
                           style={{ height: SLOT_H }}
                         >
@@ -823,7 +823,7 @@ export function BrowseRooms({
                     return (
                       <div
                         key={r.email}
-                        onMouseEnter={() => extendDrag(r.email, ti, false)}
+                        onMouseEnter={() => extendDrag(ti)}
                         {...(myBooking
                           ? {
                               role: "button",
