@@ -23,6 +23,7 @@ import {
   Tag,
   TagGroup,
   TextField,
+  toast,
   useFilter,
 } from "@heroui/react";
 import {
@@ -952,8 +953,17 @@ export default function Home() {
         setActiveThreadId(null);
         setView("chat");
       });
+      toast.success("Chat deleted", {
+        description: "The conversation has been removed successfully.",
+      });
     } catch (e: any) {
       setError(e.message);
+      toast.danger("Delete failed", {
+        description:
+          e.message === "UNAUTHENTICATED"
+            ? "Please sign in again to continue."
+            : "Could not delete the conversation. Please try again.",
+      });
       throw e;
     }
   };

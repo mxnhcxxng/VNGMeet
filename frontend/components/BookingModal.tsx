@@ -10,6 +10,7 @@ import {
   Select,
   TextArea,
   TextField,
+  toast,
 } from "@heroui/react";
 import { CircleInfo, Clock } from "@gravity-ui/icons";
 import { api } from "@/lib/api";
@@ -120,17 +121,27 @@ export function BookingModal({
           .filter(Boolean),
         body: notes.trim() || undefined,
       });
+      toast.success("Booking created", {
+        description: "Your room has been booked successfully.",
+      });
       onBooked();
       clearDraft();
       onClose();
     } catch (e: any) {
       const msg = String(e?.message ?? e);
       if (msg === "UNAUTHENTICATED") {
-        setError("Bạn cần đăng nhập lại.");
+        toast.danger("Session expired", {
+          description: "Please sign in again to continue.",
+        });
       } else if (msg.startsWith("403")) {
-        setError("Thiếu quyền tạo lịch (cần Calendars.ReadWrite). Đăng nhập lại để cấp quyền.");
+        toast.danger("Permission required", {
+          description:
+            "Calendar write access (Calendars.ReadWrite) is needed. Please sign in again to grant it.",
+        });
       } else {
-        setError(`Đặt phòng thất bại: ${msg}`);
+        toast.danger("Booking failed", {
+          description: "Could not book the room. Please try again.",
+        });
       }
     } finally {
       setLoading(false);

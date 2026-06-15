@@ -10,6 +10,7 @@ import {
   Checkbox,
   Chip,
   ScrollShadow,
+  toast,
 } from "@heroui/react";
 import {
   ArrowDown,
@@ -290,6 +291,9 @@ function BookingConfirmationCard({
       onActionMessage(res.message);
     } catch (e: any) {
       setLocalError(e.message);
+      toast.danger("Action failed", {
+        description: "Could not complete the request. Please try again.",
+      });
     } finally {
       setBusyAction(null);
     }
@@ -680,6 +684,9 @@ export function ChatPanel({
     } catch (e: any) {
       setError(e.message);
       setCachedMessages((prev) => prev.filter((m) => m.id !== optimistic.id));
+      toast.danger("Message failed", {
+        description: "Could not send your message. Please try again.",
+      });
     } finally {
       setSending(false);
     }

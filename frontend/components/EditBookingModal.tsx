@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type MouseEvent } from "react";
-import { Button, Input, Label, TextArea, TextField } from "@heroui/react";
+import { Button, Input, Label, TextArea, TextField, toast } from "@heroui/react";
 import { Clock } from "@gravity-ui/icons";
 import { api, type Booking } from "@/lib/api";
 
@@ -64,16 +64,26 @@ export function EditBookingModal({
           .filter(Boolean),
         body: notes.trim(),
       });
+      toast.success("Booking updated", {
+        description: "Your meeting has been updated successfully.",
+      });
       onSaved();
       onClose();
     } catch (e: any) {
       const msg = String(e?.message ?? e);
       if (msg === "UNAUTHENTICATED") {
-        setError("Bạn cần đăng nhập lại.");
+        toast.danger("Session expired", {
+          description: "Please sign in again to continue.",
+        });
       } else if (msg.startsWith("403")) {
-        setError("Thiếu quyền sửa lịch (cần Calendars.ReadWrite). Đăng nhập lại để cấp quyền.");
+        toast.danger("Permission required", {
+          description:
+            "Calendar write access (Calendars.ReadWrite) is needed. Please sign in again to grant it.",
+        });
       } else {
-        setError(`Sửa lịch thất bại: ${msg}`);
+        toast.danger("Update failed", {
+          description: "Could not update the booking. Please try again.",
+        });
       }
     } finally {
       setLoading(false);

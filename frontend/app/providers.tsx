@@ -8,6 +8,7 @@ import {
   useMemo,
   useState,
 } from "react";
+import { ToastProvider } from "@heroui/react";
 import type { ThemeMode } from "@/lib/api";
 
 export type { ThemeMode };
@@ -101,5 +102,10 @@ export function useTheme(): ThemeContextValue {
 }
 
 export function Providers({ children }: { children: React.ReactNode }) {
-  return <ThemeProvider>{children}</ThemeProvider>;
+  return (
+    <ThemeProvider>
+      {children}
+      <ToastProvider placement="top end" />
+    </ThemeProvider>
+  );
 }

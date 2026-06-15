@@ -17,6 +17,7 @@ import {
   Tag,
   TagGroup,
   TextField,
+  toast,
   useFilter,
 } from "@heroui/react";
 import {
@@ -270,8 +271,17 @@ export function SettingsScreen({
         profile: res.profile,
         profileComplete: res.profileComplete,
       });
+      toast.success("Settings saved", {
+        description: "Your preferences have been updated successfully.",
+      });
     } catch (e: any) {
       setErr(e.message);
+      toast.danger("Save failed", {
+        description:
+          e.message === "UNAUTHENTICATED"
+            ? "Please sign in again to continue."
+            : "Could not save your settings. Please try again.",
+      });
     } finally {
       setBusy(false);
     }

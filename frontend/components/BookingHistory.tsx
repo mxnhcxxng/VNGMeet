@@ -17,6 +17,7 @@ import {
   TableContent,
   TableHeader,
   TableRow,
+  toast,
 } from "@heroui/react";
 import { ArrowsRotateRight, Magnifier, Pencil, TrashBin } from "@gravity-ui/icons";
 import { api, type Booking } from "@/lib/api";
@@ -180,11 +181,13 @@ export function BookingHistory() {
       cachedBookings = res.bookings;
       setBookings(res.bookings);
     } catch (e: any) {
-      setError(
-        e.message === "UNAUTHENTICATED"
-          ? "Your session has expired."
-          : e.message
-      );
+      const expired = e.message === "UNAUTHENTICATED";
+      setError(expired ? "Your session has expired." : e.message);
+      toast.danger("Failed to load bookings", {
+        description: expired
+          ? "Please sign in again to continue."
+          : "Could not load your bookings. Please try again.",
+      });
     } finally {
       setLoading(false);
     }
@@ -215,12 +218,21 @@ export function BookingHistory() {
     try {
       await api.deleteBooking(deleting.id);
       setDeleting(null);
+      toast.success("Booking deleted", {
+        description: "The meeting has been removed successfully.",
+      });
       await load();
     } catch (e: any) {
       const msg = String(e?.message ?? e);
+      const expired = msg === "UNAUTHENTICATED";
       setDeleteError(
-        msg === "UNAUTHENTICATED" ? "Bạn cần đăng nhập lại." : `Xoá lịch thất bại: ${msg}`
+        expired ? "Bạn cần đăng nhập lại." : `Xoá lịch thất bại: ${msg}`
       );
+      toast.danger("Delete failed", {
+        description: expired
+          ? "Please sign in again to continue."
+          : "Could not delete the booking. Please try again.",
+      });
     } finally {
       setDeleteLoading(false);
     }
