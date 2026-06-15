@@ -1025,6 +1025,25 @@ def _scout_scan_window(tz: ZoneInfo, scout: dict) -> tuple[int, int, int]:
     return scan_start, scan_end, duration_slots
 
 
+def _token_has_mail_send(token: str | None) -> bool:
+    """True when the Graph access token carries the Mail.Send permission.
+
+    Delegated tokens list granted scopes in the space-delimited `scp` claim;
+    application tokens use `roles`. We accept either so the check works in both
+    the manual-token and Supabase/Azure auth paths.
+    """
+    if not token:
+        return False
+    claims = auth.decode_jwt_claims(token)
+    granted = f"{claims.get('scp', '')} {claims.get('roles', '')}"
+    return "mail.send" in granted.lower().split()
+
+
+MAIL_SEND_REQUIRED_MESSAGE = (
+    "Bạn cần cấp quyền gửi mail (Mail.Send) để dùng Room Scout."
+)
+
+
 def _room_scout_token_for_create(token: str | None, auth_user_id: str | None) -> str | None:
     # Supabase/Azure users can be refreshed from provider_tokens. Manual-token
     # users need an encrypted copy so the scheduler can send mail later.
@@ -1225,9 +1244,10 @@ async def process_room_scouts() -> dict:
 
 @app.get("/api/room-scouts")
 async def list_room_scouts(request: Request):
-    _token, _auth_user_id, user_profile_id, _email = await _booking_auth_context(request)
+    token, _auth_user_id, user_profile_id, _email = await _booking_auth_context(request)
+    can_send_mail = _token_has_mail_send(token)
     if not user_profile_id or not settings.supabase_enabled:
-        return {"scouts": []}
+        return {"scouts": [], "can_send_mail": can_send_mail}
     from .supabase_client import get_supabase
 
     rows = (
@@ -1245,7 +1265,7 @@ async def list_room_scouts(request: Request):
         .data
         or []
     )
-    return {"scouts": rows}
+    return {"scouts": rows, "can_send_mail": can_send_mail}
 
 
 @app.post("/api/room-scouts")
@@ -1253,6 +1273,8 @@ async def create_room_scout(request: Request, payload: RoomScoutRequest):
     token, auth_user_id, user_profile_id, email = await _booking_auth_context(request)
     if not settings.supabase_enabled or not user_profile_id or not email:
         raise HTTPException(503, "Room Scout requires Supabase and a user profile email.")
+    if not _token_has_mail_send(token):
+        raise HTTPException(403, MAIL_SEND_REQUIRED_MESSAGE)
     from .supabase_client import get_supabase
 
     profile = _read_user_profile(user_profile_id, email) or {}
@@ -3704,11 +3726,12 @@ async def update_booking(request: Request, booking_id: str, payload: UpdateBooki
 
 @app.delete("/api/bookings/{booking_id}")
 async def delete_booking(request: Request, booking_id: str):
-    """Cancel/delete a booking.
+    """Cancel a booking.
 
-    Instant bookings are cancelled on the real calendar via Graph, then the row is
-    removed. Scheduled bookings are only pending — we drop the stored request, free
-    the user's active-booking slot, and release the availability cache.
+    Instant bookings are cancelled on the real calendar via Graph. The history row is
+    kept and its status flipped to "canceled" rather than deleted, so the user keeps a
+    record of it. Scheduled bookings are only pending — we cancel the stored request,
+    free the user's active-booking slot, and release the availability cache.
     """
     token, _auth_user_id, user_profile_id, _email = await _booking_auth_context(request)
     if not user_profile_id or not settings.supabase_enabled:
@@ -3729,12 +3752,13 @@ async def delete_booking(request: Request, booking_id: str):
 
     from .supabase_client import get_supabase
 
+    # Keep the history row — just mark it canceled instead of deleting it.
     try:
-        get_supabase().table("user_activity").delete().eq("id", booking_id).eq(
-            "user_id", user_profile_id
-        ).execute()
+        get_supabase().table("user_activity").update(
+            {"status": "canceled"}
+        ).eq("id", booking_id).eq("user_id", user_profile_id).execute()
     except Exception as e:  # noqa: BLE001
-        raise HTTPException(500, f"Could not delete booking: {e}")
+        raise HTTPException(500, f"Could not cancel booking: {e}")
 
     # Release the slots this booking occupied in the availability cache.
     if row.get("status") in ("ok", "pending"):

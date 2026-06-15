@@ -109,11 +109,13 @@ export function SettingsScreen({
   onSaved,
   onDirtyChange,
   discardRef,
+  saveRef,
 }: {
   me: Me;
   onSaved: (me: Me) => void;
   onDirtyChange?: (dirty: boolean) => void;
   discardRef?: { current: (() => void) | null };
+  saveRef?: { current: (() => Promise<boolean>) | null };
 }) {
   const [office, setOffice] = useState(me.profile?.office ?? "");
   const [floor, setFloor] = useState(me.profile?.floor ?? "");
@@ -243,8 +245,8 @@ export function SettingsScreen({
     setPreferredRooms((current) => current.filter((item) => !keys.has(item)));
   };
 
-  const submitProfile = async () => {
-    if (!canSave) return;
+  const submitProfile = async (): Promise<boolean> => {
+    if (!canSave) return false;
     setBusy(true);
     setErr(null);
     try {
@@ -274,6 +276,7 @@ export function SettingsScreen({
       toast.success("Settings saved", {
         description: "Your preferences have been updated successfully.",
       });
+      return true;
     } catch (e: any) {
       setErr(e.message);
       toast.danger("Save failed", {
@@ -282,10 +285,22 @@ export function SettingsScreen({
             ? "Please sign in again to continue."
             : "Could not save your settings. Please try again.",
       });
+      return false;
     } finally {
       setBusy(false);
     }
   };
+
+  // Expose the latest save closure so the parent can "Save and leave" directly
+  // from the unsaved-changes prompt. Returns whether the save succeeded.
+  const submitProfileRef = useRef(submitProfile);
+  submitProfileRef.current = submitProfile;
+  useEffect(() => {
+    if (saveRef) saveRef.current = () => submitProfileRef.current();
+    return () => {
+      if (saveRef) saveRef.current = null;
+    };
+  }, [saveRef]);
 
   const req = <span className="text-danger">*</span>;
 
@@ -517,8 +532,8 @@ export function SettingsScreen({
               </Switch>
               <span className="text-sm font-medium text-[#18181b] dark:text-[#f7f7f7]">
                 {bookWithoutConfirmation
-                  ? "Book without confirmation"
-                  : "Ask for confirmation"}
+                  ? "ON (Bot will book without confirmation)"
+                  : "OFF (Bot will always ask for confirmation)"}
               </span>
             </div>
           </div>

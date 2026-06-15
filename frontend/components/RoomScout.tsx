@@ -9,6 +9,7 @@ import {
 import {
   Button,
   Checkbox,
+  Chip,
   Label,
   ListBox,
   ListBoxItem,
@@ -16,7 +17,15 @@ import {
   Spinner,
   toast,
 } from "@heroui/react";
-import { CircleInfo, Magnifier } from "@gravity-ui/icons";
+import {
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  CircleInfo,
+  Copy,
+  Magnifier,
+} from "@gravity-ui/icons";
+import type { ReactNode } from "react";
 import {
   api,
   type CapacitySize,
@@ -76,19 +85,24 @@ export function RoomScout({
   userOffice,
   officeOptions = [],
   roomThumbnails = [],
+  onActiveChange,
 }: {
   userName?: string;
   userOffice?: string;
   officeOptions?: UserProfileOption[];
   roomThumbnails?: string[];
+  onActiveChange?: (active: boolean) => void;
 }) {
   const [scouts, setScouts] = useState<RoomScoutRow[]>([]);
+  const [canSendMail, setCanSendMail] = useState(true);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     try {
       const res = await api.roomScouts();
       setScouts(res.scouts);
+      setCanSendMail(res.can_send_mail);
+      onActiveChange?.(res.scouts.some((s) => s.status === "active"));
     } catch (e: any) {
       toast.danger("Could not load Room Scout", {
         description: e.message === "UNAUTHENTICATED" ? "Please sign in again." : e.message,
@@ -96,7 +110,7 @@ export function RoomScout({
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [onActiveChange]);
 
   useEffect(() => {
     load();
@@ -107,10 +121,14 @@ export function RoomScout({
     [scouts],
   );
 
+  // When the signed-in token lacks Mail.Send we can't run a scout, so we guide
+  // the user through granting the permission instead of showing the form.
+  const showGuide = !loading && !activeScout && !canSendMail;
+
   return (
     <div className="flex h-full min-h-0 flex-col overflow-y-auto">
       <div className="flex min-h-full w-full flex-col items-center justify-center px-6 py-10">
-        <div className="w-full max-w-[480px]">
+        <div className={`w-full ${showGuide ? "max-w-[640px]" : "max-w-[480px]"}`}>
           {loading ? (
             <div className="flex justify-center py-10">
               <Spinner />
@@ -121,6 +139,8 @@ export function RoomScout({
               thumbnails={roomThumbnails}
               onChanged={load}
             />
+          ) : showGuide ? (
+            <ScoutPermissionGuide userName={userName} />
           ) : (
             <ScoutForm
               userName={userName}
@@ -129,6 +149,207 @@ export function RoomScout({
               onCreated={load}
             />
           )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const GUIDE_SUBTITLE =
+  "We'll check for available rooms every 30 minutes and send you an Outlook email when a matching room becomes available.";
+
+const GRAPH_EXPLORER_URL =
+  "https://developer.microsoft.com/en-us/graph/graph-explorer";
+const SEND_MAIL_URL =
+  "https://graph.microsoft.com/v1.0/me/microsoft.graph.sendMail";
+
+type GuideStep = { image: string; body: ReactNode; copy?: string };
+
+const GUIDE_STEPS: GuideStep[] = [
+  {
+    image: "/scout-steps/step-1.png",
+    copy: GRAPH_EXPLORER_URL,
+    body: (
+      <>
+        Go to{" "}
+        <a
+          href={GRAPH_EXPLORER_URL}
+          target="_blank"
+          rel="noreferrer"
+          className="underline [text-underline-position:from-font] hover:text-default-900"
+        >
+          Microsoft Graph Explorer.
+        </a>
+      </>
+    ),
+  },
+  {
+    image: "/scout-steps/step-2.png",
+    copy: SEND_MAIL_URL,
+    body: (
+      <>
+        Change the request method to <b className="font-semibold">POST</b> and
+        enter the following URL:
+      </>
+    ),
+  },
+  {
+    image: "/scout-steps/step-3.png",
+    body: (
+      <>
+        Click <b className="font-semibold">Run Query</b>, then open the{" "}
+        <b className="font-semibold">Modify Permissions</b> tab and{" "}
+        <b className="font-semibold">Consent</b> to the Mail.Send permission.
+      </>
+    ),
+  },
+  {
+    image: "/scout-steps/step-4.png",
+    body: (
+      <>
+        Return to <b className="font-semibold">VNG Meet</b> and sign in again{" "}
+        <b className="font-semibold">using a new access token</b>. Once
+        completed, Scouting will be ready to send Outlook email notifications.
+      </>
+    ),
+  },
+];
+
+function GuideArrow({
+  direction,
+  disabled,
+  onPress,
+}: {
+  direction: "left" | "right";
+  disabled: boolean;
+  onPress: () => void;
+}) {
+  const Icon = direction === "left" ? ChevronLeft : ChevronRight;
+  return (
+    <Button
+      isIconOnly
+      variant="secondary"
+      className="rounded-full"
+      aria-label={direction === "left" ? "Previous step" : "Next step"}
+      isDisabled={disabled}
+      onPress={onPress}
+    >
+      <Icon width={16} height={16} />
+    </Button>
+  );
+}
+
+function StepCopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      toast.danger("Could not copy to clipboard");
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      aria-label={copied ? "Copied" : "Copy link"}
+      onClick={copy}
+      className="shrink-0 rounded-md p-1 text-default-500 transition hover:bg-default-100 hover:text-default-700"
+    >
+      {copied ? (
+        <Check className="size-4 text-success" />
+      ) : (
+        <Copy className="size-4" />
+      )}
+    </button>
+  );
+}
+
+function ScoutPermissionGuide({ userName }: { userName?: string }) {
+  const [stepIndex, setStepIndex] = useState(0);
+  const total = GUIDE_STEPS.length;
+  const step = GUIDE_STEPS[stepIndex];
+
+  return (
+    <div>
+      <div className="mb-1 flex items-center gap-1.5">
+        <BrandIcon size={34} />
+        <Magnifier className="size-7 text-[#F05A22]" />
+      </div>
+      <h1 className="mt-3 text-2xl font-bold text-default-900">
+        Hi, {userName || "there"}
+      </h1>
+      <p className="mt-1.5 text-sm leading-5 text-default-500">
+        {GUIDE_SUBTITLE}
+      </p>
+
+      <div className="mt-5 flex items-start gap-2 rounded-xl bg-[#fee7de] p-3 text-sm leading-6 text-[#535862] dark:bg-[#3B1202] dark:text-[#fee7de]">
+        <CircleInfo className="mt-0.5 size-4 shrink-0 text-[#F05A22]" />
+        <span>
+          Scouting requires email permission so we can notify you when a room
+          becomes available. Please follow the steps below to grant access.
+        </span>
+      </div>
+
+      {/* Fixed-ratio frame so the height stays reserved while the next image
+          loads — switching steps no longer collapses/jumps the layout. */}
+      <div className="relative mt-5 aspect-[3372/1920] w-full overflow-hidden rounded-xl border border-default-200 bg-default-100">
+        <img
+          key={step.image}
+          src={step.image}
+          alt={`Step ${stepIndex + 1} of ${total}`}
+          className="scout-thumb-fade absolute inset-0 h-full w-full object-cover"
+        />
+      </div>
+
+      <div className="mt-5 flex items-start justify-between gap-4">
+        <div className="flex min-w-0 flex-1 flex-col gap-2">
+          <Chip
+            size="sm"
+            variant="secondary"
+            className="w-fit text-xs font-medium text-[#F05A22]"
+          >
+            Step {stepIndex + 1} of {total}
+          </Chip>
+          {/* Stack all four step bodies in one grid cell so the block keeps the
+              height of the tallest step — switching steps never shifts layout. */}
+          <div className="grid text-sm leading-6 text-default-600">
+            {GUIDE_STEPS.map((s, i) => (
+              <div
+                key={i}
+                aria-hidden={i !== stepIndex}
+                className={`col-start-1 row-start-1 ${
+                  i === stepIndex ? "" : "invisible"
+                }`}
+              >
+                <p>{s.body}</p>
+                {s.copy && (
+                  <div className="mt-0.5 flex items-center gap-1.5">
+                    <span className="break-all font-semibold text-default-900">
+                      {s.copy}
+                    </span>
+                    <StepCopyButton text={s.copy} />
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex shrink-0 items-center gap-2">
+          <GuideArrow
+            direction="left"
+            disabled={stepIndex === 0}
+            onPress={() => setStepIndex((i) => Math.max(0, i - 1))}
+          />
+          <GuideArrow
+            direction="right"
+            disabled={stepIndex === total - 1}
+            onPress={() => setStepIndex((i) => Math.min(total - 1, i + 1))}
+          />
         </div>
       </div>
     </div>

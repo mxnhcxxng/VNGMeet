@@ -7,7 +7,6 @@ import {
   PencilToSquare,
   LayoutHeaderCells,
   Gear,
-  LayoutSideContentLeft,
   ArrowRightFromSquare,
   ClockArrowRotateLeft,
   Magnifier,
@@ -210,6 +209,7 @@ export function Sidebar({
   onChange,
   username,
   onLogout,
+  scoutingActive,
   chatThreads,
   activeThreadId,
   onNewChat,
@@ -222,6 +222,7 @@ export function Sidebar({
   onChange: (v: View) => void;
   username?: string;
   onLogout: () => void;
+  scoutingActive?: boolean;
   chatThreads?: ChatThread[];
   activeThreadId?: string | null;
   onNewChat?: () => void;
@@ -233,22 +234,16 @@ export function Sidebar({
   const display = username || "Người dùng";
   const name = display.replace(/@.*/, "");
   const email = display.includes("@") ? display : "";
+  const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
 
   return (
     <aside className="flex w-[280px] shrink-0 flex-col rounded-2xl bg-white dark:bg-[#0c0e12] shadow-sm">
-      {/* Brand + collapse */}
-      <div className="flex items-center justify-between px-5 pt-5">
+      {/* Brand */}
+      <div className="flex items-center px-5 pt-5">
         <div className="flex items-center gap-[7.5px]">
           <BrandIcon size={24} className="shrink-0" />
           <span className="text-[18px] font-bold leading-6 text-[#181d27] dark:text-[#f7f7f7]">VNG MEET</span>
         </div>
-        <button
-          type="button"
-          aria-label="Thu gọn"
-          className="flex h-8 w-8 items-center justify-center rounded-2xl text-[#18181b] dark:text-[#f7f7f7] transition-colors hover:bg-[#f5f5f5] dark:hover:bg-[#22262f]"
-        >
-          <LayoutSideContentLeft width={16} height={16} />
-        </button>
       </div>
 
       {/* Primary nav */}
@@ -284,6 +279,12 @@ export function Sidebar({
         >
           <Magnifier width={16} height={16} />
           Room Scout
+          {scoutingActive && (
+            <span className="relative ml-1 flex size-2" aria-label="Đang quét phòng">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#f05a22] opacity-75" />
+              <span className="relative inline-flex size-2 rounded-full bg-[#f05a22]" />
+            </span>
+          )}
         </button>
       </div>
 
@@ -342,7 +343,7 @@ export function Sidebar({
           </div>
           <button
             type="button"
-            onClick={onLogout}
+            onClick={() => setLogoutConfirmOpen(true)}
             aria-label="Đăng xuất"
             title="Đăng xuất"
             className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[#71717a] dark:text-[#94979c] transition-colors hover:bg-[#f5f5f5] dark:hover:bg-[#22262f] hover:text-[#18181b] dark:hover:text-[#f7f7f7]"
@@ -351,6 +352,41 @@ export function Sidebar({
           </button>
         </div>
       </div>
+
+      {logoutConfirmOpen && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setLogoutConfirmOpen(false);
+          }}
+        >
+          <div className="w-full max-w-[420px] rounded-2xl bg-white p-6 shadow-2xl dark:bg-[#0c0e12]">
+            <h2 className="text-lg font-semibold text-default-900">Log out</h2>
+            <p className="mt-2 text-sm leading-6 text-default-600">
+              Are you sure you want to log out of VNG Meet?
+            </p>
+            <div className="mt-6 flex items-center justify-end gap-2">
+              <Button
+                variant="tertiary"
+                className="rounded-full"
+                onPress={() => setLogoutConfirmOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="danger"
+                className="rounded-full"
+                onPress={() => {
+                  setLogoutConfirmOpen(false);
+                  onLogout();
+                }}
+              >
+                Log out
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </aside>
   );
 }

@@ -780,6 +780,7 @@ export default function Home() {
   const [data, setData] = useState<ScheduleResponse | null>(null);
   const [dayIndex, setDayIndex] = useState(0);
   const [chatThreads, setChatThreads] = useState<ChatThread[]>([]);
+  const [scoutingActive, setScoutingActive] = useState(false);
   const [profileOptions, setProfileOptions] = useState<UserProfileOptions | null>(null);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(
     initialRoute.threadId,
@@ -791,7 +792,9 @@ export default function Home() {
   // confirms leaving; `settingsDiscardRef` reverts the form (and live theme).
   const [settingsDirty, setSettingsDirty] = useState(false);
   const [pendingNav, setPendingNav] = useState<(() => void) | null>(null);
+  const [leaveSaving, setLeaveSaving] = useState(false);
   const settingsDiscardRef = useRef<(() => void) | null>(null);
+  const settingsSaveRef = useRef<(() => Promise<boolean>) | null>(null);
 
   // Run a navigation, but if there are unsaved Settings changes, stash it and
   // surface the confirm modal instead.
@@ -806,11 +809,20 @@ export default function Home() {
     if (next === view) return;
     guardNav(() => setView(next));
   };
-  const confirmLeave = () => {
-    settingsDiscardRef.current?.();
-    setSettingsDirty(false);
-    pendingNav?.();
-    setPendingNav(null);
+  // "Save and leave": persist the Settings form, then run the stashed
+  // navigation only if the save succeeded (otherwise keep the user on Settings
+  // so they can fix the error).
+  const saveAndLeave = async () => {
+    setLeaveSaving(true);
+    try {
+      const ok = (await settingsSaveRef.current?.()) ?? false;
+      if (!ok) return;
+      setSettingsDirty(false);
+      pendingNav?.();
+      setPendingNav(null);
+    } finally {
+      setLeaveSaving(false);
+    }
   };
   const cancelLeave = () => setPendingNav(null);
   const canEnterBooking = Boolean(
@@ -964,6 +976,15 @@ export default function Home() {
       .catch(() => setProfileOptions(null));
   }, [canEnterBooking]);
 
+  // Track whether the user currently has an active Room Scout so the sidebar can
+  // show a blinking indicator next to the Room Scout tab.
+  useEffect(() => {
+    if (!canEnterBooking) return;
+    api.roomScouts()
+      .then((res) => setScoutingActive(res.scouts.some((s) => s.status === "active")))
+      .catch(() => setScoutingActive(false));
+  }, [canEnterBooking]);
+
   useEffect(() => {
     if (!canEnterBooking) return;
     if (sessionExpiredOpen) return;
@@ -1085,23 +1106,23 @@ export default function Home() {
           Unsaved changes
         </h2>
         <p className="mt-2 text-sm leading-6 text-default-600">
-          You have unsaved changes. If you leave, your changes will be
-          discarded.
+          You have unsaved changes. Please save your changes before leaving.
         </p>
         <div className="mt-6 flex items-center justify-end gap-2">
           <Button
             variant="tertiary"
             className="rounded-full"
             onPress={cancelLeave}
+            isDisabled={leaveSaving}
           >
             Stay
           </Button>
           <Button
-            variant="danger"
             className="rounded-full"
-            onPress={confirmLeave}
+            onPress={saveAndLeave}
+            isPending={leaveSaving}
           >
-            Leave
+            Save and leave
           </Button>
         </div>
       </div>
@@ -1133,6 +1154,7 @@ export default function Home() {
         onChange={requestView}
         username={me.username}
         onLogout={handleLogout}
+        scoutingActive={scoutingActive}
         chatThreads={chatThreads}
         activeThreadId={activeThreadId}
         onNewChat={() =>
@@ -1177,6 +1199,7 @@ export default function Home() {
               roomThumbnails={(data?.rooms ?? [])
                 .map((r) => r.thumbnail_link)
                 .filter((t): t is string => Boolean(t))}
+              onActiveChange={setScoutingActive}
             />
           ) : view === "settings" ? (
             <SettingsScreen
@@ -1184,6 +1207,7 @@ export default function Home() {
               onSaved={setMe}
               onDirtyChange={setSettingsDirty}
               discardRef={settingsDiscardRef}
+              saveRef={settingsSaveRef}
             />
           ) : view === "chat" ? (
             <ChatPanel

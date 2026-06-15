@@ -137,7 +137,7 @@ export interface Booking {
   subject?: string | null;
   attendees?: string[] | null;
   body?: string | null;
-  status: "ok" | "failed" | "pending";
+  status: "ok" | "failed" | "pending" | "canceled";
   web_link?: string | null;
   created_at: string;
 }
@@ -263,10 +263,12 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     }),
-  // Cancel/delete a booking. Instant bookings are cancelled on the calendar.
-  deleteBooking: (id: string) =>
+  // Cancel a booking. Instant bookings are cancelled on the calendar; the
+  // history row is kept with its status flipped to "canceled".
+  cancelBooking: (id: string) =>
     req<{ ok: boolean }>(`/api/bookings/${id}`, { method: "DELETE" }),
-  roomScouts: () => req<{ scouts: RoomScout[] }>("/api/room-scouts"),
+  roomScouts: () =>
+    req<{ scouts: RoomScout[]; can_send_mail: boolean }>("/api/room-scouts"),
   createRoomScout: (payload: RoomScoutPayload) =>
     req<{ ok: boolean; scout: RoomScout }>("/api/room-scouts", {
       method: "POST",

@@ -248,6 +248,19 @@ export function BrowseRooms({
 
   const selectedDay = data.days[dayIndex];
   const todayIso = formatLocalIsoDate(now);
+  // Bookings are only allowed from today through 15 days out, so clamp both the
+  // date-picker range and the day-nav arrows to that window.
+  const maxDayIndex = useMemo(() => {
+    const maxDate = new Date(now);
+    maxDate.setDate(maxDate.getDate() + 15);
+    const maxIso = formatLocalIsoDate(maxDate);
+    let last = 0;
+    for (let i = 0; i < data.days.length; i++) {
+      if (data.days[i] <= maxIso) last = i;
+      else break;
+    }
+    return Math.min(last, data.days.length - 1);
+  }, [now, data.days]);
   const nowMinutes = now.getHours() * 60 + now.getMinutes();
   const currentRange = useMemo(() => {
     if (selectedDay !== todayIso) return null;
@@ -539,7 +552,7 @@ export function BrowseRooms({
         </Button>
 
         {/* Day navigation + date picker, grouped into a single pill. */}
-        <I18nProvider locale="vi-VN">
+        <I18nProvider locale="en-US">
           <div className="inline-flex h-9 items-center overflow-hidden rounded-full bg-[var(--default)] text-[var(--foreground)]">
             <button
               type="button"
@@ -555,7 +568,7 @@ export function BrowseRooms({
               aria-label="Ngày"
               value={parseDate(data.days[dayIndex])}
               minValue={parseDate(data.days[0])}
-              maxValue={parseDate(data.days[data.days.length - 1])}
+              maxValue={parseDate(data.days[maxDayIndex])}
               onChange={(date) => {
                 if (!date) return;
                 const idx = data.days.indexOf(date.toString());
@@ -591,8 +604,8 @@ export function BrowseRooms({
             <button
               type="button"
               aria-label="Ngày sau"
-              disabled={dayIndex >= data.days.length - 1}
-              onClick={() => setDayIndex((n) => Math.min(data.days.length - 1, n + 1))}
+              disabled={dayIndex >= maxDayIndex}
+              onClick={() => setDayIndex((n) => Math.min(maxDayIndex, n + 1))}
               className="flex h-full w-9 items-center justify-center transition-colors hover:bg-[var(--default-hover)] disabled:opacity-40 disabled:hover:bg-transparent"
             >
               <ChevronRight width={16} height={16} />

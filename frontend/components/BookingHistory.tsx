@@ -19,17 +19,18 @@ import {
   TableRow,
   toast,
 } from "@heroui/react";
-import { ArrowsRotateRight, Magnifier, Pencil, TrashBin } from "@gravity-ui/icons";
+import { ArrowsRotateRight, Ban, Magnifier, Pencil } from "@gravity-ui/icons";
 import { api, type Booking } from "@/lib/api";
 import { EditBookingModal } from "./EditBookingModal";
 
 const STATUS: Record<
   Booking["status"],
-  { label: string; color: "success" | "warning" | "danger" }
+  { label: string; color: "success" | "warning" | "danger" | "default" }
 > = {
   ok: { label: "Success", color: "success" },
   pending: { label: "Pending", color: "warning" },
   failed: { label: "Failed", color: "danger" },
+  canceled: { label: "Canceled", color: "default" },
 };
 
 // Mock filter options — wire to the backend later.
@@ -43,6 +44,7 @@ const STATUS_OPTS = [
   { value: "ok", label: "Success" },
   { value: "pending", label: "Pending" },
   { value: "failed", label: "Failed" },
+  { value: "canceled", label: "Canceled" },
 ];
 const TYPE_OPTS = [
   { value: "all", label: "All" },
@@ -127,6 +129,14 @@ function pageList(current: number, total: number): (number | "…")[] {
   return out;
 }
 
+// A booking is "past" once its end datetime is before now — those can no longer
+// be edited or cancelled.
+function isPastBooking(b: Booking): boolean {
+  const end = new Date(`${b.date}T${b.end_time}:00`);
+  if (Number.isNaN(end.getTime())) return false;
+  return end.getTime() < Date.now();
+}
+
 function withinTimeRange(dateStr: string, range: string): boolean {
   if (range === "all") return true;
   const d = new Date(dateStr + "T00:00:00");
@@ -169,9 +179,9 @@ export function BookingHistory() {
 
   // Row actions.
   const [editing, setEditing] = useState<Booking | null>(null);
-  const [deleting, setDeleting] = useState<Booking | null>(null);
-  const [deleteLoading, setDeleteLoading] = useState(false);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [canceling, setCanceling] = useState<Booking | null>(null);
+  const [cancelLoading, setCancelLoading] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -211,32 +221,32 @@ export function BookingHistory() {
       .catch(() => {});
   }, []);
 
-  const confirmDelete = useCallback(async () => {
-    if (!deleting) return;
-    setDeleteLoading(true);
-    setDeleteError(null);
+  const confirmCancel = useCallback(async () => {
+    if (!canceling) return;
+    setCancelLoading(true);
+    setCancelError(null);
     try {
-      await api.deleteBooking(deleting.id);
-      setDeleting(null);
-      toast.success("Booking deleted", {
-        description: "The meeting has been removed successfully.",
+      await api.cancelBooking(canceling.id);
+      setCanceling(null);
+      toast.success("Booking canceled", {
+        description: "The meeting has been canceled successfully.",
       });
       await load();
     } catch (e: any) {
       const msg = String(e?.message ?? e);
       const expired = msg === "UNAUTHENTICATED";
-      setDeleteError(
-        expired ? "Bạn cần đăng nhập lại." : `Xoá lịch thất bại: ${msg}`
+      setCancelError(
+        expired ? "Bạn cần đăng nhập lại." : `Huỷ lịch thất bại: ${msg}`
       );
-      toast.danger("Delete failed", {
+      toast.danger("Cancel failed", {
         description: expired
           ? "Please sign in again to continue."
-          : "Could not delete the booking. Please try again.",
+          : "Could not cancel the booking. Please try again.",
       });
     } finally {
-      setDeleteLoading(false);
+      setCancelLoading(false);
     }
-  }, [deleting, load]);
+  }, [canceling, load]);
 
   const filtered = useMemo(
     () =>
@@ -374,6 +384,12 @@ export function BookingHistory() {
                         </Chip>
                       </TableCell>
                       <TableCell>
+                        {(() => {
+                          const actionsDisabled =
+                            b.status === "failed" ||
+                            b.status === "canceled" ||
+                            isPastBooking(b);
+                          return (
                         <div className="flex items-center gap-1">
                           <Button
                             isIconOnly
@@ -381,7 +397,7 @@ export function BookingHistory() {
                             variant="ghost"
                             aria-label="Edit booking"
                             className="rounded-full"
-                            isDisabled={b.status === "failed"}
+                            isDisabled={actionsDisabled}
                             onPress={() => setEditing(b)}
                           >
                             <Pencil width={16} height={16} />
@@ -390,16 +406,19 @@ export function BookingHistory() {
                             isIconOnly
                             size="sm"
                             variant="ghost"
-                            aria-label="Delete booking"
+                            aria-label="Cancel booking"
                             className="rounded-full text-danger"
+                            isDisabled={actionsDisabled}
                             onPress={() => {
-                              setDeleteError(null);
-                              setDeleting(b);
+                              setCancelError(null);
+                              setCanceling(b);
                             }}
                           >
-                            <TrashBin width={16} height={16} />
+                            <Ban width={16} height={16} />
                           </Button>
                         </div>
+                          );
+                        })()}
                       </TableCell>
                     </TableRow>
                   )}
@@ -485,45 +504,45 @@ export function BookingHistory() {
         onSaved={load}
       />
 
-      {deleting && (
+      {canceling && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
           onMouseDown={(e) => {
-            if (e.target === e.currentTarget && !deleteLoading) setDeleting(null);
+            if (e.target === e.currentTarget && !cancelLoading) setCanceling(null);
           }}
         >
           <div className="flex w-full max-w-[440px] flex-col gap-4 rounded-2xl bg-white p-6 shadow-2xl dark:bg-[#0c0e12]">
             <div className="flex flex-col gap-1">
-              <h2 className="text-base font-semibold text-default-900">Delete booking?</h2>
+              <h2 className="text-base font-semibold text-default-900">Cancel booking?</h2>
               <p className="text-sm text-default-500">
-                {deleting.booking_type === "scheduled"
-                  ? "Scheduled booking này chưa được đặt — huỷ sẽ xoá yêu cầu đặt phòng."
-                  : "Sẽ huỷ cuộc họp trên lịch và xoá khỏi lịch sử. Hành động này không thể hoàn tác."}
+                {canceling.booking_type === "scheduled"
+                  ? "Scheduled booking này chưa được đặt — huỷ sẽ bỏ yêu cầu đặt phòng. Lịch sử vẫn được giữ lại."
+                  : "Sẽ huỷ cuộc họp trên lịch. Booking vẫn được giữ trong lịch sử với trạng thái Canceled."}
               </p>
             </div>
             <div className="rounded-lg bg-default-100 px-3 py-2 text-sm text-default-700">
-              <div className="font-medium">{deleting.room_name || deleting.room_email}</div>
+              <div className="font-medium">{canceling.room_name || canceling.room_email}</div>
               <div className="text-default-500">
-                {deleting.date} · {deleting.start_time} – {deleting.end_time}
+                {canceling.date} · {canceling.start_time} – {canceling.end_time}
               </div>
             </div>
-            {deleteError && <p className="text-sm text-danger">{deleteError}</p>}
+            {cancelError && <p className="text-sm text-danger">{cancelError}</p>}
             <div className="flex items-center justify-center gap-2 pt-2">
               <Button
                 variant="tertiary"
                 className="flex-1 rounded-full"
-                onPress={() => setDeleting(null)}
-                isDisabled={deleteLoading}
+                onPress={() => setCanceling(null)}
+                isDisabled={cancelLoading}
               >
-                Cancel
+                Keep booking
               </Button>
               <Button
                 variant="danger"
                 className="flex-1 rounded-full"
-                onPress={confirmDelete}
-                isPending={deleteLoading}
+                onPress={confirmCancel}
+                isPending={cancelLoading}
               >
-                Delete
+                Cancel booking
               </Button>
             </div>
           </div>

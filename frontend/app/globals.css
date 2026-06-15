@@ -34,9 +34,9 @@ html.dark body {
   --event-mine-border: #aaf0c4;
 }
 html.dark {
-  --event-booked-bg: #3e1209;
+  --event-booked-bg: #120503;
   --event-booked-border: #690802;
-  --event-mine-bg: #07411f;
+  --event-mine-bg: #021209;
   --event-mine-border: #17823f;
 }
 
