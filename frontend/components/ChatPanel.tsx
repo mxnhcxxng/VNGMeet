@@ -477,6 +477,55 @@ function stripThinking(content: string): string {
   return content.replace(/<think>[\s\S]*?(?:<\/think>|$)/gi, "").trimStart();
 }
 
+type MessagePart =
+  | { type: "answer"; content: string }
+  | { type: "thinking"; content: string };
+
+function splitThinking(content: string): MessagePart[] {
+  const parts: MessagePart[] = [];
+  const pattern = /<think>([\s\S]*?)(?:<\/think>|$)/gi;
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = pattern.exec(content)) !== null) {
+    const before = content.slice(cursor, match.index);
+    if (before) parts.push({ type: "answer", content: before });
+    parts.push({ type: "thinking", content: (match[1] ?? "").trim() });
+    cursor = match.index + match[0].length;
+  }
+
+  const after = content.slice(cursor);
+  if (after) parts.push({ type: "answer", content: after });
+
+  return parts.length ? parts : [{ type: "answer", content }];
+}
+
+function AdminAssistantMessage({ content }: { content: string }) {
+  return (
+    <div className="space-y-3">
+      {splitThinking(content).map((part, index) => {
+        if (!part.content.trim()) return null;
+        if (part.type === "thinking") {
+          return (
+            <div
+              key={`thinking-${index}`}
+              className="rounded-lg border border-[#f5d0c3] bg-[#fff7f3] p-3 text-xs leading-6 text-[#7a2e0e] dark:border-[#6b2a12] dark:bg-[#2a130a] dark:text-[#ffd6c2]"
+            >
+              <div className="mb-1 font-semibold uppercase tracking-wide">
+                Think
+              </div>
+              <pre className="whitespace-pre-wrap break-words font-mono">
+                {part.content}
+              </pre>
+            </div>
+          );
+        }
+        return <MarkdownMessage key={`answer-${index}`} content={part.content} />;
+      })}
+    </div>
+  );
+}
+
 export function ChatPanel({
   threadId,
   onThreadSelected,
@@ -742,7 +791,13 @@ export function ChatPanel({
                   <div key={message.id} className="group flex gap-3">
                     <AssistantAvatar />
                     <div className="min-w-0 flex-1">
-                      {displayContent.trim() && <MarkdownMessage content={displayContent} />}
+                      {displayContent.trim() && (
+                        userRole === "admin" ? (
+                          <AdminAssistantMessage content={displayContent} />
+                        ) : (
+                          <MarkdownMessage content={displayContent} />
+                        )
+                      )}
                       {pending && (
                         <BookingConfirmationCard
                           pending={pending}

@@ -1375,6 +1375,65 @@ def _chat_messages_for_llm(sb, thread_id: str, bot_profile_id: str) -> list[dict
     ]
 
 
+def _llm_text(value) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        text = value.get("text") or value.get("content")
+        if isinstance(text, (str, list, dict)):
+            return _llm_text(text)
+        return ""
+    if isinstance(value, list):
+        chunks: list[str] = []
+        for item in value:
+            if isinstance(item, (str, dict, list)):
+                chunks.append(_llm_text(item))
+            elif item:
+                chunks.append(str(item))
+        return "".join(chunks)
+    return str(value or "")
+
+
+def _llm_reasoning_text(message: dict) -> str:
+    chunks: list[str] = []
+    for key in ("reasoning_content", "reasoning", "reasoning_text"):
+        text = _llm_text(message.get(key)).strip()
+        if text:
+            chunks.append(text)
+
+    details = message.get("reasoning_details")
+    if isinstance(details, list):
+        for item in details:
+            if isinstance(item, dict):
+                text = _llm_text(item.get("text") or item.get("content")).strip()
+                if text:
+                    chunks.append(text)
+            else:
+                text = _llm_text(item).strip()
+                if text:
+                    chunks.append(text)
+
+    return "\n\n".join(dict.fromkeys(chunks))
+
+
+def _assistant_content_with_reasoning(
+    message: dict,
+    prior_reasoning: list[str] | None = None,
+) -> str:
+    content = _llm_text(message.get("content")).strip()
+    reasoning_parts = [part for part in (prior_reasoning or []) if part.strip()]
+    current_reasoning = _llm_reasoning_text(message)
+    if current_reasoning:
+        reasoning_parts.append(current_reasoning)
+
+    reasoning = "\n\n".join(dict.fromkeys(reasoning_parts)).strip()
+    if not reasoning or "<think" in content.lower():
+        return content
+    if not content:
+        return f"<think>\n{reasoning}\n</think>"
+    return f"<think>\n{reasoning}\n</think>\n\n{content}"
+
+
 def _chat_completion_url() -> str:
     if not settings.llm_base_url or not settings.llm_api_key or not settings.llm_model:
         raise HTTPException(
@@ -2274,6 +2333,7 @@ async def _call_llm_with_tools(
         "Content-Type": "application/json",
     }
     async with httpx.AsyncClient(timeout=60) as client:
+        reasoning_parts: list[str] = []
         for _ in range(3):
             res = await client.post(
                 _chat_completion_url(),
@@ -2291,8 +2351,11 @@ async def _call_llm_with_tools(
             msg = (res.json().get("choices") or [{}])[0].get("message") or {}
             tool_calls = msg.get("tool_calls") or []
             if not tool_calls:
-                return (msg.get("content") or "").strip(), tool_results
+                return _assistant_content_with_reasoning(msg, reasoning_parts).strip(), tool_results
 
+            reasoning = _llm_reasoning_text(msg)
+            if reasoning:
+                reasoning_parts.append(reasoning)
             messages.append(msg)
             for call in tool_calls:
                 fn = call.get("function") or {}
