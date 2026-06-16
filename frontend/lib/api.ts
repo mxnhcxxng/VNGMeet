@@ -188,6 +188,7 @@ export interface ChatMessage {
   content: string;
   created_at?: string;
   metadata?: Record<string, unknown>;
+  feedback?: "positive" | "negative" | null;
 }
 
 export interface ChatBookingActionPayload {
@@ -308,6 +309,15 @@ export const api = {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
+    }),
+  setChatMessageFeedback: (
+    messageId: string,
+    feedback: "positive" | "negative" | null
+  ) =>
+    req<{ message: ChatMessage }>(`/api/chat/messages/${messageId}/feedback`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ feedback }),
     }),
   chatBookingAction: (payload: ChatBookingActionPayload) =>
     req<{ ok: boolean; message: ChatMessage }>("/api/chat/bookings/action", {

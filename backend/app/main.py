@@ -1425,6 +1425,10 @@ class ChatThreadRenameRequest(BaseModel):
     title: str = Field(min_length=1, max_length=120)
 
 
+class ChatFeedbackRequest(BaseModel):
+    feedback: Literal["positive", "negative"] | None = None
+
+
 class ChatBookingActionRequest(BaseModel):
     thread_id: str
     confirmation_id: str
@@ -1813,6 +1817,7 @@ def _chat_message_response(row: dict, role: str) -> dict:
         "content": row.get("content") or "",
         "created_at": row.get("created_at"),
         "metadata": row.get("metadata") or {},
+        "feedback": row.get("feedback"),
     }
 
 
@@ -2965,7 +2970,7 @@ def list_chat_messages(request: Request, thread_id: str):
     _assert_thread_owner(sb, thread_id, user_profile_id)
     rows = (
         sb.table("messages")
-        .select("id, from_user_id, to_user_id, content, metadata, created_at")
+        .select("id, from_user_id, to_user_id, content, metadata, feedback, created_at")
         .eq("thread_id", thread_id)
         .order("created_at", desc=False)
         .execute()
@@ -2974,13 +2979,7 @@ def list_chat_messages(request: Request, thread_id: str):
     )
     return {
         "messages": [
-            {
-                "id": row["id"],
-                "role": _message_role(row, bot_profile_id),
-                "content": row.get("content") or "",
-                "created_at": row.get("created_at"),
-                "metadata": row.get("metadata") or {},
-            }
+            _chat_message_response(row, _message_role(row, bot_profile_id))
             for row in rows
         ]
     }
@@ -3012,6 +3011,44 @@ def rename_chat_thread(
     if not rows:
         raise HTTPException(503, "Could not rename chat thread.")
     return {"thread": rows[0]}
+
+
+@app.post("/api/chat/messages/{message_id}/feedback")
+def set_chat_message_feedback(
+    request: Request,
+    message_id: str,
+    payload: ChatFeedbackRequest,
+):
+    sb = _require_supabase_chat()
+    user_profile_id = _current_user_profile_id(request)
+    bot_profile_id = _bot_profile_id(sb)
+    rows = (
+        sb.table("messages")
+        .select("id, thread_id, from_user_id, to_user_id, content, metadata, feedback, created_at")
+        .eq("id", message_id)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    if not rows:
+        raise HTTPException(404, "Message not found.")
+    message = rows[0]
+    # Only the owner of the thread may give feedback, and only on assistant replies.
+    _assert_thread_owner(sb, message["thread_id"], user_profile_id)
+    if _message_role(message, bot_profile_id) != "assistant":
+        raise HTTPException(400, "Feedback is only allowed on assistant messages.")
+    updated = (
+        sb.table("messages")
+        .update({"feedback": payload.feedback})
+        .eq("id", message_id)
+        .execute()
+        .data
+        or []
+    )
+    if not updated:
+        raise HTTPException(503, "Could not save feedback.")
+    return {"message": _chat_message_response(updated[0], "assistant")}
 
 
 @app.delete("/api/chat/threads/{thread_id}")

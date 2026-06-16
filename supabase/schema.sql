@@ -179,6 +179,7 @@ create table if not exists messages (
   to_user_id uuid not null references user_profiles(id) on delete cascade,
   content text not null,
   metadata jsonb not null default '{}'::jsonb,
+  feedback text check (feedback in ('positive', 'negative')),
   created_at timestamptz not null default now(),
   constraint messages_content_not_blank check (length(btrim(content)) > 0)
 );

@@ -505,10 +505,23 @@ function ActionIconButton({
   );
 }
 
-function AssistantActions({ content }: { content: string }) {
+function AssistantActions({
+  content,
+  messageId,
+  feedback,
+  onFeedbackChange,
+}: {
+  content: string;
+  messageId: string;
+  feedback?: "positive" | "negative" | null;
+  onFeedbackChange: (
+    messageId: string,
+    feedback: "positive" | "negative" | null
+  ) => void;
+}) {
   const t = useT();
   const [copied, setCopied] = useState(false);
-  const [vote, setVote] = useState<"up" | "down" | null>(null);
+  const vote = feedback ?? null;
 
   const copy = async () => {
     try {
@@ -520,6 +533,15 @@ function AssistantActions({ content }: { content: string }) {
     }
   };
 
+  const setFeedback = (next: "positive" | "negative") => {
+    const value = vote === next ? null : next;
+    onFeedbackChange(messageId, value);
+    api.setChatMessageFeedback(messageId, value).catch(() => {
+      // Revert optimistic update if the request fails.
+      onFeedbackChange(messageId, vote);
+    });
+  };
+
   return (
     <div className="mt-1 flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
       <ActionIconButton label={copied ? t("chatp.copied") : t("chatp.copy")} onPress={copy}>
@@ -527,15 +549,15 @@ function AssistantActions({ content }: { content: string }) {
       </ActionIconButton>
       <ActionIconButton
         label={t("chatp.helpful")}
-        onPress={() => setVote((v) => (v === "up" ? null : "up"))}
-        isActive={vote === "up"}
+        onPress={() => setFeedback("positive")}
+        isActive={vote === "positive"}
       >
         <ThumbsUp width={15} />
       </ActionIconButton>
       <ActionIconButton
         label={t("chatp.notGood")}
-        onPress={() => setVote((v) => (v === "down" ? null : "down"))}
-        isActive={vote === "down"}
+        onPress={() => setFeedback("negative")}
+        isActive={vote === "negative"}
       >
         <ThumbsDown width={15} />
       </ActionIconButton>
@@ -736,6 +758,15 @@ export function ChatPanel({
     refreshThreads();
   };
 
+  const handleFeedbackChange = (
+    messageId: string,
+    feedback: "positive" | "negative" | null
+  ) => {
+    setCachedMessages((prev) =>
+      prev.map((m) => (m.id === messageId ? { ...m, feedback } : m))
+    );
+  };
+
   const resetTextareaHeight = () => {
     if (textareaRef.current) textareaRef.current.style.height = "auto";
   };
@@ -918,7 +949,14 @@ export function ChatPanel({
                           onActionMessage={appendActionMessage}
                         />
                       )}
-                      {displayContent.trim() && <AssistantActions content={displayContent} />}
+                      {displayContent.trim() && (
+                        <AssistantActions
+                          content={displayContent}
+                          messageId={message.id}
+                          feedback={message.feedback}
+                          onFeedbackChange={handleFeedbackChange}
+                        />
+                      )}
                     </div>
                   </div>
                 );
