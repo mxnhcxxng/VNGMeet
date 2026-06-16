@@ -367,7 +367,7 @@ const en = {
   // --- Chat panel ---------------------------------------------------------
   "chatp.suggestion1": "Book a room for 6 at campus, 2–4pm today",
   "chatp.suggestion2": "Find the nearest free room for 4 today",
-  "chatp.suggestion3": "Tonight, book a room for {date}",
+  "chatp.suggestion3": "Book a medium room for {date}",
   "chatp.suggestion4": "Help me get directions to a meeting room",
   "chatp.typing": "Typing a reply",
   "chatp.mapAlt": "Map",
@@ -757,7 +757,7 @@ const vi: Partial<Record<TranslationKey, string>> = {
   // --- Chat panel ---------------------------------------------------------
   "chatp.suggestion1": "Đặt phòng 6 người, 2–4h chiều nay ở campus",
   "chatp.suggestion2": "Tìm phòng trống gần nhất cho 4 người hôm nay",
-  "chatp.suggestion3": "Đêm nay đặt phòng cho ngày {date}",
+  "chatp.suggestion3": "Đặt phòng cỡ vừa cho ngày {date}",
   "chatp.suggestion4": "Tìm đường đến phòng họp giúp tôi",
   "chatp.typing": "Đang soạn trả lời",
   "chatp.mapAlt": "Bản đồ",
