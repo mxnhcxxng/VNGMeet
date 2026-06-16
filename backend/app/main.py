@@ -125,9 +125,12 @@ async def _safe_process_room_scouts() -> None:
 app = FastAPI(title="VNG Meet — Meeting Room Availability", lifespan=lifespan)
 
 app.add_middleware(SessionMiddleware, secret_key=settings.session_secret, same_site="lax")
+# FRONTEND_URL may be a comma-separated list so the same backend can serve
+# multiple origins (e.g. local dev + a deployed frontend on AgentBase).
+_cors_origins = [o.strip() for o in settings.frontend_url.split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.frontend_url],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -3876,4 +3879,10 @@ async def process_scheduled_bookings() -> dict:
 
 @app.get("/api/health")
 def health():
+    return {"status": "ok"}
+
+
+@app.get("/health")
+def health_root():
+    """Health check required by GreenNode AgentBase Runtime (must return 200)."""
     return {"status": "ok"}

@@ -16,5 +16,7 @@ FROM node:20-slim AS run
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=build /app ./
-EXPOSE 3000
-CMD ["npm", "run", "start"]
+# AgentBase Runtime routes traffic to port 8080 by default; PORT is overridable
+# (e.g. set PORT=3000 for local docker-compose).
+EXPOSE 8080
+CMD ["sh", "-c", "npx next start -p ${PORT:-8080}"]
