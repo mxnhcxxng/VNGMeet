@@ -37,6 +37,7 @@ import {
 import { Check, Copy } from "@gravity-ui/icons";
 import { supabase } from "@/lib/supabase";
 import { Sidebar, type View } from "@/components/Sidebar";
+import { TokenExpiryProvider } from "@/components/TokenExpiryProvider";
 import { BrowseRooms } from "@/components/BrowseRooms";
 import {
   ChatPanel,
@@ -1155,6 +1156,7 @@ export default function Home() {
   }
 
   return (
+    <TokenExpiryProvider fallbackExpiresAt={me.tokenExpiresAt}>
     <div className="flex h-screen gap-2 overflow-hidden bg-[#f0f0f1] p-2 dark:bg-[#13161b]">
       <Sidebar
         view={view}
@@ -1266,5 +1268,6 @@ export default function Home() {
       {sessionExpiredModal}
       {unsavedChangesModal}
     </div>
+    </TokenExpiryProvider>
   );
 }

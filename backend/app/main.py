@@ -983,11 +983,6 @@ class RoomScoutRequest(BaseModel):
     office: str | None = None
 
 
-def _end_of_today(tz: ZoneInfo) -> datetime:
-    tomorrow = datetime.now(tz).date() + timedelta(days=1)
-    return datetime.combine(tomorrow, datetime.min.time(), tzinfo=tz)
-
-
 def _time_to_minutes(value: object) -> int | None:
     try:
         hour, minute = str(value).split(":")
@@ -1196,8 +1191,9 @@ async def process_room_scouts() -> dict:
     now = datetime.now(timezone.utc)
     today = datetime.now(tz).date().isoformat()
 
+    # Auto-cancel scouts whose end time has passed (expires_at = scout end time).
     sb.table("room_scouts").update(
-        {"status": "expired", "updated_at": now.isoformat()}
+        {"status": "canceled", "updated_at": now.isoformat()}
     ).eq("status", "active").lte("expires_at", now.isoformat()).execute()
 
     scouts = (
@@ -1316,6 +1312,11 @@ async def create_room_scout(request: Request, payload: RoomScoutRequest):
 
     tz = ZoneInfo(settings.timezone)
     now = datetime.now(timezone.utc).isoformat()
+    # The scout auto-stops once "now" passes its end time today; after that the
+    # background job marks it canceled (see process_room_scouts).
+    scout_end_local = datetime.now(tz).replace(
+        hour=end_minutes // 60, minute=end_minutes % 60, second=0, microsecond=0
+    )
     row = {
         "user_id": user_profile_id,
         "auth_user_id": auth_user_id,
@@ -1328,7 +1329,7 @@ async def create_room_scout(request: Request, payload: RoomScoutRequest):
         "office": office,
         "status": "active",
         "graph_access_token": _room_scout_token_for_create(token, auth_user_id),
-        "expires_at": _end_of_today(tz).astimezone(timezone.utc).isoformat(),
+        "expires_at": scout_end_local.astimezone(timezone.utc).isoformat(),
         "updated_at": now,
     }
     res = get_supabase().table("room_scouts").insert(row).execute()

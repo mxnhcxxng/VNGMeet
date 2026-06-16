@@ -15,6 +15,7 @@ import {
 import { Button, Dropdown, Label } from "@heroui/react";
 import type { ChatThread } from "@/lib/api";
 import { useT } from "@/app/providers";
+import { useTokenExpiry } from "./TokenExpiryProvider";
 import { BrandIcon } from "./BrandIcon";
 
 export type View = "browse" | "chat" | "settings" | "bookingHistory" | "roomScout";
@@ -211,6 +212,53 @@ function ChatThreadRow({
   );
 }
 
+// Clickable "Token expires in: HH:MM:SS" badge. Ticks every second for the
+// display; the shared provider owns the underlying expiry + help modal.
+function TokenExpiryBadge() {
+  const t = useT();
+  const { expiresAt, openTokenModal } = useTokenExpiry();
+  const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
+
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const remaining = expiresAt === null ? null : Math.max(0, expiresAt - now);
+  const expired = remaining !== null && remaining <= 0;
+
+  let value: string;
+  if (remaining === null) value = t("sidebar.tokenUnavailable");
+  else if (expired) value = t("sidebar.tokenExpired");
+  else {
+    const h = Math.floor(remaining / 3600);
+    const m = Math.floor((remaining % 3600) / 60);
+    const s = remaining % 60;
+    const pad = (n: number) => String(n).padStart(2, "0");
+    value = `${pad(h)}:${pad(m)}:${pad(s)}`;
+  }
+
+  // Amber under 2 min, red once expired.
+  const valueTone = expired
+    ? "text-danger"
+    : remaining !== null && remaining < 120
+      ? "text-[#dc6803] dark:text-[#f79009]"
+      : "text-[#18181b] dark:text-[#f7f7f7]";
+
+  return (
+    <button
+      type="button"
+      onClick={() => openTokenModal("info")}
+      className="flex w-full items-center justify-center gap-2 rounded-full bg-[#ebebec] py-1.5 text-sm font-medium transition-colors hover:bg-[#e0e0e1] dark:bg-[#22262f] dark:hover:bg-[#2a2f38]"
+    >
+      <span className="text-[#71717a] dark:text-[#94979c]">{t("sidebar.tokenExpiresIn")}</span>
+      <span className={`font-medium ${remaining !== null && !expired ? "tabular-nums" : ""} ${valueTone}`}>
+        {value}
+      </span>
+    </button>
+  );
+}
+
 export function Sidebar({
   view,
   onChange,
@@ -337,27 +385,31 @@ export function Sidebar({
 
         <div className="h-px w-full bg-[#e9eaeb] dark:bg-[#373a41]" />
 
-        <div className="flex items-center justify-between gap-3 px-1 py-2">
-          <div className="flex min-w-0 items-center gap-3">
-            <img
-              src="/default-avatar.jpg"
-              alt={display || "User"}
-              className="h-9 w-9 shrink-0 rounded-full object-cover"
-            />
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium text-[#18181b] dark:text-[#f7f7f7]">{name}</p>
-              {email && <p className="truncate text-xs text-[#71717a] dark:text-[#94979c]">{email}</p>}
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center justify-between gap-3 px-1 py-2">
+            <div className="flex min-w-0 items-center gap-3">
+              <img
+                src="/default-avatar.jpg"
+                alt={display || "User"}
+                className="h-9 w-9 shrink-0 rounded-full object-cover"
+              />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium text-[#18181b] dark:text-[#f7f7f7]">{name}</p>
+                {email && <p className="truncate text-xs text-[#71717a] dark:text-[#94979c]">{email}</p>}
+              </div>
             </div>
+            <button
+              type="button"
+              onClick={() => setLogoutConfirmOpen(true)}
+              aria-label={t("sidebar.logout")}
+              title={t("sidebar.logout")}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[#71717a] dark:text-[#94979c] transition-colors hover:bg-[#f5f5f5] dark:hover:bg-[#22262f] hover:text-[#18181b] dark:hover:text-[#f7f7f7]"
+            >
+              <ArrowRightFromSquare width={16} height={16} />
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={() => setLogoutConfirmOpen(true)}
-            aria-label={t("sidebar.logout")}
-            title={t("sidebar.logout")}
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[#71717a] dark:text-[#94979c] transition-colors hover:bg-[#f5f5f5] dark:hover:bg-[#22262f] hover:text-[#18181b] dark:hover:text-[#f7f7f7]"
-          >
-            <ArrowRightFromSquare width={16} height={16} />
-          </button>
+
+          <TokenExpiryBadge />
         </div>
       </div>
 

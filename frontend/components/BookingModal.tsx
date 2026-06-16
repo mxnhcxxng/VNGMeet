@@ -15,6 +15,7 @@ import {
 import { CircleInfo, Clock } from "@gravity-ui/icons";
 import { api } from "@/lib/api";
 import { useT } from "@/app/providers";
+import { useTokenExpiry } from "./TokenExpiryProvider";
 
 export interface BookingSlot {
   roomEmail: string;
@@ -43,6 +44,7 @@ export function BookingModal({
   onBooked: () => void;
 }) {
   const t = useT();
+  const { ensureTokenTime } = useTokenExpiry();
   const [subject, setSubject] = useState("");
   const [attendees, setAttendees] = useState("");
   const [notes, setNotes] = useState("");
@@ -120,6 +122,13 @@ export function BookingModal({
     if (!subject.trim()) {
       setError(t("booking.titleRequired"));
       return;
+    }
+    // Scheduled bookings run at the meeting start time, so the token must still
+    // be valid then (with buffer). Block + prompt a refresh otherwise.
+    if (slot.schedule) {
+      const startAt = new Date(`${slot.date}T${slot.startTime}:00`).getTime();
+      const neededSeconds = Math.floor((startAt - Date.now()) / 1000);
+      if (!ensureTokenTime(neededSeconds)) return;
     }
     setLoading(true);
     setError(null);

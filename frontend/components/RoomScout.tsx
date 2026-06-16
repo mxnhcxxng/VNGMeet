@@ -35,6 +35,11 @@ import {
 import { useT } from "@/app/providers";
 import type { TFunction, TranslationKey } from "@/lib/i18n";
 import { BrandIcon } from "./BrandIcon";
+import { useTokenExpiry } from "./TokenExpiryProvider";
+
+// Scouting can only start within business hours; after 18:00 it's blocked until
+// midnight (all scan windows would already be in the past).
+const SCOUT_CUTOFF_HOUR = 18;
 
 const DURATION_VALUES = ["30", "60", "90", "120", "150", "180"] as const;
 const DURATION_KEY: Record<string, TranslationKey> = {
@@ -392,6 +397,7 @@ function ScoutForm({
   onCreated: () => void | Promise<void>;
 }) {
   const t = useT();
+  const { ensureTokenTime } = useTokenExpiry();
   const [office, setOffice] = useState(userOffice || "");
   const [startTime, setStartTime] = useState(() => defaultStartTime());
   const [endTime, setEndTime] = useState("");
@@ -399,10 +405,19 @@ function ScoutForm({
   const [capacity, setCapacity] = useState<string>("");
   const [ignoreLunch, setIgnoreLunch] = useState(false);
   const [saving, setSaving] = useState(false);
+  // Re-evaluate the after-hours cutoff each minute so the form locks at 18:00.
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   useEffect(() => {
     setOffice(userOffice || "");
   }, [userOffice]);
+
+  useEffect(() => {
+    const id = setInterval(() => setNowMs(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, []);
+
+  const afterHours = new Date(nowMs).getHours() >= SCOUT_CUTOFF_HOUR;
 
   const startOptions = useMemo(
     () => TIME_OPTIONS.slice(0, -1).map((tm) => ({ value: tm, label: tm })),
@@ -437,6 +452,17 @@ function ScoutForm({
       toast.warning(t("scout.rangeTooShort"));
       return;
     }
+    if (afterHours) {
+      toast.warning(t("scout.afterHoursNote"));
+      return;
+    }
+    // A scout runs until its end time today; the token must outlive that window
+    // (with buffer). Otherwise block and prompt a refresh.
+    const endMin = timeToMinutes(endTime);
+    const endAt = new Date();
+    endAt.setHours(Math.floor(endMin / 60), endMin % 60, 0, 0);
+    const neededSeconds = Math.floor((endAt.getTime() - Date.now()) / 1000);
+    if (!ensureTokenTime(neededSeconds)) return;
     setSaving(true);
     try {
       await api.createRoomScout({
@@ -534,12 +560,26 @@ function ScoutForm({
           options={capacityOptions(t)}
         />
 
-        <div className="flex items-start gap-1.5 text-sm leading-5 text-default-500">
-          <CircleInfo className="mt-0.5 size-4 shrink-0 text-[#F05A22]" />
-          <span>{t("scout.sameDayNote")}</span>
-        </div>
+        {!afterHours && (
+          <div className="flex items-start gap-1.5 text-sm leading-5 text-default-500">
+            <CircleInfo className="mt-0.5 size-4 shrink-0 text-[#F05A22]" />
+            <span>{t("scout.sameDayNote")}</span>
+          </div>
+        )}
 
-        <Button className="mt-2 w-full rounded-full" onPress={submit} isPending={saving}>
+        {afterHours && (
+          <div className="flex items-center gap-2 rounded-xl bg-[#fee7de] p-3 text-sm leading-6 text-[#535862] dark:bg-[#3B1202] dark:text-[#fee7de]">
+            <CircleInfo className="size-4 shrink-0 text-[#F05A22]" />
+            <span>{t("scout.afterHoursNote")}</span>
+          </div>
+        )}
+
+        <Button
+          className="mt-2 w-full rounded-full"
+          onPress={submit}
+          isPending={saving}
+          isDisabled={afterHours}
+        >
           {t("scout.start")}
         </Button>
       </div>
