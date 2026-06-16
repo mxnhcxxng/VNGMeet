@@ -14,6 +14,7 @@ import json
 import logging
 from contextlib import asynccontextmanager
 from datetime import date as date_cls, datetime, timedelta, timezone
+from pathlib import Path
 from typing import Literal
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
@@ -1122,15 +1123,37 @@ def _room_scout_signature(day: str, start_time: str, end_time: str, rooms: list[
     return f"{day}|{start_time}|{end_time}|{emails}"
 
 
-# Inline VNG Meet brand mark (same artwork as the web app's BrandIcon), embedded
-# directly so the email renders the logo without depending on an externally hosted
-# image. Kept as a module constant to avoid rebuilding the markup on every send.
+# VNG Meet brand mark, sent as an inline CID attachment rather than an inline SVG
+# or base64 data-URI: Outlook desktop strips both of those, but renders cid: images.
+# The PNG asset ships in app/assets and is base64-encoded once at import time.
+_VNG_MEET_LOGO_CID = "vngmeetlogo"
+_VNG_MEET_LOGO_PATH = Path(__file__).resolve().parent / "assets" / "vng_meet_logo.png"
+try:
+    _VNG_MEET_LOGO_B64 = base64.b64encode(_VNG_MEET_LOGO_PATH.read_bytes()).decode()
+except OSError:  # asset missing — fall back to text-only header
+    _VNG_MEET_LOGO_B64 = ""
+
+# Displayed at 28px (rendered from a 64px asset for crisp HiDPI), matching the
+# wordmark size next to it.
 _VNG_MEET_EMAIL_ICON = (
-    '<img width="32" height="32" alt="VNG Meet" style="display:block;border:0" '
-    'src="data:image/svg+xml;base64,'
-    "PHN2ZyB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHZpZXdCb3g9IjAgMCAzMiAzMiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTE2LjY0MzggMy4wMjY2OUMxNy41ODAxIDIuNjk4NjIgMTguNTU5NyAzLjM5Mjk2IDE4LjU1OTggNC4zODUwOVYyNi44NTY4QzE4LjU1OTYgMjcuNzI4NSAxNy43OTA5IDI4LjQwMDQgMTYuOTI3IDI4LjI4MzVMNy45NjcwNCAyNy4wNjc3QzcuMjUzMTUgMjYuOTcwOCA2LjcxOTk3IDI2LjM2MDQgNi43MTk5NyAyNS42NFY3LjUyNjY5QzYuNzE5OTkgNi45MTUwNyA3LjEwNjY2IDYuMzY5NjggNy42ODM4NCA2LjE2NzMyTDE2LjY0MzggMy4wMjY2OVpNMTQuNzIgMTQuMzk5N0MxNC4xMDE0IDE0LjM5OTcgMTMuNTk5OSAxNS4xMTU4IDEzLjU5OTkgMTUuOTk5M0MxMy41OTk5IDE2Ljg4MyAxNC4xMDE0IDE3LjU5OTkgMTQuNzIgMTcuNTk5OUMxNS4zMzg1IDE3LjU5OTkgMTUuODQwMSAxNi44ODMgMTUuODQwMSAxNS45OTkzQzE1Ljg0IDE1LjExNTggMTUuMzM4NSAxNC4zOTk3IDE0LjcyIDE0LjM5OTdaIiBmaWxsPSIjRjA1QTIyIi8+CjxwYXRoIGQ9Ik0xOS44NCA3LjM1OTk5SDIzLjg0QzIzLjkyODMgNy4zNTk5OSAyNCA3LjQzMTYyIDI0IDcuNTE5OTlWMjUuNkMyNCAyNS42ODg0IDIzLjkyODMgMjUuNzYgMjMuODQgMjUuNzZIMTkuODQiIHN0cm9rZT0iI0YwNUEyMiIgc3Ryb2tlLXdpZHRoPSIyLjU2IiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz4KPC9zdmc+"
-    '" />'
+    f'<img src="cid:{_VNG_MEET_LOGO_CID}" width="28" height="28" alt="VNG Meet" '
+    'style="display:block;border:0" />'
+    if _VNG_MEET_LOGO_B64
+    else ""
 )
+
+
+def _vng_meet_inline_images() -> list[dict]:
+    """Inline image attachments for the Room Scout email (the brand logo)."""
+    if not _VNG_MEET_LOGO_B64:
+        return []
+    return [
+        {
+            "content_id": _VNG_MEET_LOGO_CID,
+            "content_bytes": _VNG_MEET_LOGO_B64,
+            "content_type": "image/png",
+        }
+    ]
 
 
 def _room_scout_email_body(scout: dict, rooms: list[dict], day: str, start_time: str, end_time: str) -> str:
@@ -1245,6 +1268,7 @@ async def process_room_scouts() -> dict:
                         scout["email"],
                         f"Room Scout: {len(rooms)} room(s) available at {start_time}",
                         _room_scout_email_body(scout, rooms, today, start_time, end_time),
+                        inline_images=_vng_meet_inline_images(),
                     )
                     update["last_notified_at"] = checked_at
                     update["last_notified_signature"] = signature

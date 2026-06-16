@@ -331,24 +331,43 @@ async def send_mail(
     to_email: str,
     subject: str,
     html_body: str,
+    inline_images: list[dict] | None = None,
 ) -> None:
     """Send a notification from the signed-in user's mailbox via Graph.
 
     Needs the Mail.Send delegated permission. In manual-token mode the pasted
     Graph token must include that scope.
+
+    ``inline_images`` lets the HTML reference embedded images via ``cid:<id>``.
+    Each entry is ``{"content_id": str, "content_bytes": <base64 str>,
+    "content_type": str}``. CID attachments render in Outlook desktop, which
+    strips both inline SVG and base64 data-URI images.
     """
+    message: dict = {
+        "subject": subject,
+        "body": {"contentType": "HTML", "content": html_body},
+        "toRecipients": [
+            {"emailAddress": {"address": to_email}},
+        ],
+    }
+    if inline_images:
+        message["attachments"] = [
+            {
+                "@odata.type": "#microsoft.graph.fileAttachment",
+                "name": f"{img['content_id']}.png",
+                "contentType": img.get("content_type", "image/png"),
+                "contentId": img["content_id"],
+                "isInline": True,
+                "contentBytes": img["content_bytes"],
+            }
+            for img in inline_images
+        ]
     headers = {
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json",
     }
     body = {
-        "message": {
-            "subject": subject,
-            "body": {"contentType": "HTML", "content": html_body},
-            "toRecipients": [
-                {"emailAddress": {"address": to_email}},
-            ],
-        },
+        "message": message,
         "saveToSentItems": False,
     }
     url = f"{GRAPH_BASE}/me/sendMail"
