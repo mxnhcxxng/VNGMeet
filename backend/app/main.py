@@ -1532,6 +1532,7 @@ Nguyên tắc phản hồi:
 - Không hỏi số lượng người tham dự. Thay vào đó hỏi nhu cầu phòng để user chọn: nhỏ (4 người), vừa (5-12 người), lớn (13+ người); rồi truyền capacity_size là small/medium/large tương ứng. Nếu user tự nói rõ con số thì mới truyền capacity.
 - Sức chứa phòng được phân loại theo cột capacity_size (small/medium/large), không dựa trên con số capacity thô.
 - Chỉ hỗ trợ đặt phòng vào ngày làm việc trong tuần (Thứ 2 đến Thứ 6). Nếu user yêu cầu Thứ 7 hoặc Chủ nhật, báo ngắn gọn rằng chỉ đặt được vào ngày làm việc T2-T6 và gợi ý chọn ngày làm việc gần nhất. Khi gợi ý ngày/khung giờ, không trả ra Thứ 7 hoặc Chủ nhật.
+- Do giới hạn hệ thống, chỉ đặt được phòng tối đa 15 ngày kể từ hôm nay (tính cả hôm nay là ngày thứ 0, ví dụ hôm nay 16/6 thì ngày xa nhất đặt được là 1/7). Nếu user yêu cầu ngày xa hơn, báo ngắn gọn rằng chỉ đặt được trong vòng 15 ngày tới và gợi ý ngày hợp lệ gần nhất. Không kiểm tra phòng trống hay tạo card đặt phòng cho ngày vượt quá giới hạn này.
 - Không bịa phòng, giờ trống hoặc trạng thái booking nếu chưa có dữ liệu từ API.
 - Nếu API không trả về phòng phù hợp, gợi ý người dùng đổi thời gian, địa điểm hoặc tiêu chí.
 - Nếu người dùng không nói tên cuộc họp, để trống subject; hệ thống sẽ tự điền tên mặc định.
@@ -2456,6 +2457,16 @@ async def _tool_check_room_availability(
     today = datetime.now(ZoneInfo(settings.timezone)).date()
     if requested_day < today:
         return {"ok": False, "error": "Không thể kiểm tra/ngỏ ý đặt phòng trong quá khứ."}
+    max_booking_day = today + timedelta(days=settings.max_booking_advance_days)
+    if requested_day > max_booking_day:
+        return {
+            "ok": False,
+            "error": (
+                f"Do giới hạn hệ thống, chỉ đặt được phòng tối đa "
+                f"{settings.max_booking_advance_days} ngày từ hôm nay "
+                f"(đến hết ngày {max_booking_day.isoformat()})."
+            ),
+        }
     if requested_day.weekday() >= 5:
         return {
             "ok": False,
@@ -2623,6 +2634,16 @@ async def _tool_book_room(
     try:
         target_day = date_cls.fromisoformat(booking_date)
         today = datetime.now(ZoneInfo(settings.timezone)).date()
+        max_booking_day = today + timedelta(days=settings.max_booking_advance_days)
+        if target_day > max_booking_day:
+            return {
+                "ok": False,
+                "error": (
+                    f"Do giới hạn hệ thống, chỉ đặt được phòng tối đa "
+                    f"{settings.max_booking_advance_days} ngày từ hôm nay "
+                    f"(đến hết ngày {max_booking_day.isoformat()})."
+                ),
+            }
         horizon_end = today + timedelta(days=settings.availability_days - 1)
         booking_type = "scheduled" if target_day > horizon_end else "instant"
     except ValueError:
@@ -2733,11 +2754,15 @@ async def _call_llm_with_tools(
     this_sunday = this_monday + timedelta(days=6)
     next_monday = this_monday + timedelta(days=7)
     next_sunday = next_monday + timedelta(days=6)
+    max_booking_day = today + timedelta(days=settings.max_booking_advance_days)
     runtime_context = (
         f"\n\nNgữ cảnh thời gian hiện tại:\n"
         f"- Hôm nay là {today.isoformat()} ({weekday_names[now.weekday()]}).\n"
         f"- Thời gian hiện tại là {now.strftime('%H:%M')}.\n"
         f"- Timezone là {settings.timezone}.\n"
+        f"- Ngày xa nhất có thể đặt phòng là {max_booking_day.isoformat()} "
+        f"(giới hạn hệ thống {settings.max_booking_advance_days} ngày kể từ hôm nay). "
+        "Không kiểm tra/đặt phòng cho ngày sau ngày này.\n"
         "- Tuần bắt đầu từ Thứ 2 và kết thúc vào Chủ nhật.\n"
         f"- Tuần này: Thứ 2 {this_monday.isoformat()} đến Chủ nhật {this_sunday.isoformat()}.\n"
         f"- Tuần sau: Thứ 2 {next_monday.isoformat()} đến Chủ nhật {next_sunday.isoformat()}.\n"
@@ -3479,10 +3504,17 @@ def _release_room_availability_owner(
         if len(slot_owner_ids) != availability.SLOTS_PER_DAY:
             slot_owner_ids = [None] * availability.SLOTS_PER_DAY
 
+        # A schedule day is seeded entirely with -1 and never refreshed from Graph
+        # (it's beyond the live-availability window). Releasing a slot there must
+        # restore the seeded -1 baseline, not 0 — otherwise a cancelled scheduled
+        # booking would leave the slot looking like a live/instant-free slot and the
+        # day would stop being detected as a schedule day. Instant days restore to 0.
+        restore_value = -1 if any(s == -1 for s in slots) else 0
+
         for idx in range(start, min(end, availability.SLOTS_PER_DAY)):
             # Only release slots this user actually owns.
             if str(slot_owner_ids[idx] or "") == user_profile_id:
-                slots[idx] = 0
+                slots[idx] = restore_value
                 slot_owner_ids[idx] = None
 
         sb.table("room_availability").upsert(
@@ -3541,6 +3573,21 @@ async def create_booking(request: Request, payload: BookingRequest):
     if payload.end_time <= payload.start_time:
         _log_user_booking_activity(user_profile_id, payload, "failed", "invalid_time_range")
         raise HTTPException(400, "Giờ kết thúc phải sau giờ bắt đầu")
+    try:
+        target_day = date_cls.fromisoformat(payload.date)
+    except ValueError:
+        _log_user_booking_activity(user_profile_id, payload, "failed", "invalid_date")
+        raise HTTPException(400, "Ngày đặt phòng không hợp lệ")
+    today = datetime.now(ZoneInfo(settings.timezone)).date()
+    max_booking_day = today + timedelta(days=settings.max_booking_advance_days)
+    if target_day > max_booking_day:
+        _log_user_booking_activity(user_profile_id, payload, "failed", "beyond_max_advance")
+        raise HTTPException(
+            400,
+            f"Do giới hạn hệ thống, chỉ đặt được phòng tối đa "
+            f"{settings.max_booking_advance_days} ngày từ hôm nay "
+            f"(đến hết ngày {max_booking_day.isoformat()}).",
+        )
     if _payload_is_scheduled(payload):
         duration = _booking_duration_minutes(payload)
         if duration is None:
@@ -3673,16 +3720,25 @@ async def update_booking(request: Request, booking_id: str, payload: UpdateBooki
     from .supabase_client import get_supabase
 
     sb = get_supabase()
-    is_scheduled = _booking_type_for_db(row.get("booking_type") or "") == "scheduled"
+    event_id = (row.get("graph_event_id") or "").strip()
+    # A scheduled booking is only "pending" until the background job places it on
+    # the calendar (status -> "ok", graph_event_id set). Decide how to edit by
+    # whether the booking actually exists on the calendar yet, NOT by booking_type:
+    # a scheduled booking that has since been placed must be edited for real via
+    # Graph, exactly like an instant booking.
+    is_pending_scheduled = (
+        _booking_type_for_db(row.get("booking_type") or "") == "scheduled"
+        and row.get("status") == "pending"
+        and not event_id
+    )
     slot_changed = (
         new_date != row["date"]
         or new_start != row["start_time"]
         or new_end != row["end_time"]
     )
 
-    if is_scheduled:
-        if row.get("status") != "pending":
-            raise HTTPException(400, "Scheduled booking này không còn ở trạng thái pending.")
+    if is_pending_scheduled:
+        # Still pending — nothing on the calendar yet. Update the stored request only.
         if slot_changed:
             probe = _activity_to_booking_request(
                 {**row, "date": new_date, "start_time": new_start, "end_time": new_end}
@@ -3698,8 +3754,8 @@ async def update_booking(request: Request, booking_id: str, payload: UpdateBooki
             )
             _mark_room_availability_owner(user_profile_id, probe)
     else:
-        # Instant booking: push the change to the real calendar event.
-        event_id = (row.get("graph_event_id") or "").strip()
+        # Already on the calendar (instant booking, or a scheduled booking that has
+        # since been placed): push the change to the real calendar event via Graph.
         if not event_id:
             raise HTTPException(
                 400,
@@ -3777,15 +3833,16 @@ async def delete_booking(request: Request, booking_id: str):
     row = _fetch_own_booking(user_profile_id, booking_id)
     is_scheduled = _booking_type_for_db(row.get("booking_type") or "") == "scheduled"
     was_ok = row.get("status") == "ok"
+    event_id = (row.get("graph_event_id") or "").strip()
 
-    # Instant + actually booked → cancel the real calendar event first.
-    if not is_scheduled and was_ok:
-        event_id = (row.get("graph_event_id") or "").strip()
-        if event_id:
-            try:
-                await graph.delete_event(token, event_id)
-            except httpx.HTTPStatusError as e:
-                raise HTTPException(e.response.status_code, e.response.text)
+    # Actually on the calendar → cancel the real event first. This covers instant
+    # bookings AND scheduled bookings that have since been placed (status "ok" +
+    # graph_event_id), so canceling never leaves a phantom event behind.
+    if was_ok and event_id:
+        try:
+            await graph.delete_event(token, event_id)
+        except httpx.HTTPStatusError as e:
+            raise HTTPException(e.response.status_code, e.response.text)
 
     from .supabase_client import get_supabase
 

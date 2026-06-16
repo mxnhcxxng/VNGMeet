@@ -120,6 +120,10 @@ class Settings(BaseSettings):
     availability_refresh_minutes: str = "0,15,30,45"
     # Set true to disable the scheduler even when app creds are present.
     availability_refresh_disabled: bool = False
+    # Hard limit on how far ahead a room can be booked (system constraint).
+    # A date is bookable only when it falls within today .. today + N days
+    # (inclusive). E.g. with 15 and today=16/06, the latest bookable day is 01/07.
+    max_booking_advance_days: int = 15
 
     @property
     def authority(self) -> str:

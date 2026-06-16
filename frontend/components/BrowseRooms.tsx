@@ -412,16 +412,20 @@ export function BrowseRooms({
     schedule: boolean
   ): Booking | null {
     const wantType = schedule ? "scheduled" : "instant";
-    return (
-      myBookings.find(
-        (b) =>
-          b.room_email.toLowerCase() === roomEmail.toLowerCase() &&
-          b.date === date &&
-          b.booking_type === wantType &&
-          time >= b.start_time &&
-          time < b.end_time
-      ) ?? null
+    const matches = myBookings.filter(
+      (b) =>
+        b.room_email.toLowerCase() === roomEmail.toLowerCase() &&
+        b.date === date &&
+        b.status !== "canceled" &&
+        b.status !== "failed" &&
+        time >= b.start_time &&
+        time < b.end_time
     );
+    // Prefer the booking whose stored type matches the grid band, but fall back
+    // to any active match: a scheduled booking that has since been placed now
+    // renders on an instant day (status 2) even though its stored booking_type
+    // stays "scheduled", so a strict type match would miss it.
+    return matches.find((b) => b.booking_type === wantType) ?? matches[0] ?? null;
   }
 
   function openEditForSlot(room: ScheduleRoom, time: string, schedule: boolean) {
@@ -912,7 +916,7 @@ export function BrowseRooms({
                             }
                           : {})}
                         className={`border-r border-t border-[color:var(--separator)] bg-white dark:bg-[#0c0e12] outline-none ${
-                          myBooking ? "cursor-pointer" : ""
+                          myBooking ? "my-booking-cell cursor-pointer" : ""
                         }`}
                         style={{ height: SLOT_H }}
                       >
@@ -921,7 +925,7 @@ export function BrowseRooms({
                           style={{ paddingTop: prevBusy ? 0 : 6, paddingBottom: nextBusy ? 0 : 6 }}
                         >
                           <div
-                            className="h-full overflow-hidden px-2"
+                            className={`h-full overflow-hidden px-2 ${myBooking ? "my-booking-fill" : ""}`}
                             style={{
                               backgroundColor: palette.bg,
                               borderLeft: `1px solid ${palette.border}`,
@@ -957,11 +961,6 @@ export function BrowseRooms({
                                     />
                                   )}
                                 </div>
-                                {myBooking && (
-                                  <p className="truncate text-xs" style={{ color: EVENT_MINE.time }}>
-                                    {t}
-                                  </p>
-                                )}
                               </>
                             )}
                           </div>
