@@ -47,6 +47,13 @@ alter table user_profiles alter column theme set default 'system';
 update user_profiles set theme = 'system' where theme is null;
 alter table user_profiles
   add constraint user_profiles_theme_check check (theme in ('system', 'light', 'dark')) not valid;
+-- UI language preference: 'en' English, 'vi' Vietnamese. Defaults to 'vi'.
+alter table user_profiles add column if not exists language text not null default 'vi';
+alter table user_profiles alter column language set default 'vi';
+update user_profiles set language = 'vi' where language is null;
+alter table user_profiles alter column language set not null;
+alter table user_profiles
+  add constraint user_profiles_language_check check (language in ('en', 'vi')) not valid;
 -- Access role. 'admin' sees the full assistant reply (including <think> blocks),
 -- 'user' has them hidden in the UI. Role is managed by service_role only; the
 -- client read policy below never lets a user change their own role.

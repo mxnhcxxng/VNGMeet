@@ -14,6 +14,7 @@ import {
 } from "@gravity-ui/icons";
 import { Button, Dropdown, Label } from "@heroui/react";
 import type { ChatThread } from "@/lib/api";
+import { useT } from "@/app/providers";
 import { BrandIcon } from "./BrandIcon";
 
 export type View = "browse" | "chat" | "settings" | "bookingHistory" | "roomScout";
@@ -37,15 +38,17 @@ function ChatThreadRow({
   onRename?: (threadId: string, title: string) => Promise<void>;
   onDelete?: (threadId: string) => Promise<void>;
 }) {
+  const t = useT();
+  const fallbackTitle = t("sidebar.defaultChatTitle");
   const [editing, setEditing] = useState(false);
-  const [draftTitle, setDraftTitle] = useState(thread.title || "Chat mới");
+  const [draftTitle, setDraftTitle] = useState(thread.title || fallbackTitle);
   const [busy, setBusy] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (!editing) setDraftTitle(thread.title || "Chat mới");
-  }, [editing, thread.title]);
+    if (!editing) setDraftTitle(thread.title || fallbackTitle);
+  }, [editing, thread.title, fallbackTitle]);
 
   useEffect(() => {
     if (editing) {
@@ -56,12 +59,12 @@ function ChatThreadRow({
 
   const startRename = () => {
     if (!onRename || busy) return;
-    setDraftTitle(thread.title || "Chat mới");
+    setDraftTitle(thread.title || fallbackTitle);
     setEditing(true);
   };
 
   const cancelRename = () => {
-    setDraftTitle(thread.title || "Chat mới");
+    setDraftTitle(thread.title || fallbackTitle);
     setEditing(false);
   };
 
@@ -71,7 +74,7 @@ function ChatThreadRow({
       cancelRename();
       return;
     }
-    if (nextTitle === (thread.title || "Chat mới")) {
+    if (nextTitle === (thread.title || fallbackTitle)) {
       setEditing(false);
       return;
     }
@@ -100,7 +103,7 @@ function ChatThreadRow({
       className={`group/thread flex h-10 w-full items-center rounded-full pl-4 pr-1 text-sm font-medium text-[#18181b] dark:text-[#f7f7f7] transition-colors ${
         active ? "bg-[var(--default)]" : "hover:bg-[#f5f5f5] dark:hover:bg-[#22262f]"
       }`}
-      title={thread.title || "Chat mới"}
+      title={thread.title || fallbackTitle}
       onMouseEnter={onPrefetch}
       onFocus={onPrefetch}
     >
@@ -123,7 +126,7 @@ function ChatThreadRow({
           onClick={onClick}
           className="min-w-0 flex-1 truncate text-left outline-none"
         >
-          {thread.title || "Chat mới"}
+          {thread.title || fallbackTitle}
         </button>
       )}
 
@@ -131,7 +134,7 @@ function ChatThreadRow({
         <Dropdown>
           <Button
             isIconOnly
-            aria-label="Chat menu"
+            aria-label={t("sidebar.chatMenu")}
             variant="ghost"
             size="sm"
             isDisabled={busy}
@@ -147,13 +150,17 @@ function ChatThreadRow({
                 if (key === "delete-chat") setConfirmOpen(true);
               }}
             >
-              <Dropdown.Item id="rename-chat" textValue="Rename">
+              <Dropdown.Item id="rename-chat" textValue={t("sidebar.rename")}>
                 <Pencil className="size-4 shrink-0 text-muted" />
-                <Label>Rename</Label>
+                <Label>{t("sidebar.rename")}</Label>
               </Dropdown.Item>
-              <Dropdown.Item id="delete-chat" textValue="Delete" variant="danger">
+              <Dropdown.Item
+                id="delete-chat"
+                textValue={t("common.delete")}
+                variant="danger"
+              >
                 <TrashBin className="size-4 shrink-0 text-danger" />
-                <Label>Delete</Label>
+                <Label>{t("common.delete")}</Label>
               </Dropdown.Item>
             </Dropdown.Menu>
           </Dropdown.Popover>
@@ -169,15 +176,15 @@ function ChatThreadRow({
         >
           <div className="w-full max-w-[420px] rounded-2xl bg-white p-6 shadow-2xl dark:bg-[#0c0e12]">
             <h2 className="text-lg font-semibold text-default-900">
-              Delete chat
+              {t("sidebar.deleteChatTitle")}
             </h2>
             <p className="mt-2 text-sm leading-6 text-default-600">
-              This will permanently delete
+              {t("sidebar.deleteChatBodyPre")}
               {" "}
               <span className="font-medium text-default-900">
-                “{thread.title || "Chat mới"}”
+                “{thread.title || fallbackTitle}”
               </span>
-              . This action cannot be undone.
+              {t("sidebar.deleteChatBodyPost")}
             </p>
             <div className="mt-6 flex items-center justify-end gap-2">
               <Button
@@ -186,7 +193,7 @@ function ChatThreadRow({
                 isDisabled={busy}
                 onPress={() => setConfirmOpen(false)}
               >
-                Cancel
+                {t("common.cancel")}
               </Button>
               <Button
                 variant="danger"
@@ -194,7 +201,7 @@ function ChatThreadRow({
                 isPending={busy}
                 onPress={performDelete}
               >
-                Delete
+                {t("common.delete")}
               </Button>
             </div>
           </div>
@@ -231,7 +238,8 @@ export function Sidebar({
   onRenameThread?: (threadId: string, title: string) => Promise<void>;
   onDeleteThread?: (threadId: string) => Promise<void>;
 }) {
-  const display = username || "Người dùng";
+  const t = useT();
+  const display = username || t("common.user");
   const name = display.replace(/@.*/, "");
   const email = display.includes("@") ? display : "";
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
@@ -254,7 +262,7 @@ export function Sidebar({
           className={`${ROW} ${view === "chat" && !activeThreadId ? "bg-[var(--default)]" : "hover:bg-[#f5f5f5] dark:hover:bg-[#22262f]"}`}
         >
           <PencilToSquare width={16} height={16} />
-          New chat
+          {t("sidebar.newChat")}
         </button>
         <button
           type="button"
@@ -262,7 +270,7 @@ export function Sidebar({
           className={`${ROW} ${view === "browse" ? "bg-[var(--default)]" : "hover:bg-[#f5f5f5] dark:hover:bg-[#22262f]"}`}
         >
           <LayoutHeaderCells width={16} height={16} />
-          Browse Rooms
+          {t("sidebar.browseRooms")}
         </button>
         <button
           type="button"
@@ -270,7 +278,7 @@ export function Sidebar({
           className={`${ROW} ${view === "bookingHistory" ? "bg-[var(--default)]" : "hover:bg-[#f5f5f5] dark:hover:bg-[#22262f]"}`}
         >
           <ClockArrowRotateLeft width={16} height={16} />
-          Booking History
+          {t("sidebar.bookingHistory")}
         </button>
         <button
           type="button"
@@ -278,9 +286,9 @@ export function Sidebar({
           className={`${ROW} ${view === "roomScout" ? "bg-[var(--default)]" : "hover:bg-[#f5f5f5] dark:hover:bg-[#22262f]"}`}
         >
           <Magnifier width={16} height={16} />
-          Room Scout
+          {t("sidebar.roomScout")}
           {scoutingActive && (
-            <span className="relative ml-1 flex size-2" aria-label="Đang quét phòng">
+            <span className="relative ml-1 flex size-2" aria-label={t("sidebar.scoutingActive")}>
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#f05a22] opacity-75" />
               <span className="relative inline-flex size-2 rounded-full bg-[#f05a22]" />
             </span>
@@ -290,7 +298,7 @@ export function Sidebar({
 
       {/* Recents (chat threads) */}
       <div className="mt-3 flex min-h-0 flex-1 flex-col px-4">
-        <div className="px-3 pb-1 pt-3 text-xs font-medium text-[#71717a] dark:text-[#94979c]">Recents</div>
+        <div className="px-3 pb-1 pt-3 text-xs font-medium text-[#71717a] dark:text-[#94979c]">{t("sidebar.recents")}</div>
         <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {(chatThreads ?? []).map((thread) => {
             const active = view === "chat" && activeThreadId === thread.id;
@@ -311,7 +319,7 @@ export function Sidebar({
             );
           })}
           {!(chatThreads ?? []).length && (
-            <div className="px-4 py-2 text-sm text-[#a4a7ae] dark:text-[#94979c]">Chưa có thread</div>
+            <div className="px-4 py-2 text-sm text-[#a4a7ae] dark:text-[#94979c]">{t("sidebar.noChats")}</div>
           )}
         </div>
       </div>
@@ -324,7 +332,7 @@ export function Sidebar({
           className={`${ROW} ${view === "settings" ? "bg-[var(--default)]" : "hover:bg-[#f5f5f5] dark:hover:bg-[#22262f]"}`}
         >
           <Gear width={16} height={16} />
-          Setting
+          {t("sidebar.settings")}
         </button>
 
         <div className="h-px w-full bg-[#e9eaeb] dark:bg-[#373a41]" />
@@ -344,8 +352,8 @@ export function Sidebar({
           <button
             type="button"
             onClick={() => setLogoutConfirmOpen(true)}
-            aria-label="Đăng xuất"
-            title="Đăng xuất"
+            aria-label={t("sidebar.logout")}
+            title={t("sidebar.logout")}
             className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[#71717a] dark:text-[#94979c] transition-colors hover:bg-[#f5f5f5] dark:hover:bg-[#22262f] hover:text-[#18181b] dark:hover:text-[#f7f7f7]"
           >
             <ArrowRightFromSquare width={16} height={16} />
@@ -361,9 +369,9 @@ export function Sidebar({
           }}
         >
           <div className="w-full max-w-[420px] rounded-2xl bg-white p-6 shadow-2xl dark:bg-[#0c0e12]">
-            <h2 className="text-lg font-semibold text-default-900">Log out</h2>
+            <h2 className="text-lg font-semibold text-default-900">{t("sidebar.logoutTitle")}</h2>
             <p className="mt-2 text-sm leading-6 text-default-600">
-              Are you sure you want to log out of VNG Meet?
+              {t("sidebar.logoutBody")}
             </p>
             <div className="mt-6 flex items-center justify-end gap-2">
               <Button
@@ -371,7 +379,7 @@ export function Sidebar({
                 className="rounded-full"
                 onPress={() => setLogoutConfirmOpen(false)}
               >
-                Cancel
+                {t("common.cancel")}
               </Button>
               <Button
                 variant="danger"
@@ -381,7 +389,7 @@ export function Sidebar({
                   onLogout();
                 }}
               >
-                Log out
+                {t("sidebar.logout")}
               </Button>
             </div>
           </div>

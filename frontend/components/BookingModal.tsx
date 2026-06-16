@@ -14,6 +14,7 @@ import {
 } from "@heroui/react";
 import { CircleInfo, Clock } from "@gravity-ui/icons";
 import { api } from "@/lib/api";
+import { useT } from "@/app/providers";
 
 export interface BookingSlot {
   roomEmail: string;
@@ -41,6 +42,7 @@ export function BookingModal({
   userDomain?: string; // email username, used to auto-fill the meeting title
   onBooked: () => void;
 }) {
+  const t = useT();
   const [subject, setSubject] = useState("");
   const [attendees, setAttendees] = useState("");
   const [notes, setNotes] = useState("");
@@ -73,8 +75,24 @@ export function BookingModal({
   // instant bookings, "<Domain>'s Scheduled Meeting" for schedule bookings.
   useEffect(() => {
     if (!isOpen || !slot) return;
-    const kind = slot.schedule ? "Scheduled Meeting" : "Meeting";
-    setSubject(userDomain ? `${userDomain}'s ${kind}` : kind);
+    if (userDomain) {
+      setSubject(
+        t(
+          slot.schedule
+            ? "booking.subjectScheduled"
+            : "booking.subjectInstant",
+          { domain: userDomain },
+        ),
+      );
+    } else {
+      setSubject(
+        t(
+          slot.schedule
+            ? "booking.subjectScheduledNoName"
+            : "booking.subjectInstantNoName",
+        ),
+      );
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, slot, userDomain]);
 
@@ -100,7 +118,7 @@ export function BookingModal({
 
   const submit = async () => {
     if (!subject.trim()) {
-      setError("Vui lòng nhập tiêu đề cuộc họp.");
+      setError(t("booking.titleRequired"));
       return;
     }
     setLoading(true);
@@ -121,8 +139,8 @@ export function BookingModal({
           .filter(Boolean),
         body: notes.trim() || undefined,
       });
-      toast.success("Booking created", {
-        description: "Your room has been booked successfully.",
+      toast.success(t("booking.created"), {
+        description: t("booking.createdDesc"),
       });
       onBooked();
       clearDraft();
@@ -130,17 +148,16 @@ export function BookingModal({
     } catch (e: any) {
       const msg = String(e?.message ?? e);
       if (msg === "UNAUTHENTICATED") {
-        toast.danger("Session expired", {
-          description: "Please sign in again to continue.",
+        toast.danger(t("booking.sessionExpired"), {
+          description: t("booking.sessionExpiredDesc"),
         });
       } else if (msg.startsWith("403")) {
-        toast.danger("Permission required", {
-          description:
-            "Calendar write access (Calendars.ReadWrite) is needed. Please sign in again to grant it.",
+        toast.danger(t("booking.permissionRequired"), {
+          description: t("booking.permissionDesc"),
         });
       } else {
-        toast.danger("Booking failed", {
-          description: "Could not book the room. Please try again.",
+        toast.danger(t("booking.failed"), {
+          description: t("booking.failedDesc"),
         });
       }
     } finally {
@@ -174,7 +191,7 @@ export function BookingModal({
             {slot.schedule && (
               <div className="absolute bottom-2 left-2 inline-flex items-center gap-1 rounded-md bg-[var(--accent)] px-2 py-1 text-sm font-medium leading-5 text-[var(--accent-foreground)] shadow-sm">
                 <Clock width={16} height={16} />
-                <span>Scheduled Booking</span>
+                <span>{t("booking.scheduledBadge")}</span>
               </div>
             )}
           </div>
@@ -189,10 +206,10 @@ export function BookingModal({
         {/* Form */}
         <div className="grid gap-4 px-6">
           <TextField fullWidth isRequired>
-            <Label>Meeting Title</Label>
+            <Label>{t("booking.meetingTitle")}</Label>
             <Input
               variant="secondary"
-              placeholder="Meeting title"
+              placeholder={t("booking.meetingTitlePlaceholder")}
               value={subject}
               onChange={(event) => setSubject(event.target.value)}
             />
@@ -200,7 +217,7 @@ export function BookingModal({
 
           <div className="grid grid-cols-2 gap-4">
             <TextField fullWidth isDisabled>
-              <Label>Start time {req}</Label>
+              <Label>{t("booking.startTime")} {req}</Label>
               <Input variant="secondary" value={slot.startTime} readOnly />
             </TextField>
 
@@ -209,16 +226,16 @@ export function BookingModal({
               selectedKey={endTime || null}
               onSelectionChange={(key) => setEndTime((key as string) ?? "")}
             >
-              <Label>End time {req}</Label>
+              <Label>{t("booking.endTime")} {req}</Label>
               <Select.Trigger>
                 <Select.Value />
                 <Select.Indicator />
               </Select.Trigger>
               <Select.Popover>
                 <ListBox>
-                  {endOptions.map((t) => (
-                    <ListBoxItem key={t} id={t}>
-                      {t}
+                  {endOptions.map((opt) => (
+                    <ListBoxItem key={opt} id={opt}>
+                      {opt}
                     </ListBoxItem>
                   ))}
                 </ListBox>
@@ -227,20 +244,20 @@ export function BookingModal({
           </div>
 
           <TextField fullWidth>
-            <Label>Attendees</Label>
+            <Label>{t("booking.attendees")}</Label>
             <Input
               variant="secondary"
-              placeholder='Invite required attendees, separate by a comma ","'
+              placeholder={t("booking.attendeesPlaceholder")}
               value={attendees}
               onChange={(event) => setAttendees(event.target.value)}
             />
           </TextField>
 
           <TextField fullWidth>
-            <Label>Description</Label>
+            <Label>{t("booking.description")}</Label>
             <TextArea
               variant="secondary"
-              placeholder="Meeting description"
+              placeholder={t("booking.descriptionPlaceholder")}
               value={notes}
               onChange={(event) => setNotes(event.target.value)}
             />
@@ -250,15 +267,11 @@ export function BookingModal({
             <div className="grid gap-3 pt-1">
               <div className="flex items-start gap-2 text-sm leading-5 text-default-600">
                 <CircleInfo width={16} height={16} className="mt-0.5 shrink-0 text-[var(--accent)]" />
-                <p>
-                  The schedule is not open for booking yet. We&apos;ll automatically book this room for you as soon as booking becomes available.
-                </p>
+                <p>{t("booking.scheduleInfo1")}</p>
               </div>
               <div className="flex items-start gap-2 text-sm leading-5 text-default-600">
                 <CircleInfo width={16} height={16} className="mt-0.5 shrink-0 text-[var(--accent)]" />
-                <p>
-                  To ensure fairness for everyone, each user can have only one active scheduled booking at a time.
-                </p>
+                <p>{t("booking.scheduleInfo2")}</p>
               </div>
             </div>
           )}
@@ -274,10 +287,10 @@ export function BookingModal({
             onPress={onClose}
             isDisabled={loading}
           >
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button className="flex-1 rounded-full" onPress={submit} isPending={loading}>
-            Book
+            {t("booking.book")}
           </Button>
         </div>
       </div>

@@ -32,25 +32,34 @@ import {
   type RoomScout as RoomScoutRow,
   type UserProfileOption,
 } from "@/lib/api";
+import { useT } from "@/app/providers";
+import type { TFunction, TranslationKey } from "@/lib/i18n";
 import { BrandIcon } from "./BrandIcon";
 
-const SCOUT_SUBTITLE =
-  "We'll check for available rooms every 30 minutes and notify you by email when a matching room is found.";
+const DURATION_VALUES = ["30", "60", "90", "120", "150", "180"] as const;
+const DURATION_KEY: Record<string, TranslationKey> = {
+  "30": "scout.dur30",
+  "60": "scout.dur60",
+  "90": "scout.dur90",
+  "120": "scout.dur120",
+  "150": "scout.dur150",
+  "180": "scout.dur180",
+};
 
-const DURATION_OPTIONS = [
-  { value: "30", label: "30 min" },
-  { value: "60", label: "1 hour" },
-  { value: "90", label: "1.5 hours" },
-  { value: "120", label: "2 hours" },
-  { value: "150", label: "2.5 hours" },
-  { value: "180", label: "3 hours" },
-];
+const CAPACITY_VALUES: CapacitySize[] = ["small", "medium", "large"];
+const CAPACITY_KEY: Record<CapacitySize, TranslationKey> = {
+  small: "scout.capSmall",
+  medium: "scout.capMedium",
+  large: "scout.capLarge",
+};
 
-const CAPACITY_OPTIONS: { value: CapacitySize; label: string }[] = [
-  { value: "small", label: "Small (≤4)" },
-  { value: "medium", label: "Medium (5–12)" },
-  { value: "large", label: "Large (13+)" },
-];
+function durationOptions(t: TFunction) {
+  return DURATION_VALUES.map((v) => ({ value: v, label: t(DURATION_KEY[v]) }));
+}
+
+function capacityOptions(t: TFunction): { value: CapacitySize; label: string }[] {
+  return CAPACITY_VALUES.map((v) => ({ value: v, label: t(CAPACITY_KEY[v]) }));
+}
 
 // Business hours 09:00–18:00, 30-minute steps (matches backend slot_minutes).
 const TIME_OPTIONS = (() => {
@@ -66,13 +75,14 @@ function timeToMinutes(value: string) {
   return Number(h) * 60 + Number(m);
 }
 
-function durationLabel(minutes: number) {
-  return DURATION_OPTIONS.find((o) => o.value === String(minutes))?.label ?? `${minutes} min`;
+function durationLabel(t: TFunction, minutes: number) {
+  const key = DURATION_KEY[String(minutes)];
+  return key ? t(key) : t("scout.durFallback", { n: minutes });
 }
 
-function capacityLabel(size?: CapacitySize | null) {
-  if (!size) return "Any";
-  return CAPACITY_OPTIONS.find((o) => o.value === size)?.label ?? size;
+function capacityLabel(t: TFunction, size?: CapacitySize | null) {
+  if (!size) return t("scout.capAny");
+  return CAPACITY_KEY[size] ? t(CAPACITY_KEY[size]) : size;
 }
 
 function pickRandom<T>(list: T[]): T | undefined {
@@ -93,6 +103,7 @@ export function RoomScout({
   roomThumbnails?: string[];
   onActiveChange?: (active: boolean) => void;
 }) {
+  const t = useT();
   const [scouts, setScouts] = useState<RoomScoutRow[]>([]);
   const [canSendMail, setCanSendMail] = useState(true);
   const [loading, setLoading] = useState(true);
@@ -104,8 +115,8 @@ export function RoomScout({
       setCanSendMail(res.can_send_mail);
       onActiveChange?.(res.scouts.some((s) => s.status === "active"));
     } catch (e: any) {
-      toast.danger("Could not load Room Scout", {
-        description: e.message === "UNAUTHENTICATED" ? "Please sign in again." : e.message,
+      toast.danger(t("scout.loadFailed"), {
+        description: e.message === "UNAUTHENTICATED" ? t("scout.loadFailedAuth") : e.message,
       });
     } finally {
       setLoading(false);
@@ -155,9 +166,6 @@ export function RoomScout({
   );
 }
 
-const GUIDE_SUBTITLE =
-  "We'll check for available rooms every 30 minutes and send you an Outlook email when a matching room becomes available.";
-
 const GRAPH_EXPLORER_URL =
   "https://developer.microsoft.com/en-us/graph/graph-explorer";
 const SEND_MAIL_URL =
@@ -165,55 +173,60 @@ const SEND_MAIL_URL =
 
 type GuideStep = { image: string; body: ReactNode; copy?: string };
 
-const GUIDE_STEPS: GuideStep[] = [
-  {
-    image: "/scout-steps/step-1.png",
-    copy: GRAPH_EXPLORER_URL,
-    body: (
-      <>
-        Go to{" "}
-        <a
-          href={GRAPH_EXPLORER_URL}
-          target="_blank"
-          rel="noreferrer"
-          className="underline [text-underline-position:from-font] hover:text-default-900"
-        >
-          Microsoft Graph Explorer.
-        </a>
-      </>
-    ),
-  },
-  {
-    image: "/scout-steps/step-2.png",
-    copy: SEND_MAIL_URL,
-    body: (
-      <>
-        Change the request method to <b className="font-semibold">POST</b> and
-        enter the following URL:
-      </>
-    ),
-  },
-  {
-    image: "/scout-steps/step-3.png",
-    body: (
-      <>
-        Click <b className="font-semibold">Run Query</b>, then open the{" "}
-        <b className="font-semibold">Modify Permissions</b> tab and{" "}
-        <b className="font-semibold">Consent</b> to the Mail.Send permission.
-      </>
-    ),
-  },
-  {
-    image: "/scout-steps/step-4.png",
-    body: (
-      <>
-        Return to <b className="font-semibold">VNG Meet</b> and sign in again{" "}
-        <b className="font-semibold">using a new access token</b>. Once
-        completed, Scouting will be ready to send Outlook email notifications.
-      </>
-    ),
-  },
-];
+function buildGuideSteps(t: TFunction): GuideStep[] {
+  return [
+    {
+      image: "/scout-steps/step-1.png",
+      copy: GRAPH_EXPLORER_URL,
+      body: (
+        <>
+          {t("scout.guideStep1")}{" "}
+          <a
+            href={GRAPH_EXPLORER_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="underline [text-underline-position:from-font] hover:text-default-900"
+          >
+            {t("scout.graphLink")}
+          </a>
+        </>
+      ),
+    },
+    {
+      image: "/scout-steps/step-2.png",
+      copy: SEND_MAIL_URL,
+      body: (
+        <>
+          {t("scout.guideStep2a")} <b className="font-semibold">POST</b>{" "}
+          {t("scout.guideStep2b")}
+        </>
+      ),
+    },
+    {
+      image: "/scout-steps/step-3.png",
+      body: (
+        <>
+          {t("scout.guideStep3a")} <b className="font-semibold">Run Query</b>
+          {t("scout.guideStep3b")}{" "}
+          <b className="font-semibold">Modify Permissions</b>{" "}
+          {t("scout.guideStep3c")} <b className="font-semibold">Consent</b>{" "}
+          {t("scout.guideStep3d")}
+        </>
+      ),
+    },
+    {
+      image: "/scout-steps/step-4.png",
+      body: (
+        <>
+          {t("scout.guideStep4a")} <b className="font-semibold">VNG Meet</b>{" "}
+          {t("scout.guideStep4b")}{" "}
+          <b className="font-semibold">{t("scout.guideStep4Bold")}</b>
+          {t("scout.guideStep4c")}
+        </>
+      ),
+    },
+  ];
+}
 
 function GuideArrow({
   direction,
@@ -224,13 +237,14 @@ function GuideArrow({
   disabled: boolean;
   onPress: () => void;
 }) {
+  const t = useT();
   const Icon = direction === "left" ? ChevronLeft : ChevronRight;
   return (
     <Button
       isIconOnly
       variant="secondary"
       className="rounded-full"
-      aria-label={direction === "left" ? "Previous step" : "Next step"}
+      aria-label={direction === "left" ? t("scout.guidePrevStep") : t("scout.guideNextStep")}
       isDisabled={disabled}
       onPress={onPress}
     >
@@ -240,6 +254,7 @@ function GuideArrow({
 }
 
 function StepCopyButton({ text }: { text: string }) {
+  const t = useT();
   const [copied, setCopied] = useState(false);
 
   const copy = async () => {
@@ -248,14 +263,14 @@ function StepCopyButton({ text }: { text: string }) {
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1500);
     } catch {
-      toast.danger("Could not copy to clipboard");
+      toast.danger(t("scout.copyFailed"));
     }
   };
 
   return (
     <button
       type="button"
-      aria-label={copied ? "Copied" : "Copy link"}
+      aria-label={copied ? t("scout.copied") : t("scout.copyLink")}
       onClick={copy}
       className="shrink-0 rounded-md p-1 text-default-500 transition hover:bg-default-100 hover:text-default-700"
     >
@@ -269,6 +284,8 @@ function StepCopyButton({ text }: { text: string }) {
 }
 
 function ScoutPermissionGuide({ userName }: { userName?: string }) {
+  const t = useT();
+  const GUIDE_STEPS = buildGuideSteps(t);
   const [stepIndex, setStepIndex] = useState(0);
   const total = GUIDE_STEPS.length;
   const step = GUIDE_STEPS[stepIndex];
@@ -280,18 +297,15 @@ function ScoutPermissionGuide({ userName }: { userName?: string }) {
         <Magnifier className="size-7 text-[#F05A22]" />
       </div>
       <h1 className="mt-3 text-2xl font-bold text-default-900">
-        Hi, {userName || "there"}
+        {t("scout.greeting", { name: userName || t("scout.greetingThere") })}
       </h1>
       <p className="mt-1.5 text-sm leading-5 text-default-500">
-        {GUIDE_SUBTITLE}
+        {t("scout.guideSubtitle")}
       </p>
 
       <div className="mt-5 flex items-start gap-2 rounded-xl bg-[#fee7de] p-3 text-sm leading-6 text-[#535862] dark:bg-[#3B1202] dark:text-[#fee7de]">
         <CircleInfo className="mt-0.5 size-4 shrink-0 text-[#F05A22]" />
-        <span>
-          Scouting requires email permission so we can notify you when a room
-          becomes available. Please follow the steps below to grant access.
-        </span>
+        <span>{t("scout.permissionInfo")}</span>
       </div>
 
       {/* Fixed-ratio frame so the height stays reserved while the next image
@@ -300,7 +314,7 @@ function ScoutPermissionGuide({ userName }: { userName?: string }) {
         <img
           key={step.image}
           src={step.image}
-          alt={`Step ${stepIndex + 1} of ${total}`}
+          alt={t("scout.stepImageAlt", { current: stepIndex + 1, total })}
           className="scout-thumb-fade absolute inset-0 h-full w-full object-cover"
         />
       </div>
@@ -312,7 +326,7 @@ function ScoutPermissionGuide({ userName }: { userName?: string }) {
             variant="secondary"
             className="w-fit text-xs font-medium text-[#F05A22]"
           >
-            Step {stepIndex + 1} of {total}
+            {t("scout.stepBadge", { current: stepIndex + 1, total })}
           </Chip>
           {/* Stack all four step bodies in one grid cell so the block keeps the
               height of the tallest step — switching steps never shifts layout. */}
@@ -367,6 +381,7 @@ function ScoutForm({
   officeOptions: UserProfileOption[];
   onCreated: () => void | Promise<void>;
 }) {
+  const t = useT();
   const [office, setOffice] = useState(userOffice || "");
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
@@ -380,36 +395,36 @@ function ScoutForm({
   }, [userOffice]);
 
   const startOptions = useMemo(
-    () => TIME_OPTIONS.slice(0, -1).map((t) => ({ value: t, label: t })),
+    () => TIME_OPTIONS.slice(0, -1).map((tm) => ({ value: tm, label: tm })),
     [],
   );
   const endOptions = useMemo(() => {
     const after = startTime ? timeToMinutes(startTime) : -Infinity;
-    return TIME_OPTIONS.filter((t) => timeToMinutes(t) > after).map((t) => ({
-      value: t,
-      label: t,
+    return TIME_OPTIONS.filter((tm) => timeToMinutes(tm) > after).map((tm) => ({
+      value: tm,
+      label: tm,
     }));
   }, [startTime]);
 
   const submit = async () => {
     if (!office) {
-      toast.warning("Please choose an office.");
+      toast.warning(t("scout.chooseOffice"));
       return;
     }
     if (!startTime || !endTime) {
-      toast.warning("Please choose a scout range.");
+      toast.warning(t("scout.chooseRange"));
       return;
     }
     if (!duration) {
-      toast.warning("Please choose a duration.");
+      toast.warning(t("scout.chooseDuration"));
       return;
     }
     if (!capacity) {
-      toast.warning("Please choose a capacity.");
+      toast.warning(t("scout.chooseCapacity"));
       return;
     }
     if (timeToMinutes(endTime) - timeToMinutes(startTime) < Number(duration)) {
-      toast.warning("Scout range must be at least as long as the duration.");
+      toast.warning(t("scout.rangeTooShort"));
       return;
     }
     setSaving(true);
@@ -422,12 +437,12 @@ function ScoutForm({
         ignore_lunch_break: ignoreLunch,
         office: office || null,
       });
-      toast.success("Room Scout started", {
-        description: "We'll email you when a matching room opens up.",
+      toast.success(t("scout.started"), {
+        description: t("scout.startedDesc"),
       });
       await onCreated();
     } catch (e: any) {
-      toast.danger("Could not start Room Scout", { description: e.message });
+      toast.danger(t("scout.startFailed"), { description: e.message });
     } finally {
       setSaving(false);
     }
@@ -440,24 +455,24 @@ function ScoutForm({
         <Magnifier className="size-7 text-[#F05A22]" />
       </div>
       <h1 className="mt-3 text-2xl font-bold text-default-900">
-        Hi, {userName || "there"}
+        {t("scout.greeting", { name: userName || t("scout.greetingThere") })}
       </h1>
-      <p className="mt-1.5 text-sm leading-5 text-default-500">{SCOUT_SUBTITLE}</p>
+      <p className="mt-1.5 text-sm leading-5 text-default-500">{t("scout.subtitle")}</p>
 
       <div className="mt-6 grid gap-4">
         <SelectField
-          label="Office"
-          placeholder="Select Office"
+          label={t("scout.office")}
+          placeholder={t("scout.selectOffice")}
           value={office}
           onChange={setOffice}
           options={officeOptions.map((o) => ({ value: o.value, label: o.label }))}
         />
 
         <div>
-          <Label className="mb-1.5 block">Scout range</Label>
+          <Label className="mb-1.5 block">{t("scout.scoutRange")}</Label>
           <div className="grid grid-cols-2 gap-4">
             <SelectField
-              placeholder="Start Time"
+              placeholder={t("scout.startTime")}
               value={startTime}
               onChange={(value) => {
                 setStartTime(value);
@@ -469,7 +484,7 @@ function ScoutForm({
               maxRows={5}
             />
             <SelectField
-              placeholder="End Time"
+              placeholder={t("scout.endTime")}
               value={endTime}
               onChange={setEndTime}
               options={endOptions}
@@ -488,34 +503,34 @@ function ScoutForm({
           </Checkbox.Control>
           <Checkbox.Content>
             <span className="text-sm font-medium text-default-700">
-              Ignore lunch break
+              {t("scout.ignoreLunch")}
             </span>
           </Checkbox.Content>
         </Checkbox>
 
         <SelectField
-          label="Duration"
-          placeholder="Select Duration"
+          label={t("scout.duration")}
+          placeholder={t("scout.selectDuration")}
           value={duration}
           onChange={setDuration}
-          options={DURATION_OPTIONS}
+          options={durationOptions(t)}
         />
 
         <SelectField
-          label="Capacity"
-          placeholder="Select Capacity"
+          label={t("scout.capacity")}
+          placeholder={t("scout.selectCapacity")}
           value={capacity}
           onChange={setCapacity}
-          options={CAPACITY_OPTIONS}
+          options={capacityOptions(t)}
         />
 
         <div className="flex items-start gap-1.5 text-sm leading-5 text-default-500">
           <CircleInfo className="mt-0.5 size-4 shrink-0 text-[#F05A22]" />
-          <span>Room scouting is currently limited to same-day bookings.</span>
+          <span>{t("scout.sameDayNote")}</span>
         </div>
 
         <Button className="mt-2 w-full rounded-full" onPress={submit} isPending={saving}>
-          Start Room Scout
+          {t("scout.start")}
         </Button>
       </div>
     </div>
@@ -531,6 +546,7 @@ function ScoutingCard({
   thumbnails: string[];
   onChanged: () => void | Promise<void>;
 }) {
+  const t = useT();
   const [busy, setBusy] = useState<"cancel" | "found" | null>(null);
 
   // Random thumbnail that crossfades to another random one every 5s.
@@ -541,18 +557,18 @@ function ScoutingCard({
     if (thumbnails.length === 0) return;
     if (!pair.cur) setPair({ cur: pickRandom(thumbnails) });
     if (thumbnails.length < 2) return;
-    const t = setInterval(() => {
+    const id = setInterval(() => {
       setPair((p) => ({ cur: pickRandom(thumbnails) ?? p.cur, prev: p.cur }));
     }, 5000);
-    return () => clearInterval(t);
+    return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [thumbnails]);
 
   // Sequential blinking dots: "." → ".." → "..." → repeat.
   const [dots, setDots] = useState(1);
   useEffect(() => {
-    const t = setInterval(() => setDots((d) => (d % 3) + 1), 450);
-    return () => clearInterval(t);
+    const id = setInterval(() => setDots((d) => (d % 3) + 1), 450);
+    return () => clearInterval(id);
   }, []);
 
   const stop = async (kind: "cancel" | "found") => {
@@ -560,15 +576,15 @@ function ScoutingCard({
     try {
       await api.stopRoomScout(scout.id, kind === "found" ? "success" : "canceled");
       if (kind === "found") {
-        toast.success("Nice! Room Scout stopped", {
-          description: "Glad you found a room.",
+        toast.success(t("scout.stopFound"), {
+          description: t("scout.stopFoundDesc"),
         });
       } else {
-        toast.success("Room Scout cancelled");
+        toast.success(t("scout.stopCancelled"));
       }
       await onChanged();
     } catch (e: any) {
-      toast.danger("Could not stop Room Scout", { description: e.message });
+      toast.danger(t("scout.stopFailed"), { description: e.message });
       setBusy(null);
     }
   };
@@ -589,41 +605,41 @@ function ScoutingCard({
           <img
             key={pair.cur}
             src={pair.cur}
-            alt="Scouting room"
+            alt={t("scout.scoutingAlt")}
             className="scout-thumb-fade absolute inset-0 h-full w-full object-cover"
           />
         ) : (
           <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-primary to-secondary text-2xl font-bold text-white">
-            Room Scout
+            {t("scout.cardTitle")}
           </div>
         )}
       </div>
 
       <h1 className="mt-5 text-2xl font-bold text-default-900">
-        Scouting
+        {t("scout.scouting")}
         <span className="ml-0.5 inline-block w-6 text-left align-baseline">
           {".".repeat(dots)}
         </span>
       </h1>
-      <p className="mt-1.5 text-sm leading-5 text-default-500">{SCOUT_SUBTITLE}</p>
+      <p className="mt-1.5 text-sm leading-5 text-default-500">{t("scout.subtitle")}</p>
 
       <dl className="mt-5 grid gap-2.5 text-sm">
-        <DetailRow label="Office" value={scout.office || "All"} />
-        <DetailRow label="Duration" value={durationLabel(scout.duration_minutes)} />
+        <DetailRow label={t("scout.office")} value={scout.office || t("scout.allOffices")} />
+        <DetailRow label={t("scout.duration")} value={durationLabel(t, scout.duration_minutes)} />
         <DetailRow
-          label="Scout Range"
+          label={t("scout.scoutRangeLabel")}
           value={
             scout.scout_start_time && scout.scout_end_time
               ? `${scout.scout_start_time} - ${scout.scout_end_time}`
               : "-"
           }
         />
-        <DetailRow label="Capacity" value={capacityLabel(scout.capacity_size)} />
+        <DetailRow label={t("scout.capacity")} value={capacityLabel(t, scout.capacity_size)} />
       </dl>
 
       <div className="mt-4 flex items-start gap-1.5 text-sm leading-5 text-default-500">
         <CircleInfo className="mt-0.5 size-4 shrink-0 text-[#F05A22]" />
-        <span>Room scouting is currently limited to same-day bookings.</span>
+        <span>{t("scout.sameDayNote")}</span>
       </div>
 
       <div className="mt-5 flex items-center gap-2">
@@ -634,7 +650,7 @@ function ScoutingCard({
           isDisabled={busy === "found"}
           onPress={() => stop("cancel")}
         >
-          Cancel Scouting
+          {t("scout.cancelScouting")}
         </Button>
         <Button
           className="flex-1 rounded-full"
@@ -642,7 +658,7 @@ function ScoutingCard({
           isDisabled={busy === "cancel"}
           onPress={() => stop("found")}
         >
-          I already found a room
+          {t("scout.foundRoom")}
         </Button>
       </div>
     </div>

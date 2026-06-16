@@ -21,41 +21,27 @@ import {
 } from "@heroui/react";
 import { ArrowsRotateRight, Ban, Magnifier, Pencil } from "@gravity-ui/icons";
 import { api, type Booking } from "@/lib/api";
+import { useT } from "@/app/providers";
+import type { TFunction, TranslationKey } from "@/lib/i18n";
 import { EditBookingModal } from "./EditBookingModal";
 
-const STATUS: Record<
+const STATUS_COLOR: Record<
   Booking["status"],
-  { label: string; color: "success" | "warning" | "danger" | "default" }
+  "success" | "warning" | "danger" | "default"
 > = {
-  ok: { label: "Success", color: "success" },
-  pending: { label: "Pending", color: "warning" },
-  failed: { label: "Failed", color: "danger" },
-  canceled: { label: "Canceled", color: "default" },
+  ok: "success",
+  pending: "warning",
+  failed: "danger",
+  canceled: "default",
 };
 
-// Mock filter options — wire to the backend later.
-const TIME_RANGE_OPTS = [
-  { value: "all", label: "All" },
-  { value: "this_week", label: "This week" },
-  { value: "this_month", label: "This month" },
-];
-const STATUS_OPTS = [
-  { value: "all", label: "All" },
-  { value: "ok", label: "Success" },
-  { value: "pending", label: "Pending" },
-  { value: "failed", label: "Failed" },
-  { value: "canceled", label: "Canceled" },
-];
-const TYPE_OPTS = [
-  { value: "all", label: "All" },
-  { value: "instant", label: "Instant" },
-  { value: "scheduled", label: "Scheduled" },
-];
-const METHOD_OPTS = [
-  { value: "all", label: "All" },
-  { value: "manual", label: "Manual" },
-  { value: "chatbot", label: "Chatbot" },
-];
+const STATUS_LABEL_KEY: Record<Booking["status"], TranslationKey> = {
+  ok: "bh.statusSuccess",
+  pending: "bh.statusPending",
+  failed: "bh.statusFailed",
+  canceled: "bh.statusCanceled",
+};
+
 const PAGE_SIZE_OPTS = [
   { value: "10", label: "10" },
   { value: "20", label: "20" },
@@ -160,6 +146,29 @@ function withinTimeRange(dateStr: string, range: string): boolean {
 
 // Placeholder layout — uses HeroUI's table as-is. Styling to be refined later.
 export function BookingHistory() {
+  const t = useT();
+  const TIME_RANGE_OPTS = [
+    { value: "all", label: t("bh.all") },
+    { value: "this_week", label: t("bh.thisWeek") },
+    { value: "this_month", label: t("bh.thisMonth") },
+  ];
+  const STATUS_OPTS = [
+    { value: "all", label: t("bh.all") },
+    { value: "ok", label: t("bh.statusSuccess") },
+    { value: "pending", label: t("bh.statusPending") },
+    { value: "failed", label: t("bh.statusFailed") },
+    { value: "canceled", label: t("bh.statusCanceled") },
+  ];
+  const TYPE_OPTS = [
+    { value: "all", label: t("bh.all") },
+    { value: "instant", label: t("bh.typeInstant") },
+    { value: "scheduled", label: t("bh.typeScheduled") },
+  ];
+  const METHOD_OPTS = [
+    { value: "all", label: t("bh.all") },
+    { value: "manual", label: t("bh.methodManual") },
+    { value: "chatbot", label: t("bh.methodChatbot") },
+  ];
   const [bookings, setBookings] = useState<Booking[]>(cachedBookings ?? []);
   const [loading, setLoading] = useState(cachedBookings === null);
   const [error, setError] = useState<string | null>(null);
@@ -192,11 +201,11 @@ export function BookingHistory() {
       setBookings(res.bookings);
     } catch (e: any) {
       const expired = e.message === "UNAUTHENTICATED";
-      setError(expired ? "Your session has expired." : e.message);
-      toast.danger("Failed to load bookings", {
+      setError(expired ? t("bh.sessionExpired") : e.message);
+      toast.danger(t("bh.loadFailed"), {
         description: expired
-          ? "Please sign in again to continue."
-          : "Could not load your bookings. Please try again.",
+          ? t("bh.loadFailedAuthDesc")
+          : t("bh.loadFailedDesc"),
       });
     } finally {
       setLoading(false);
@@ -228,20 +237,20 @@ export function BookingHistory() {
     try {
       await api.cancelBooking(canceling.id);
       setCanceling(null);
-      toast.success("Booking canceled", {
-        description: "The meeting has been canceled successfully.",
+      toast.success(t("bh.canceled"), {
+        description: t("bh.canceledDesc"),
       });
       await load();
     } catch (e: any) {
       const msg = String(e?.message ?? e);
       const expired = msg === "UNAUTHENTICATED";
       setCancelError(
-        expired ? "Bạn cần đăng nhập lại." : `Huỷ lịch thất bại: ${msg}`
+        expired ? t("bh.cancelErrorAuth") : t("bh.cancelErrorGeneric", { msg })
       );
-      toast.danger("Cancel failed", {
+      toast.danger(t("bh.cancelFailed"), {
         description: expired
-          ? "Please sign in again to continue."
-          : "Could not cancel the booking. Please try again.",
+          ? t("bh.cancelFailedAuthDesc")
+          : t("bh.cancelFailedDesc"),
       });
     } finally {
       setCancelLoading(false);
@@ -278,25 +287,25 @@ export function BookingHistory() {
       {/* Filter bar */}
       <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
         <FilterSelect
-          label="Time range"
+          label={t("bh.filterTimeRange")}
           value={timeRange}
           onChange={setTimeRange}
           options={TIME_RANGE_OPTS}
         />
         <FilterSelect
-          label="Status"
+          label={t("bh.filterStatus")}
           value={status}
           onChange={setStatus}
           options={STATUS_OPTS}
         />
         <FilterSelect
-          label="Booking Type"
+          label={t("bh.filterType")}
           value={bookingType}
           onChange={setBookingType}
           options={TYPE_OPTS}
         />
         <FilterSelect
-          label="Booking Method"
+          label={t("bh.filterMethod")}
           value={method}
           onChange={setMethod}
           options={METHOD_OPTS}
@@ -305,7 +314,7 @@ export function BookingHistory() {
           isIconOnly
           size="sm"
           variant="tertiary"
-          aria-label="Refresh"
+          aria-label={t("bh.refresh")}
           className="ml-auto rounded-full"
           onPress={load}
           isDisabled={loading}
@@ -323,7 +332,7 @@ export function BookingHistory() {
       {loading ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-3">
           <Spinner />
-          <span className="text-sm text-default-500">Loading history...</span>
+          <span className="text-sm text-default-500">{t("bh.loading")}</span>
         </div>
       ) : (
         <>
@@ -335,25 +344,25 @@ export function BookingHistory() {
                 className="mb-2 text-[#a4a7ae] dark:text-[#94979c]"
               />
               <p className="text-base font-semibold text-[#181d27] dark:text-[#f7f7f7]">
-                No results found
+                {t("bh.noResults")}
               </p>
               <p className="text-sm text-[#71717a] dark:text-[#94979c]">
-                Try adjusting your search or filters
+                {t("bh.noResultsHint")}
               </p>
             </EmptyState>
           ) : (
             <div className="min-h-0 flex-1 overflow-auto">
               <Table variant="secondary">
-                <TableContent aria-label="Booking history">
+                <TableContent aria-label={t("bh.tableLabel")}>
                   <TableHeader>
-                    <TableColumn isRowHeader>Date</TableColumn>
-                    <TableColumn>Room</TableColumn>
-                    <TableColumn>Time</TableColumn>
-                    <TableColumn>Subject</TableColumn>
-                    <TableColumn>Type</TableColumn>
-                    <TableColumn>Method</TableColumn>
-                    <TableColumn>Status</TableColumn>
-                    <TableColumn>Actions</TableColumn>
+                    <TableColumn isRowHeader>{t("bh.colDate")}</TableColumn>
+                    <TableColumn>{t("bh.colRoom")}</TableColumn>
+                    <TableColumn>{t("bh.colTime")}</TableColumn>
+                    <TableColumn>{t("bh.colSubject")}</TableColumn>
+                    <TableColumn>{t("bh.colType")}</TableColumn>
+                    <TableColumn>{t("bh.colMethod")}</TableColumn>
+                    <TableColumn>{t("bh.colStatus")}</TableColumn>
+                    <TableColumn>{t("bh.colActions")}</TableColumn>
                   </TableHeader>
                   <TableBody items={pageItems}>
                   {(b) => (
@@ -369,18 +378,24 @@ export function BookingHistory() {
                         </span>
                       </TableCell>
                       <TableCell>
-                        {b.booking_type === "scheduled" ? "Scheduled" : "Instant"}
+                        {b.booking_type === "scheduled"
+                          ? t("bh.typeScheduled")
+                          : t("bh.typeInstant")}
                       </TableCell>
                       <TableCell>
-                        {b.method === "chatbot" ? "Chatbot" : "Manual"}
+                        {b.method === "chatbot"
+                          ? t("bh.methodChatbot")
+                          : t("bh.methodManual")}
                       </TableCell>
                       <TableCell>
                         <Chip
                           size="sm"
                           variant="soft"
-                          color={STATUS[b.status]?.color ?? "warning"}
+                          color={STATUS_COLOR[b.status] ?? "warning"}
                         >
-                          {STATUS[b.status]?.label ?? b.status}
+                          {STATUS_LABEL_KEY[b.status]
+                            ? t(STATUS_LABEL_KEY[b.status])
+                            : b.status}
                         </Chip>
                       </TableCell>
                       <TableCell>
@@ -395,7 +410,7 @@ export function BookingHistory() {
                             isIconOnly
                             size="sm"
                             variant="ghost"
-                            aria-label="Edit booking"
+                            aria-label={t("bh.editBooking")}
                             className="rounded-full"
                             isDisabled={actionsDisabled}
                             onPress={() => setEditing(b)}
@@ -406,7 +421,7 @@ export function BookingHistory() {
                             isIconOnly
                             size="sm"
                             variant="ghost"
-                            aria-label="Cancel booking"
+                            aria-label={t("bh.cancelBooking")}
                             className="rounded-full text-danger"
                             isDisabled={actionsDisabled}
                             onPress={() => {
@@ -432,9 +447,9 @@ export function BookingHistory() {
           <Pagination>
             <Pagination.Summary>
               <div className="flex items-center gap-2 text-sm text-[#71717a] dark:text-[#94979c]">
-                <span>Showing</span>
+                <span>{t("bh.showing")}</span>
                 <Select
-                  aria-label="Rows per page"
+                  aria-label={t("bh.rowsPerPage")}
                   variant="secondary"
                   selectedKey={String(pageSize)}
                   onSelectionChange={(k) => setPageSize(Number(k))}
@@ -454,7 +469,11 @@ export function BookingHistory() {
                   </Select.Popover>
                 </Select>
                 <span>
-                  {rangeStart}-{rangeEnd} of {total} results
+                  {t("bh.resultsRange", {
+                    start: rangeStart,
+                    end: rangeEnd,
+                    total,
+                  })}
                 </span>
               </div>
             </Pagination.Summary>
@@ -465,7 +484,7 @@ export function BookingHistory() {
                     isDisabled={safePage <= 1}
                   >
                     <Pagination.PreviousIcon />
-                    Previous
+                    {t("bh.previous")}
                   </Pagination.Previous>
                 </Pagination.Item>
                 {pageList(safePage, totalPages).map((p, i) => (
@@ -487,7 +506,7 @@ export function BookingHistory() {
                     onPress={() => setPage((p) => Math.min(totalPages, p + 1))}
                     isDisabled={safePage >= totalPages}
                   >
-                    Next
+                    {t("bh.next")}
                     <Pagination.NextIcon />
                   </Pagination.Next>
                 </Pagination.Item>
@@ -513,11 +532,11 @@ export function BookingHistory() {
         >
           <div className="flex w-full max-w-[440px] flex-col gap-4 rounded-2xl bg-white p-6 shadow-2xl dark:bg-[#0c0e12]">
             <div className="flex flex-col gap-1">
-              <h2 className="text-base font-semibold text-default-900">Cancel booking?</h2>
+              <h2 className="text-base font-semibold text-default-900">{t("bh.cancelTitle")}</h2>
               <p className="text-sm text-default-500">
                 {canceling.booking_type === "scheduled"
-                  ? "Scheduled booking này chưa được đặt — huỷ sẽ bỏ yêu cầu đặt phòng. Lịch sử vẫn được giữ lại."
-                  : "Sẽ huỷ cuộc họp trên lịch. Booking vẫn được giữ trong lịch sử với trạng thái Canceled."}
+                  ? t("bh.cancelScheduledDesc")
+                  : t("bh.cancelInstantDesc")}
               </p>
             </div>
             <div className="rounded-lg bg-default-100 px-3 py-2 text-sm text-default-700">
@@ -534,7 +553,7 @@ export function BookingHistory() {
                 onPress={() => setCanceling(null)}
                 isDisabled={cancelLoading}
               >
-                Keep booking
+                {t("bh.keepBooking")}
               </Button>
               <Button
                 variant="danger"
@@ -542,7 +561,7 @@ export function BookingHistory() {
                 onPress={confirmCancel}
                 isPending={cancelLoading}
               >
-                Cancel booking
+                {t("bh.cancelBooking")}
               </Button>
             </div>
           </div>

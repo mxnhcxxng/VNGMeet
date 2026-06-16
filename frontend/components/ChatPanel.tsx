@@ -23,18 +23,21 @@ import {
   ThumbsUp,
 } from "@gravity-ui/icons";
 import { api, type BookingRequest, type ChatMessage, type ChatThread, type UserRole } from "@/lib/api";
+import { useT } from "@/app/providers";
+import type { TranslationKey } from "@/lib/i18n";
 import { BrandIcon } from "./BrandIcon";
 
-const SUGGESTIONS = [
-  "I need a room for 6 people from 2 to 4 this afternoon",
-  "Book a room for tomorrow's team meeting",
-  "Show available rooms close to my location",
-  "Find a room for a 10-person review session next week",
+const SUGGESTION_KEYS: TranslationKey[] = [
+  "chatp.suggestion1",
+  "chatp.suggestion2",
+  "chatp.suggestion3",
+  "chatp.suggestion4",
 ];
 
 function TypingDots() {
+  const t = useT();
   return (
-    <div className="flex items-center gap-1 py-1.5" aria-label="Đang soạn trả lời">
+    <div className="flex items-center gap-1 py-1.5" aria-label={t("chatp.typing")}>
       <span className="typing-dot" style={{ animationDelay: "0ms" }} />
       <span className="typing-dot" style={{ animationDelay: "150ms" }} />
       <span className="typing-dot" style={{ animationDelay: "300ms" }} />
@@ -47,6 +50,7 @@ const MarkdownMessage = memo(function MarkdownMessage({
 }: {
   content: string;
 }) {
+  const t = useT();
   return (
     <div className="text-sm leading-7 text-[#252b37] dark:text-[#f7f7f7]">
       <ReactMarkdown
@@ -70,7 +74,7 @@ const MarkdownMessage = memo(function MarkdownMessage({
           img: ({ src, alt }) => (
             <img
               src={src ?? ""}
-              alt={alt ?? "Map"}
+              alt={alt ?? t("chatp.mapAlt")}
               className="mt-2 max-h-72 w-full rounded-lg border border-[#e9eaeb] dark:border-[#373a41] object-contain"
               loading="lazy"
             />
@@ -228,6 +232,7 @@ function BookingConfirmationCard({
   outcome: BookingOutcome;
   onActionMessage: (message: ChatMessage) => void;
 }) {
+  const t = useT();
   const [busyAction, setBusyAction] = useState<"accept" | "reject" | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
   const [skipConfirmation, setSkipConfirmation] = useState(false);
@@ -291,8 +296,8 @@ function BookingConfirmationCard({
       onActionMessage(res.message);
     } catch (e: any) {
       setLocalError(e.message);
-      toast.danger("Action failed", {
-        description: "Could not complete the request. Please try again.",
+      toast.danger(t("chatp.actionFailed"), {
+        description: t("chatp.actionFailedDesc"),
       });
     } finally {
       setBusyAction(null);
@@ -311,39 +316,39 @@ function BookingConfirmationCard({
           </h2>
         </div>
         <p className="text-center text-sm text-default-500">
-          Confirm your booking to secure this room
+          {t("chatp.confirmSubtitle")}
         </p>
       </div>
 
       <div className="flex flex-col gap-3">
         <div className="flex flex-col gap-1">
           <div className="flex items-center justify-between text-base font-medium">
-            <span className="text-muted">Room</span>
+            <span className="text-muted">{t("chatp.room")}</span>
             <span className="text-default-900">{roomName}</span>
           </div>
           <div className="flex items-center justify-between text-base font-medium">
-            <span className="text-muted">Meeting time</span>
+            <span className="text-muted">{t("chatp.meetingTime")}</span>
             <span className="text-default-900">
               {booking.start_time} - {booking.end_time}
             </span>
           </div>
           <div className="flex items-center justify-between">
-            <span className="text-base font-medium text-muted">Expires in</span>
+            <span className="text-base font-medium text-muted">{t("chatp.expiresIn")}</span>
             {outcome === "success" ? (
               <Chip size="md" color="success" variant="soft">
-                Success
+                {t("chatp.success")}
               </Chip>
             ) : outcome === "cancelled" ? (
               <Chip size="md" color="default" variant="soft">
-                Cancelled
+                {t("chatp.cancelled")}
               </Chip>
             ) : outcome === "failed" ? (
               <Chip size="md" color="danger" variant="soft">
-                Failed
+                {t("chatp.failed")}
               </Chip>
             ) : outcome === "expired" || expired ? (
               <Chip size="md" color="danger" variant="soft">
-                Expired
+                {t("chatp.expired")}
               </Chip>
             ) : (
               <Chip size="md" color="danger" variant="soft">
@@ -367,7 +372,7 @@ function BookingConfirmationCard({
           </Checkbox.Control>
           <Checkbox.Content>
             <span className="text-sm font-medium text-default-500">
-              Book without confirmation next time
+              {t("chatp.bookWithoutConfirm")}
             </span>
           </Checkbox.Content>
         </Checkbox>
@@ -387,7 +392,7 @@ function BookingConfirmationCard({
           isPending={busyAction === "reject"}
           onPress={() => submitAction("reject")}
         >
-          Cancel
+          {t("chatp.cancel")}
         </Button>
         <Button
           className="flex-1 rounded-full"
@@ -395,7 +400,7 @@ function BookingConfirmationCard({
           isPending={busyAction === "accept"}
           onPress={() => submitAction("accept")}
         >
-          Book
+          {t("chatp.book")}
         </Button>
       </div>
     </div>
@@ -428,6 +433,7 @@ function ActionIconButton({
 }
 
 function AssistantActions({ content }: { content: string }) {
+  const t = useT();
   const [copied, setCopied] = useState(false);
   const [vote, setVote] = useState<"up" | "down" | null>(null);
 
@@ -443,18 +449,18 @@ function AssistantActions({ content }: { content: string }) {
 
   return (
     <div className="mt-1 flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-      <ActionIconButton label={copied ? "Đã copy" : "Copy"} onPress={copy}>
+      <ActionIconButton label={copied ? t("chatp.copied") : t("chatp.copy")} onPress={copy}>
         {copied ? <Check width={15} /> : <Copy width={15} />}
       </ActionIconButton>
       <ActionIconButton
-        label="Hữu ích"
+        label={t("chatp.helpful")}
         onPress={() => setVote((v) => (v === "up" ? null : "up"))}
         isActive={vote === "up"}
       >
         <ThumbsUp width={15} />
       </ActionIconButton>
       <ActionIconButton
-        label="Chưa tốt"
+        label={t("chatp.notGood")}
         onPress={() => setVote((v) => (v === "down" ? null : "down"))}
         isActive={vote === "down"}
       >
@@ -505,6 +511,7 @@ function splitThinking(content: string): MessagePart[] {
 }
 
 function AdminAssistantMessage({ content }: { content: string }) {
+  const t = useT();
   return (
     <div className="space-y-3">
       {splitThinking(content).map((part, index) => {
@@ -516,7 +523,7 @@ function AdminAssistantMessage({ content }: { content: string }) {
               className="rounded-lg border border-[#f5d0c3] bg-[#fff7f3] p-3 text-xs leading-6 text-[#7a2e0e] dark:border-[#6b2a12] dark:bg-[#2a130a] dark:text-[#ffd6c2]"
             >
               <div className="mb-1 font-semibold uppercase tracking-wide">
-                Think
+                {t("chatp.think")}
               </div>
               <pre className="whitespace-pre-wrap break-words font-mono">
                 {part.content}
@@ -543,6 +550,7 @@ export function ChatPanel({
   userRole?: UserRole;
   userDomain?: string;
 }) {
+  const t = useT();
   const [messages, setMessages] = useState<ChatMessage[]>(() =>
     threadId ? cachedMessagesByThread.get(threadId) ?? [] : []
   );
@@ -686,8 +694,8 @@ export function ChatPanel({
     } catch (e: any) {
       setError(e.message);
       setCachedMessages((prev) => prev.filter((m) => m.id !== optimistic.id));
-      toast.danger("Message failed", {
-        description: "Could not send your message. Please try again.",
+      toast.danger(t("chatp.messageFailed"), {
+        description: t("chatp.messageFailedDesc"),
       });
     } finally {
       setSending(false);
@@ -717,7 +725,7 @@ export function ChatPanel({
           )}
 
           {loading ? (
-            <div className="space-y-6 pb-4" aria-label="Đang tải chat">
+            <div className="space-y-6 pb-4" aria-label={t("chatp.loading")}>
               {[0, 1, 2].map((row) => (
                 <div key={row} className="flex gap-3">
                   <div className="size-8 shrink-0 animate-pulse rounded-full bg-[#f0f0f1] dark:bg-[#22262f]" />
@@ -736,22 +744,27 @@ export function ChatPanel({
                 </Avatar.Fallback>
               </Avatar>
               <h1 className="text-2xl font-semibold tracking-tight text-[#181d27] dark:text-[#f7f7f7]">
-                {userDomain ? `How can I help, ${userDomain}?` : "How can I help?"}
+                {userDomain
+                  ? t("chatp.greeting", { name: userDomain })
+                  : t("chatp.greetingNoName")}
               </h1>
               <p className="mt-2 max-w-md text-sm text-[#535862] dark:text-[#94979c]">
-                Describe your meeting and I&apos;ll suggest the best available rooms.
+                {t("chatp.greetingSubtitle")}
               </p>
               <div className="mt-8 grid w-full max-w-xl gap-2 sm:grid-cols-2">
-                {SUGGESTIONS.map((text) => (
-                  <button
-                    key={text}
-                    type="button"
-                    onClick={() => pickSuggestion(text)}
-                    className="rounded-xl border border-[#e9eaeb] dark:border-[#373a41] bg-white dark:bg-[#13161b] px-4 py-3 text-left text-sm text-[#414651] dark:text-[#f7f7f7] transition hover:border-[#d5d7da] dark:hover:border-[#373a41] hover:bg-[#f9f9fa] dark:hover:bg-[#22262f]"
-                  >
-                    {text}
-                  </button>
-                ))}
+                {SUGGESTION_KEYS.map((key) => {
+                  const text = t(key);
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => pickSuggestion(text)}
+                      className="rounded-xl border border-[#e9eaeb] dark:border-[#373a41] bg-white dark:bg-[#13161b] px-4 py-3 text-left text-sm text-[#414651] dark:text-[#f7f7f7] transition hover:border-[#d5d7da] dark:hover:border-[#373a41] hover:bg-[#f9f9fa] dark:hover:bg-[#22262f]"
+                    >
+                      {text}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           ) : (
@@ -840,7 +853,7 @@ export function ChatPanel({
               isIconOnly
               size="sm"
               variant="secondary"
-              aria-label="Cuộn xuống cuối"
+              aria-label={t("chatp.scrollDown")}
               onPress={scrollToBottom}
               className="pointer-events-auto size-9 rounded-full shadow-md"
             >
@@ -860,7 +873,7 @@ export function ChatPanel({
               el.style.height = "auto";
               el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
             }}
-            placeholder="Describe your meeting requirements..."
+            placeholder={t("chatp.inputPlaceholder")}
             className="block max-h-[200px] min-h-[60px] w-full resize-none bg-transparent px-1 py-1.5 text-sm leading-6 text-[#181d27] dark:text-[#f7f7f7] outline-none placeholder:text-[#a4a7ae] dark:placeholder:text-[#94979c]"
             onKeyDown={(e) => {
               // Ignore Enter while an IME composition is active (Vietnamese / CJK
@@ -877,7 +890,7 @@ export function ChatPanel({
           <Button
             isIconOnly
             variant="primary"
-            aria-label="Send"
+            aria-label={t("chatp.send")}
             className="size-10 shrink-0 self-end rounded-full"
             isDisabled={!input.trim()}
             isPending={sending}
@@ -887,7 +900,7 @@ export function ChatPanel({
           </Button>
         </div>
         <p className="mt-2 text-center text-xs text-[#a4a7ae] dark:text-[#94979c]">
-          AI can make mistakes. Check important info.
+          {t("chatp.aiDisclaimer")}
         </p>
       </div>
     </div>

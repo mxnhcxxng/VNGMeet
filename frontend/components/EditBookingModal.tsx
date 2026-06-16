@@ -4,6 +4,7 @@ import { useEffect, useState, type MouseEvent } from "react";
 import { Button, Input, Label, TextArea, TextField, toast } from "@heroui/react";
 import { Clock } from "@gravity-ui/icons";
 import { api, type Booking } from "@/lib/api";
+import { useT } from "@/app/providers";
 
 export function EditBookingModal({
   isOpen,
@@ -18,6 +19,7 @@ export function EditBookingModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const t = useT();
   const [subject, setSubject] = useState("");
   const [attendees, setAttendees] = useState("");
   const [notes, setNotes] = useState("");
@@ -50,7 +52,7 @@ export function EditBookingModal({
 
   const submit = async () => {
     if (!subject.trim()) {
-      setError("Vui lòng nhập tiêu đề cuộc họp.");
+      setError(t("booking.titleRequired"));
       return;
     }
     setLoading(true);
@@ -64,25 +66,24 @@ export function EditBookingModal({
           .filter(Boolean),
         body: notes.trim(),
       });
-      toast.success("Booking updated", {
-        description: "Your meeting has been updated successfully.",
+      toast.success(t("booking.updated"), {
+        description: t("booking.updatedDesc"),
       });
       onSaved();
       onClose();
     } catch (e: any) {
       const msg = String(e?.message ?? e);
       if (msg === "UNAUTHENTICATED") {
-        toast.danger("Session expired", {
-          description: "Please sign in again to continue.",
+        toast.danger(t("booking.sessionExpired"), {
+          description: t("booking.sessionExpiredDesc"),
         });
       } else if (msg.startsWith("403")) {
-        toast.danger("Permission required", {
-          description:
-            "Calendar write access (Calendars.ReadWrite) is needed. Please sign in again to grant it.",
+        toast.danger(t("booking.permissionRequired"), {
+          description: t("booking.permissionDesc"),
         });
       } else {
-        toast.danger("Update failed", {
-          description: "Could not update the booking. Please try again.",
+        toast.danger(t("booking.updateFailed"), {
+          description: t("booking.updateFailedDesc"),
         });
       }
     } finally {
@@ -116,7 +117,7 @@ export function EditBookingModal({
             {isScheduled && (
               <div className="absolute bottom-2 left-2 inline-flex items-center gap-1 rounded-md bg-[var(--accent)] px-2 py-1 text-sm font-medium leading-5 text-[var(--accent-foreground)] shadow-sm">
                 <Clock width={16} height={16} />
-                <span>Scheduled Booking</span>
+                <span>{t("booking.scheduledBadge")}</span>
               </div>
             )}
           </div>
@@ -125,17 +126,17 @@ export function EditBookingModal({
         {/* Room name + email */}
         <div className="px-6 pb-1 pt-6">
           <h2 className="text-base font-semibold text-default-900">
-            {roomName} - Edit booking
+            {t("booking.editTitleSuffix", { room: roomName })}
           </h2>
           <p className="text-sm text-default-500">{booking.room_email}</p>
         </div>
 
         <div className="grid gap-4 px-6 pt-4">
           <TextField fullWidth isRequired>
-            <Label>Meeting Title</Label>
+            <Label>{t("booking.meetingTitle")}</Label>
             <Input
               variant="secondary"
-              placeholder="Meeting title"
+              placeholder={t("booking.meetingTitlePlaceholder")}
               value={subject}
               onChange={(event) => setSubject(event.target.value)}
             />
@@ -143,36 +144,36 @@ export function EditBookingModal({
 
           {/* Date & time are fixed once booked — shown read-only for context. */}
           <TextField fullWidth isDisabled>
-            <Label>Date {req}</Label>
+            <Label>{t("booking.date")} {req}</Label>
             <Input variant="secondary" value={booking.date} readOnly />
           </TextField>
 
           <div className="grid grid-cols-2 gap-4">
             <TextField fullWidth isDisabled>
-              <Label>Start time {req}</Label>
+              <Label>{t("booking.startTime")} {req}</Label>
               <Input variant="secondary" value={booking.start_time} readOnly />
             </TextField>
             <TextField fullWidth isDisabled>
-              <Label>End time {req}</Label>
+              <Label>{t("booking.endTime")} {req}</Label>
               <Input variant="secondary" value={booking.end_time} readOnly />
             </TextField>
           </div>
 
           <TextField fullWidth>
-            <Label>Attendees</Label>
+            <Label>{t("booking.attendees")}</Label>
             <Input
               variant="secondary"
-              placeholder='Invite required attendees, separate by a comma ","'
+              placeholder={t("booking.attendeesPlaceholder")}
               value={attendees}
               onChange={(event) => setAttendees(event.target.value)}
             />
           </TextField>
 
           <TextField fullWidth>
-            <Label>Description</Label>
+            <Label>{t("booking.description")}</Label>
             <TextArea
               variant="secondary"
-              placeholder="Meeting description"
+              placeholder={t("booking.descriptionPlaceholder")}
               value={notes}
               onChange={(event) => setNotes(event.target.value)}
             />
@@ -188,10 +189,10 @@ export function EditBookingModal({
             onPress={onClose}
             isDisabled={loading}
           >
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button className="flex-1 rounded-full" onPress={submit} isPending={loading}>
-            Save
+            {t("common.saveShort")}
           </Button>
         </div>
       </div>

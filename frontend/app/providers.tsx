@@ -9,7 +9,13 @@ import {
   useState,
 } from "react";
 import { ToastProvider } from "@heroui/react";
-import type { ThemeMode } from "@/lib/api";
+import type { Language, ThemeMode } from "@/lib/api";
+import {
+  DEFAULT_LANGUAGE,
+  LANGUAGE_STORAGE_KEY,
+  translate,
+  type TFunction,
+} from "@/lib/i18n";
 
 export type { ThemeMode };
 
@@ -101,11 +107,73 @@ export function useTheme(): ThemeContextValue {
   return ctx;
 }
 
+// --- Language -----------------------------------------------------------------
+
+interface LanguageContextValue {
+  language: Language;
+  setLanguage: (lang: Language) => void;
+  // Translate a key with the current language; falls back to English.
+  t: TFunction;
+}
+
+const LanguageContext = createContext<LanguageContextValue | null>(null);
+
+export function LanguageProvider({ children }: { children: React.ReactNode }) {
+  // Mirror ThemeProvider: read the localStorage value the user last chose so the
+  // first client render is already in the right language.
+  const [language, setLanguageState] = useState<Language>(() => {
+    if (typeof window === "undefined") return DEFAULT_LANGUAGE;
+    const stored = window.localStorage.getItem(LANGUAGE_STORAGE_KEY);
+    return stored === "vi" || stored === "en" ? stored : DEFAULT_LANGUAGE;
+  });
+
+  const setLanguage = useCallback((lang: Language) => {
+    setLanguageState(lang);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(LANGUAGE_STORAGE_KEY, lang);
+    }
+  }, []);
+
+  // Keep the <html lang> attribute in sync for a11y / SEO.
+  useEffect(() => {
+    if (typeof document !== "undefined") {
+      document.documentElement.lang = language;
+    }
+  }, [language]);
+
+  const t = useCallback<TFunction>(
+    (key, vars) => translate(language, key, vars),
+    [language],
+  );
+
+  const value = useMemo(
+    () => ({ language, setLanguage, t }),
+    [language, setLanguage, t],
+  );
+
+  return (
+    <LanguageContext.Provider value={value}>{children}</LanguageContext.Provider>
+  );
+}
+
+export function useLanguage(): LanguageContextValue {
+  const ctx = useContext(LanguageContext);
+  if (!ctx) throw new Error("useLanguage must be used within LanguageProvider");
+  return ctx;
+}
+
+// Convenience hook for components that only need the translate function.
+export function useT(): TFunction {
+  return useLanguage().t;
+}
+
 export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <ThemeProvider>
-      {children}
-      <ToastProvider placement="top end" />
+      <LanguageProvider>
+        {children}
+        <ToastProvider placement="top end" />
+      </LanguageProvider>
     </ThemeProvider>
   );
 }
