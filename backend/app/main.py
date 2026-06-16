@@ -1885,6 +1885,18 @@ def _chat_time_from_slot(idx: int) -> str:
     return f"{minutes // 60:02d}:{minutes % 60:02d}"
 
 
+def _earliest_end_slot_today(now: datetime) -> int:
+    """Smallest end-slot index whose clock time is strictly after `now`.
+
+    A booking slot is only offerable when its end time is after the current
+    moment, e.g. at 16:12 a 16:00-17:00 slot (end 17:00) is fine but a
+    13:00-15:00 slot (end 15:00) is not. End-slot time = idx * slot_minutes,
+    so the first acceptable end index is now_minutes // slot_minutes + 1.
+    """
+    now_minutes = now.hour * 60 + now.minute
+    return now_minutes // settings.availability_slot_minutes + 1
+
+
 def _chat_slot_is_bookable(slots: list, idx: int) -> bool:
     """True for live-free slots and seeded schedule-bookable slots."""
     if idx < 0 or idx >= len(slots):
@@ -2062,7 +2074,11 @@ def _split_room_suggestions(
     start_idx: int,
     end_idx: int,
     profile: dict | None,
+    now: datetime,
 ) -> list[dict]:
+    # Hôm nay: không gợi ý các đoạn có giờ kết thúc <= thời điểm hiện tại.
+    is_today = day == now.date().isoformat()
+    earliest_end_slot = _earliest_end_slot_today(now) if is_today else 0
     segments: list[dict] = []
     idx = start_idx
     while idx < end_idx:
@@ -2090,6 +2106,9 @@ def _split_room_suggestions(
                 if end == end_idx:
                     break
         if best is None or best[0] <= idx:
+            return []
+        # Đoạn này kết thúc trong quá khứ (so với hiện tại, hôm nay) → không gợi ý split.
+        if is_today and best[0] < earliest_end_slot:
             return []
         segments.append(
             {
@@ -2134,6 +2153,7 @@ def _alternate_time_suggestions(
     start_idx: int,
     end_idx: int,
     profile: dict | None,
+    now: datetime,
 ) -> list[dict]:
     duration = end_idx - start_idx
     if duration <= 0:
@@ -2145,6 +2165,8 @@ def _alternate_time_suggestions(
     candidates: list[tuple[tuple, dict]] = []
     business_start = settings.business_start_hour * 60 // settings.availability_slot_minutes
     business_end = settings.business_end_hour * 60 // settings.availability_slot_minutes
+    today = now.date()
+    earliest_end_slot = _earliest_end_slot_today(now)
     for day in day_list:
         try:
             candidate_day = date_cls.fromisoformat(day)
@@ -2153,6 +2175,9 @@ def _alternate_time_suggestions(
         latest_start = business_end - duration
         for candidate_start in range(business_start, latest_start + 1):
             candidate_end = candidate_start + duration
+            # Hôm nay: chỉ gợi ý khung giờ có giờ kết thúc sau thời điểm hiện tại.
+            if candidate_day == today and candidate_end < earliest_end_slot:
+                continue
             for room in rows:
                 booking_type = _room_bookable_for_range(
                     cache.get((room["id"], day)), candidate_start, candidate_end
@@ -2454,9 +2479,17 @@ async def _tool_check_room_availability(
     rows = _rows_for_chat_availability(sb, requested_capacity_size, location, profile)
 
     room_ids = [r["id"] for r in rows if r.get("id")]
-    today = datetime.now(ZoneInfo(settings.timezone)).date()
+    now = datetime.now(ZoneInfo(settings.timezone))
+    today = now.date()
     if requested_day < today:
         return {"ok": False, "error": "Không thể kiểm tra/ngỏ ý đặt phòng trong quá khứ."}
+    # Khung giờ trong hôm nay nhưng đã kết thúc trước thời điểm hiện tại thì coi như
+    # đã qua: ví dụ bây giờ 16:00 thì không nhận khung 13:00-15:00.
+    if requested_day == today and end_idx < _earliest_end_slot_today(now):
+        return {
+            "ok": False,
+            "error": "Khung giờ này đã qua; vui lòng chọn khung giờ có giờ kết thúc sau thời điểm hiện tại.",
+        }
     max_booking_day = today + timedelta(days=settings.max_booking_advance_days)
     if requested_day > max_booking_day:
         return {
@@ -2519,11 +2552,11 @@ async def _tool_check_room_availability(
     room_scout_suggestion: dict | None = None
     if not available:
         split_suggestions = _split_room_suggestions(
-            rows, cache, date, start_idx, end_idx, profile
+            rows, cache, date, start_idx, end_idx, profile, now
         )
         if not split_suggestions:
             alternate_suggestions = _alternate_time_suggestions(
-                rows, cache, day_list, date, start_idx, end_idx, profile
+                rows, cache, day_list, date, start_idx, end_idx, profile, now
             )
         # Room Scout chỉ theo dõi phòng trong ngày hôm nay, nên chỉ đề xuất khi
         # khung giờ user yêu cầu rơi vào hôm nay.
