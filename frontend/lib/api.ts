@@ -39,6 +39,8 @@ export interface Me {
 
 export type ThemeMode = "system" | "light" | "dark";
 
+export type Language = "en" | "vi";
+
 export type UserRole = "admin" | "user";
 
 export interface UserProfile {
@@ -50,6 +52,7 @@ export interface UserProfile {
   preferred_rooms: string[];
   book_without_confirmation: boolean;
   theme: ThemeMode;
+  language: Language;
   role: UserRole;
 }
 
@@ -221,6 +224,7 @@ export const api = {
     payload: Pick<UserProfile, "office" | "floor" | "building" | "preferred_rooms"> & {
       book_without_confirmation?: boolean;
       theme?: ThemeMode;
+      language?: Language;
     }
   ) =>
     req<{ ok: boolean; profile: UserProfile | null; profileComplete: boolean }>(

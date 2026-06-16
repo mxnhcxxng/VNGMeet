@@ -46,7 +46,8 @@ import {
 } from "@/components/ChatPanel";
 import { SettingsScreen } from "@/components/SettingsScreen";
 import { BrandIcon } from "@/components/BrandIcon";
-import { useTheme } from "@/app/providers";
+import { useTheme, useLanguage, useT } from "@/app/providers";
+import type { TFunction } from "@/lib/i18n";
 import {
   BookingHistory,
   clearBookingHistoryCache,
@@ -93,6 +94,7 @@ const GRAPH_EXPLORER_URL =
   "https://developer.microsoft.com/en-us/graph/graph-explorer";
 
 function CopyLinkButton({ text }: { text: string }) {
+  const t = useT();
   const [copied, setCopied] = useState(false);
 
   const copy = async () => {
@@ -134,7 +136,7 @@ function CopyLinkButton({ text }: { text: string }) {
   return (
     <button
       type="button"
-      aria-label={copied ? "Link copied" : "Copy link"}
+      aria-label={copied ? t("login.linkCopied") : t("login.copyLink")}
       onClick={copy}
       className="shrink-0 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-white/60"
     >
@@ -145,7 +147,7 @@ function CopyLinkButton({ text }: { text: string }) {
         className="inline-flex cursor-pointer items-center gap-1"
       >
         {copied ? <Check width={14} /> : <Copy width={14} />}
-        <Chip.Label>{copied ? "Copied" : "Copy"}</Chip.Label>
+        <Chip.Label>{copied ? t("login.copied") : t("login.copy")}</Chip.Label>
       </Chip>
     </button>
   );
@@ -232,53 +234,53 @@ function SlideBackground({ stepKey }: { stepKey: LoginStepKey }) {
 
 type LoginStepKey = "graph" | "account" | "token";
 
-const LOGIN_STEPS: {
+function buildLoginSteps(t: TFunction): {
   key: LoginStepKey;
   title: ReactNode;
   description: ReactNode;
-}[] = [
-  {
-    key: "graph",
-    title: (
-      <>
-        Go to{" "}
-        <a
-          href={GRAPH_EXPLORER_URL}
-          target="_blank"
-          rel="noreferrer"
-          className="underline decoration-2 underline-offset-2 [text-underline-position:from-font] transition hover:text-white/80"
-        >
-          Microsoft Graph Explorer
-        </a>
-      </>
-    ),
-    description: (
-      <div className="flex flex-col gap-0.5">
-        <p>
-          If the link isn&apos;t available, paste this link into your search bar
-        </p>
-        <div className="flex items-center gap-2">
-          <span className="break-all font-semibold">{GRAPH_EXPLORER_URL}</span>
-          <CopyLinkButton text={GRAPH_EXPLORER_URL} />
+}[] {
+  return [
+    {
+      key: "graph",
+      title: (
+        <>
+          {t("login.graphTitlePre")}{" "}
+          <a
+            href={GRAPH_EXPLORER_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="underline decoration-2 underline-offset-2 [text-underline-position:from-font] transition hover:text-white/80"
+          >
+            {t("login.graphLinkText")}
+          </a>
+        </>
+      ),
+      description: (
+        <div className="flex flex-col gap-0.5">
+          <p>{t("login.graphFallback")}</p>
+          <div className="flex items-center gap-2">
+            <span className="break-all font-semibold">{GRAPH_EXPLORER_URL}</span>
+            <CopyLinkButton text={GRAPH_EXPLORER_URL} />
+          </div>
         </div>
-      </div>
-    ),
-  },
-  {
-    key: "account",
-    title: "Login using your work account",
-    description:
-      "Due to development constraints, this is currently the only supported connection method.",
-  },
-  {
-    key: "token",
-    title: "Get your access token",
-    description:
-      "Navigate to the Access Token tab, copy the token, and paste it into the field on the left to authenticate.",
-  },
-];
+      ),
+    },
+    {
+      key: "account",
+      title: t("login.accountTitle"),
+      description: t("login.accountDesc"),
+    },
+    {
+      key: "token",
+      title: t("login.tokenTitle"),
+      description: t("login.tokenDesc"),
+    },
+  ];
+}
 
 function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
+  const t = useT();
+  const LOGIN_STEPS = buildLoginSteps(t);
   const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -301,7 +303,7 @@ function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
     } catch (e: any) {
       setErr(
         e.message === "UNAUTHENTICATED"
-          ? "Graph token không hợp lệ hoặc đã hết hạn."
+          ? t("login.tokenInvalid")
           : e.message,
       );
     } finally {
@@ -317,7 +319,7 @@ function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
         setErr(null);
       }
     } catch {
-      setErr("Không đọc được clipboard. Hãy dán thủ công bằng Cmd/Ctrl+V.");
+      setErr(t("login.clipboardError"));
     }
   };
 
@@ -336,17 +338,16 @@ function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
 
             <div className="flex w-full flex-col gap-3">
               <h1 className="text-2xl font-bold leading-8 text-[#181d27] dark:text-[#f7f7f7]">
-                Welcome to VNG Meet
+                {t("login.welcome")}
               </h1>
               <p className="text-base leading-6 text-[#535862] dark:text-[#94979c]">
-                Please read the instruction on the right side carefully to get
-                the Microsoft Graph Access Token
+                {t("login.welcomeDesc")}
               </p>
 
               <TextField fullWidth>
                 <InputGroup variant="secondary">
                   <InputGroup.Input
-                    placeholder="Paste access token here"
+                    placeholder={t("login.pasteTokenPlaceholder")}
                     type="password"
                     autoComplete="off"
                     data-1p-ignore
@@ -361,7 +362,7 @@ function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
                       className="inline-flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-sm font-medium text-[#535862] transition-colors hover:bg-black/5 hover:text-[#181d27] dark:text-[#94979c] dark:hover:bg-white/5 dark:hover:text-[#f7f7f7]"
                     >
                       <Copy width={14} height={14} />
-                      Paste
+                      {t("login.paste")}
                     </button>
                   </InputGroup.Suffix>
                 </InputGroup>
@@ -379,10 +380,10 @@ function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
                 {busy ? (
                   <span className="inline-flex items-center justify-center gap-2">
                     <Spinner size="sm" color="current" />
-                    Checking...
+                    {t("login.checking")}
                   </span>
                 ) : (
-                  "Authenticate"
+                  t("login.authenticate")
                 )}
               </Button>
 
@@ -404,7 +405,10 @@ function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
               className="auth-caption-in flex min-w-0 flex-1 flex-col items-start gap-3"
             >
               <span className="inline-flex items-center rounded-full border border-white/40 bg-white/10 px-3 py-1 text-xs font-semibold text-white backdrop-blur-sm">
-                Step {stepIndex + 1} of {LOGIN_STEPS.length}
+                {t("login.stepOf", {
+                  current: stepIndex + 1,
+                  total: LOGIN_STEPS.length,
+                })}
               </span>
               <h2 className="text-2xl font-semibold leading-8 text-white">
                 {currentStep.title}
@@ -417,12 +421,12 @@ function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
             <div className="flex shrink-0 items-start gap-4">
               <CarouselArrow
                 direction="left"
-                label="Previous instruction"
+                label={t("login.prevInstruction")}
                 onPress={() => goToStep(-1)}
               />
               <CarouselArrow
                 direction="right"
-                label="Next instruction"
+                label={t("login.nextInstruction")}
                 onPress={() => goToStep(1)}
               />
             </div>
@@ -442,6 +446,7 @@ function ProfileInfoScreen({
   onSaved: (me: Me) => void;
   onLogout: () => void;
 }) {
+  const t = useT();
   const [office, setOffice] = useState(me.profile?.office ?? "");
   const [floor, setFloor] = useState(me.profile?.floor ?? "");
   const [building, setBuilding] = useState(me.profile?.building ?? "");
@@ -541,11 +546,10 @@ function ProfileInfoScreen({
             {/* Header */}
             <div className="flex w-full flex-col gap-3">
               <h1 className="text-2xl font-bold leading-8 text-[#181d27] dark:text-[#f7f7f7]">
-                Hi, {emailUsername}
+                {t("onboarding.greeting", { name: emailUsername })}
               </h1>
               <p className="text-base leading-6 text-[#535862] dark:text-[#94979c]">
-                Complete your details to get better room recommendations. You can
-            always change it later in Setting
+                {t("onboarding.subtitle")}
               </p>
             </div>
 
@@ -554,13 +558,13 @@ function ProfileInfoScreen({
               <Select
                 variant="secondary"
                 className="flex flex-col gap-2"
-                placeholder="Choose Office"
+                placeholder={t("settings.chooseOffice")}
                 selectedKey={office || null}
                 onSelectionChange={changeOffice}
                 isRequired
                 isDisabled={optionsLoading}
               >
-                <Label>Office</Label>
+                <Label>{t("settings.office")}</Label>
                 <Select.Trigger>
                   <Select.Value />
                   <Select.Indicator />
@@ -580,12 +584,12 @@ function ProfileInfoScreen({
                 <Select
                   variant="secondary"
                   className="flex flex-col gap-2"
-                  placeholder="Choose Floor"
+                  placeholder={t("settings.chooseFloor")}
                   selectedKey={floor || null}
                   onSelectionChange={(key) => setFloor((key as string) ?? "")}
                   isDisabled={!isCampus || optionsLoading}
                 >
-                  <Label>Floor</Label>
+                  <Label>{t("settings.floor")}</Label>
                   <Select.Trigger>
                     <Select.Value />
                     <Select.Indicator />
@@ -603,14 +607,14 @@ function ProfileInfoScreen({
                 <Select
                   variant="secondary"
                   className="flex flex-col gap-2"
-                  placeholder="Choose Building"
+                  placeholder={t("settings.chooseBuilding")}
                   selectedKey={building || null}
                   onSelectionChange={(key) =>
                     setBuilding((key as string) ?? "")
                   }
                   isDisabled={!isCampus || optionsLoading}
                 >
-                  <Label>Building</Label>
+                  <Label>{t("settings.building")}</Label>
                   <Select.Trigger>
                     <Select.Value />
                     <Select.Indicator />
@@ -631,13 +635,13 @@ function ProfileInfoScreen({
                 variant="secondary"
                 fullWidth
                 className="flex flex-col gap-2 [&_.autocomplete__trigger]:w-full"
-                placeholder="Choose Prefered Rooms (MAX: 3)"
+                placeholder={t("onboarding.preferredRoomsPlaceholder")}
                 selectionMode="multiple"
                 value={preferredRooms}
                 onChange={updatePreferredRooms}
                 isDisabled={!office || optionsLoading}
               >
-                <Label>Prefered Rooms</Label>
+                <Label>{t("settings.preferredRooms")}</Label>
                 <Autocomplete.Trigger>
                   <Autocomplete.Value>
                     {({ defaultChildren, isPlaceholder, state }) => {
@@ -683,14 +687,14 @@ function ProfileInfoScreen({
                     <div className="w-full px-2 py-2">
                       <SearchField
                         autoFocus
-                        aria-label="Search prefered rooms"
+                        aria-label={t("settings.preferredRooms")}
                         name="search"
                         variant="secondary"
                         fullWidth
                       >
                         <SearchField.Group>
                           <SearchField.SearchIcon />
-                          <SearchField.Input placeholder="Choose Prefered Rooms (MAX: 3)" />
+                          <SearchField.Input placeholder={t("onboarding.preferredRoomsPlaceholder")} />
                           <SearchField.ClearButton />
                         </SearchField.Group>
                       </SearchField>
@@ -698,7 +702,7 @@ function ProfileInfoScreen({
                     <ListBox
                       className="max-h-[200px] overflow-y-auto"
                       renderEmptyState={() => (
-                        <EmptyState>No results found</EmptyState>
+                        <EmptyState>{t("settings.noResults")}</EmptyState>
                       )}
                     >
                       {preferredRoomOptions.map((item) => (
@@ -740,7 +744,7 @@ function ProfileInfoScreen({
                 onPress={onLogout}
                 isDisabled={busy}
               >
-                Cancel
+                {t("common.cancel")}
               </Button>
               <Button
                 className="flex-1 rounded-full"
@@ -748,7 +752,7 @@ function ProfileInfoScreen({
                 isPending={busy}
                 onPress={submitProfile}
               >
-                Save
+                {t("common.saveShort")}
               </Button>
             </div>
           </div>
@@ -767,7 +771,9 @@ function ProfileInfoScreen({
 }
 
 export default function Home() {
+  const t = useT();
   const { setTheme } = useTheme();
+  const { setLanguage } = useLanguage();
   const [me, setMe] = useState<Me | null>(null);
   const [loading, setLoading] = useState(true);
   const [sessionExpiredOpen, setSessionExpiredOpen] = useState(false);
@@ -902,10 +908,11 @@ export default function Home() {
     if (!me) return;
     if (me.authenticated) {
       if (me.profile?.theme) setTheme(me.profile.theme);
+      if (me.profile?.language) setLanguage(me.profile.language);
     } else {
       setTheme("system");
     }
-  }, [me, setTheme]);
+  }, [me, setTheme, setLanguage]);
 
   // Supabase OAuth flow (only when configured).
   useEffect(() => {
@@ -943,7 +950,7 @@ export default function Home() {
     } catch (e: any) {
       setError(
         e.message === "UNAUTHENTICATED"
-          ? "Phiên đăng nhập hết hạn."
+          ? t("session.expiredToast")
           : e.message,
       );
       if (e.message === "UNAUTHENTICATED") setMe({ authenticated: false });
@@ -1053,16 +1060,16 @@ export default function Home() {
         setActiveThreadId(null);
         setView("chat");
       });
-      toast.success("Chat deleted", {
-        description: "The conversation has been removed successfully.",
+      toast.success(t("chat.deleted"), {
+        description: t("chat.deletedDesc"),
       });
     } catch (e: any) {
       setError(e.message);
-      toast.danger("Delete failed", {
+      toast.danger(t("chat.deleteFailed"), {
         description:
           e.message === "UNAUTHENTICATED"
-            ? "Please sign in again to continue."
-            : "Could not delete the conversation. Please try again.",
+            ? t("chat.deleteFailedAuth")
+            : t("chat.deleteFailedGeneric"),
       });
       throw e;
     }
@@ -1072,7 +1079,7 @@ export default function Home() {
     return (
       <div className="flex h-screen flex-col items-center justify-center gap-3">
         <Spinner />
-        <span className="text-sm text-default-500">Đang tải...</span>
+        <span className="text-sm text-default-500">{t("common.loading")}</span>
       </div>
     );
   }
@@ -1081,16 +1088,16 @@ export default function Home() {
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4">
       <div className="w-full max-w-[420px] rounded-2xl bg-white p-6 shadow-2xl dark:bg-[#0c0e12]">
         <h2 className="text-lg font-semibold text-default-900">
-          Session expired
+          {t("session.title")}
         </h2>
         <p className="mt-2 text-sm leading-6 text-default-600">
-          Your session has expired. Please log in again.
+          {t("session.body")}
         </p>
         <Button
           className="mt-6 w-full rounded-full"
           onPress={handleSessionExpiredLogin}
         >
-          Log in again
+          {t("session.loginAgain")}
         </Button>
       </div>
     </div>
@@ -1103,10 +1110,10 @@ export default function Home() {
     >
       <div className="w-full max-w-[420px] rounded-2xl bg-white p-6 shadow-2xl dark:bg-[#0c0e12]">
         <h2 className="text-lg font-semibold text-default-900">
-          Unsaved changes
+          {t("unsaved.title")}
         </h2>
         <p className="mt-2 text-sm leading-6 text-default-600">
-          You have unsaved changes. Please save your changes before leaving.
+          {t("unsaved.body")}
         </p>
         <div className="mt-6 flex items-center justify-end gap-2">
           <Button
@@ -1115,14 +1122,14 @@ export default function Home() {
             onPress={cancelLeave}
             isDisabled={leaveSaving}
           >
-            Stay
+            {t("unsaved.stay")}
           </Button>
           <Button
             className="rounded-full"
             onPress={saveAndLeave}
             isPending={leaveSaving}
           >
-            Save and leave
+            {t("unsaved.saveAndLeave")}
           </Button>
         </div>
       </div>
@@ -1227,12 +1234,12 @@ export default function Home() {
             <div className="flex h-full flex-col items-center justify-center gap-3">
               <Spinner />
               <span className="text-sm text-default-500">
-                Đang quét phòng họp...
+                {t("browse.scanning")}
               </span>
             </div>
           ) : !data?.rooms.length ? (
             <div className="flex h-full items-center justify-center text-default-500">
-              Không tìm thấy phòng nào được đánh dấu là meeting room.
+              {t("browse.noMeetingRooms")}
             </div>
           ) : (
             <BrowseRooms

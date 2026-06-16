@@ -24,6 +24,8 @@ import {
 import { I18nProvider } from "react-aria-components";
 import { parseDate, parseTime } from "@internationalized/date";
 import { api, type Booking, type ScheduleResponse, type ScheduleRoom } from "@/lib/api";
+import { useT } from "@/app/providers";
+import type { TranslationKey } from "@/lib/i18n";
 import { BookingModal, type BookingSlot } from "./BookingModal";
 import { EditBookingModal } from "./EditBookingModal";
 import { clearBookingHistoryCache } from "./BookingHistory";
@@ -112,10 +114,13 @@ function capacitySize(
   return room.capacity_size ?? null;
 }
 
-const CAPACITY_LABEL: Record<"small" | "medium" | "large", { label: string; range: string }> = {
-  small: { label: "Small", range: "4-" },
-  medium: { label: "Medium", range: "5-12" },
-  large: { label: "Large", range: "13+" },
+const CAPACITY_LABEL: Record<
+  "small" | "medium" | "large",
+  { labelKey: TranslationKey; range: string }
+> = {
+  small: { labelKey: "browse.capSmall", range: "4-" },
+  medium: { labelKey: "browse.capMedium", range: "5-12" },
+  large: { labelKey: "browse.capLarge", range: "13+" },
 };
 
 function numericFloor(floor?: string) {
@@ -187,6 +192,7 @@ export function BrowseRooms({
   userDomain?: string;
   preferredRooms?: string[];
 }) {
+  const tr = useT();
   const [isOpen, setIsOpen] = useState(false);
   const onOpen = () => setIsOpen(true);
   const onClose = () => setIsOpen(false);
@@ -548,7 +554,7 @@ export function BrowseRooms({
           isDisabled={dayIndex === 0}
           onPress={() => setDayIndex(() => 0)}
         >
-          Today
+          {tr("browse.today")}
         </Button>
 
         {/* Day navigation + date picker, grouped into a single pill. */}
@@ -556,7 +562,7 @@ export function BrowseRooms({
           <div className="inline-flex h-9 items-center overflow-hidden rounded-full bg-[var(--default)] text-[var(--foreground)]">
             <button
               type="button"
-              aria-label="Ngày trước"
+              aria-label={tr("browse.prevDay")}
               disabled={dayIndex <= 0}
               onClick={() => setDayIndex((n) => Math.max(0, n - 1))}
               className="flex h-full w-9 items-center justify-center transition-colors hover:bg-[var(--default-hover)] disabled:opacity-40 disabled:hover:bg-transparent"
@@ -565,7 +571,7 @@ export function BrowseRooms({
             </button>
             <span className="h-5 w-px bg-[var(--separator)]" />
             <DatePicker
-              aria-label="Ngày"
+              aria-label={tr("browse.datePicker")}
               value={parseDate(data.days[dayIndex])}
               minValue={parseDate(data.days[0])}
               maxValue={parseDate(data.days[maxDayIndex])}
@@ -603,7 +609,7 @@ export function BrowseRooms({
             <span className="h-5 w-px bg-[var(--separator)]" />
             <button
               type="button"
-              aria-label="Ngày sau"
+              aria-label={tr("browse.nextDay")}
               disabled={dayIndex >= maxDayIndex}
               onClick={() => setDayIndex((n) => Math.min(maxDayIndex, n + 1))}
               className="flex h-full w-9 items-center justify-center transition-colors hover:bg-[var(--default-hover)] disabled:opacity-40 disabled:hover:bg-transparent"
@@ -614,9 +620,9 @@ export function BrowseRooms({
 
           {/* Business-hours window */}
           <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold text-default-600">From</span>
+            <span className="text-xs font-semibold text-default-600">{tr("browse.from")}</span>
             <TimeField
-              aria-label="Giờ bắt đầu"
+              aria-label={tr("browse.startTime")}
               value={parseTime(windowStart)}
               hourCycle={24}
               isInvalid={!hasValidWindow}
@@ -633,9 +639,9 @@ export function BrowseRooms({
             </TimeField>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold text-default-600">To</span>
+            <span className="text-xs font-semibold text-default-600">{tr("browse.to")}</span>
             <TimeField
-              aria-label="Giờ kết thúc"
+              aria-label={tr("browse.endTime")}
               value={parseTime(windowEnd)}
               hourCycle={24}
               isInvalid={!hasValidWindow}
@@ -652,14 +658,14 @@ export function BrowseRooms({
             </TimeField>
           </div>
           {!hasValidWindow && (
-            <span className="text-xs font-semibold text-danger-600">To must be after From</span>
+            <span className="text-xs font-semibold text-danger-600">{tr("browse.toAfterFrom")}</span>
           )}
         </I18nProvider>
 
         <Button
           isIconOnly
           variant="tertiary"
-          aria-label="Làm mới"
+          aria-label={tr("browse.refresh")}
           className="rounded-full"
           onPress={onRefresh}
           isDisabled={refreshing}
@@ -669,7 +675,7 @@ export function BrowseRooms({
 
         {/* Search rooms by name */}
         <SearchField
-          aria-label="Tìm phòng"
+          aria-label={tr("browse.searchRooms")}
           variant="secondary"
           value={query}
           onChange={setQuery}
@@ -679,7 +685,7 @@ export function BrowseRooms({
             <SearchField.SearchIcon>
               <Magnifier width={16} height={16} />
             </SearchField.SearchIcon>
-            <SearchField.Input placeholder="Search for rooms" />
+            <SearchField.Input placeholder={tr("browse.searchPlaceholder")} />
             <SearchField.ClearButton />
           </SearchField.Group>
         </SearchField>
@@ -696,15 +702,15 @@ export function BrowseRooms({
                 </div>
                 <div>
                   <h2 className="text-base font-semibold text-default-900">
-                    Không có phòng phù hợp
+                    {tr("browse.noRooms")}
                   </h2>
                   <p className="mt-1 text-sm text-default-500">
-                    Thử đổi văn phòng hoặc xóa từ khóa tìm kiếm.
+                    {tr("browse.noRoomsHint")}
                   </p>
                 </div>
                 {query && (
                   <Button variant="secondary" onPress={() => setQuery("")}>
-                    Xóa tìm kiếm
+                    {tr("browse.clearSearch")}
                   </Button>
                 )}
               </Card.Content>
@@ -741,7 +747,7 @@ export function BrowseRooms({
                     {cap && (
                       <div className="flex items-center gap-0.5 text-[10px] text-default-500">
                         <span>
-                          {cap.label} ({cap.range}
+                          {tr(cap.labelKey)} ({cap.range}
                         </span>
                         <PersonFill className="shrink-0" width={10} height={10} />
                         <span>)</span>
@@ -824,7 +830,9 @@ export function BrowseRooms({
                       // The earliest selected slot is the booking start → the
                       // "+ Book" chip sticks there.
                       const selectionStart = selected && ti === dragLo;
-                      const label = schedule ? "+ Schedule Book" : "+ Book";
+                      const label = schedule
+                        ? tr("browse.scheduleBookChip")
+                        : tr("browse.bookChip");
                       return (
                         <div
                           key={r.email}
@@ -883,7 +891,7 @@ export function BrowseRooms({
                           ? {
                               role: "button",
                               tabIndex: 0,
-                              title: "Edit booking",
+                              title: tr("browse.editBooking"),
                               onClick: () => openEditForSlot(r, t, schedule),
                               onKeyDown: (event: KeyboardEvent) => {
                                 if (event.key === "Enter" || event.key === " ") {
@@ -926,11 +934,11 @@ export function BrowseRooms({
                                   >
                                     {myBooking
                                       ? schedule
-                                        ? "Your schedule"
-                                        : "My booking"
+                                        ? tr("browse.yourSchedule")
+                                        : tr("browse.myBooking")
                                       : schedule
-                                        ? "Scheduled"
-                                        : "Booked"}
+                                        ? tr("browse.scheduled")
+                                        : tr("browse.booked")}
                                   </p>
                                   {myBooking && (
                                     <span

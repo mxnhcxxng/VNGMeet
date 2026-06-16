@@ -22,12 +22,14 @@ import {
 } from "@heroui/react";
 import {
   api,
+  type Language,
   type Me,
   type ThemeMode,
   type UserProfileOption,
   type UserProfileOptions,
 } from "@/lib/api";
-import { useTheme } from "@/app/providers";
+import { useLanguage, useTheme } from "@/app/providers";
+import { LANGUAGE_OPTIONS } from "@/lib/i18n";
 
 // --- Display preference ------------------------------------------------------
 
@@ -80,17 +82,10 @@ function ThemeCard({
   );
 }
 
-const THEME_CARDS: { mode: ThemeMode; label: string; src: string }[] = [
-  { mode: "system", label: "System preference", src: "/theme-system.svg" },
-  { mode: "light", label: "Light mode", src: "/theme-light.svg" },
-  { mode: "dark", label: "Dark mode", src: "/theme-dark.svg" },
-];
-
-// --- Language (mock data, FE-only — not persisted) ---------------------------
-
-const LANGUAGE_OPTIONS = [
-  { value: "en", label: "English" },
-  { value: "vi", label: "Tiếng Việt" },
+const THEME_CARDS: { mode: ThemeMode; srcKey: string }[] = [
+  { mode: "system", srcKey: "/theme-system.svg" },
+  { mode: "light", srcKey: "/theme-light.svg" },
+  { mode: "dark", srcKey: "/theme-dark.svg" },
 ];
 
 // --- Section scaffolding -----------------------------------------------------
@@ -131,11 +126,10 @@ export function SettingsScreen({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // Theme is applied live (and persisted) through the global provider; we still
-  // track the last-saved value below so Cancel can revert it.
+  // Theme + language are applied live (and persisted) through global providers;
+  // we still track the last-saved values below so Cancel can revert them.
   const { theme, setTheme } = useTheme();
-  // Language stays FE-only for now (not persisted to the backend).
-  const [language, setLanguage] = useState("en");
+  const { language, setLanguage, t } = useLanguage();
 
   // Baseline snapshot of the form so Save only enables on a real change (and
   // disables again if the user reverts back to the original values).
@@ -146,7 +140,7 @@ export function SettingsScreen({
     preferredRooms: [...(me.profile?.preferred_rooms ?? [])],
     bookWithoutConfirmation: me.profile?.book_without_confirmation ?? false,
     theme: (me.profile?.theme ?? "system") as ThemeMode,
-    language: "en",
+    language: (me.profile?.language ?? "en") as Language,
   });
 
   const email =
@@ -159,7 +153,7 @@ export function SettingsScreen({
   const emailUsername =
     me.profile?.email_username ||
     (email.includes("@") ? email.split("@", 1)[0] : "");
-  const displayName = emailUsername || me.username || "Người dùng";
+  const displayName = emailUsername || me.username || t("common.user");
 
   const isCampus = office === "campus";
   const floorOptions =
@@ -257,6 +251,7 @@ export function SettingsScreen({
         preferred_rooms: preferredRooms,
         book_without_confirmation: bookWithoutConfirmation,
         theme,
+        language,
       });
       // New baseline so the button drops back to disabled after a save.
       initial.current = {
@@ -273,17 +268,17 @@ export function SettingsScreen({
         profile: res.profile,
         profileComplete: res.profileComplete,
       });
-      toast.success("Settings saved", {
-        description: "Your preferences have been updated successfully.",
+      toast.success(t("settings.saved"), {
+        description: t("settings.savedDesc"),
       });
       return true;
     } catch (e: any) {
       setErr(e.message);
-      toast.danger("Save failed", {
+      toast.danger(t("settings.saveFailed"), {
         description:
           e.message === "UNAUTHENTICATED"
-            ? "Please sign in again to continue."
-            : "Could not save your settings. Please try again.",
+            ? t("settings.saveFailedAuth")
+            : t("settings.saveFailedGeneric"),
       });
       return false;
     } finally {
@@ -334,17 +329,17 @@ export function SettingsScreen({
           {/* Personal info */}
           <div className="flex flex-wrap items-start gap-x-8 gap-y-4">
             <SectionLabel
-              title="Personal info"
-              description="Update your photo and personal details."
+              title={t("settings.personalInfo")}
+              description={t("settings.personalInfoDesc")}
             />
             <div className="flex min-w-[280px] flex-1 flex-col gap-4">
               <div className="grid grid-cols-2 gap-4">
                 <TextField fullWidth isDisabled>
-                  <Label>Domain {req}</Label>
+                  <Label>{t("settings.domain")} {req}</Label>
                   <Input variant="secondary" value={emailUsername} />
                 </TextField>
                 <TextField fullWidth isDisabled>
-                  <Label>Email {req}</Label>
+                  <Label>{t("settings.email")} {req}</Label>
                   <Input variant="secondary" value={email} />
                 </TextField>
               </div>
@@ -352,13 +347,13 @@ export function SettingsScreen({
               <Select
                 variant="secondary"
                 className="flex flex-col gap-2"
-                placeholder="Choose Office"
+                placeholder={t("settings.chooseOffice")}
                 selectedKey={office || null}
                 onSelectionChange={changeOffice}
                 isRequired
                 isDisabled={optionsLoading}
               >
-                <Label>Office</Label>
+                <Label>{t("settings.office")}</Label>
                 <Select.Trigger>
                   <Select.Value />
                   <Select.Indicator />
@@ -378,12 +373,12 @@ export function SettingsScreen({
                 <Select
                   variant="secondary"
                   className="flex flex-col gap-2"
-                  placeholder="Choose Floor"
+                  placeholder={t("settings.chooseFloor")}
                   selectedKey={floor || null}
                   onSelectionChange={(key) => setFloor((key as string) ?? "")}
                   isDisabled={!isCampus || optionsLoading}
                 >
-                  <Label>Floor</Label>
+                  <Label>{t("settings.floor")}</Label>
                   <Select.Trigger>
                     <Select.Value />
                     <Select.Indicator />
@@ -401,12 +396,12 @@ export function SettingsScreen({
                 <Select
                   variant="secondary"
                   className="flex flex-col gap-2"
-                  placeholder="Choose Building"
+                  placeholder={t("settings.chooseBuilding")}
                   selectedKey={building || null}
                   onSelectionChange={(key) => setBuilding((key as string) ?? "")}
                   isDisabled={!isCampus || optionsLoading}
                 >
-                  <Label>Building</Label>
+                  <Label>{t("settings.building")}</Label>
                   <Select.Trigger>
                     <Select.Value />
                     <Select.Indicator />
@@ -427,13 +422,13 @@ export function SettingsScreen({
                 variant="secondary"
                 fullWidth
                 className="flex flex-col gap-2 [&_.autocomplete__trigger]:w-full"
-                placeholder="Maximum 3 rooms"
+                placeholder={t("settings.preferredRoomsPlaceholder")}
                 selectionMode="multiple"
                 value={preferredRooms}
                 onChange={updatePreferredRooms}
                 isDisabled={!office || optionsLoading}
               >
-                <Label>Prefered Rooms</Label>
+                <Label>{t("settings.preferredRooms")}</Label>
                 <Autocomplete.Trigger>
                   <Autocomplete.Value>
                     {({ defaultChildren, isPlaceholder, state }) => {
@@ -476,21 +471,25 @@ export function SettingsScreen({
                     <div className="w-full px-2 py-2">
                       <SearchField
                         autoFocus
-                        aria-label="Search prefered rooms"
+                        aria-label={t("settings.preferredRooms")}
                         name="search"
                         variant="secondary"
                         fullWidth
                       >
                         <SearchField.Group>
                           <SearchField.SearchIcon />
-                          <SearchField.Input placeholder="Maximum 3 rooms" />
+                          <SearchField.Input
+                            placeholder={t("settings.preferredRoomsPlaceholder")}
+                          />
                           <SearchField.ClearButton />
                         </SearchField.Group>
                       </SearchField>
                     </div>
                     <ListBox
                       className="max-h-[200px] overflow-y-auto"
-                      renderEmptyState={() => <EmptyState>No results found</EmptyState>}
+                      renderEmptyState={() => (
+                      <EmptyState>{t("settings.noResults")}</EmptyState>
+                    )}
                     >
                       {preferredRoomOptions.map((item) => (
                         <ListBoxItem
@@ -518,8 +517,8 @@ export function SettingsScreen({
           {/* Booking confirmation toggle */}
           <div className="flex flex-wrap items-start gap-x-8 gap-y-4">
             <SectionLabel
-              title="Booking confirmation"
-              description="Let the chatbot book a room instantly when you pick one, skipping the in-chat confirmation card."
+              title={t("settings.bookingConfirmation")}
+              description={t("settings.bookingConfirmationDesc")}
             />
             <div className="flex min-w-[280px] flex-1 items-center gap-3">
               <Switch
@@ -532,8 +531,8 @@ export function SettingsScreen({
               </Switch>
               <span className="text-sm font-medium text-[#18181b] dark:text-[#f7f7f7]">
                 {bookWithoutConfirmation
-                  ? "ON (Bot will book without confirmation)"
-                  : "OFF (Bot will always ask for confirmation)"}
+                  ? t("settings.bookingOn")
+                  : t("settings.bookingOff")}
               </span>
             </div>
           </div>
@@ -543,16 +542,22 @@ export function SettingsScreen({
           {/* Display preference (mock) */}
           <div className="flex flex-wrap items-start gap-x-8 gap-y-4">
             <SectionLabel
-              title="Display preference"
-              description="Switch between light and dark modes."
+              title={t("settings.displayPreference")}
+              description={t("settings.displayPreferenceDesc")}
             />
             <div className="flex flex-1 flex-wrap gap-5">
               {THEME_CARDS.map((card) => (
                 <ThemeCard
                   key={card.mode}
                   mode={card.mode}
-                  label={card.label}
-                  src={card.src}
+                  label={t(
+                    card.mode === "system"
+                      ? "settings.themeSystem"
+                      : card.mode === "light"
+                        ? "settings.themeLight"
+                        : "settings.themeDark",
+                  )}
+                  src={card.srcKey}
                   selected={theme === card.mode}
                   onSelect={setTheme}
                 />
@@ -565,15 +570,17 @@ export function SettingsScreen({
           {/* Language (mock) */}
           <div className="flex flex-wrap items-start gap-x-8 gap-y-4">
             <SectionLabel
-              title="Language"
-              description="Default language for VNG Meets."
+              title={t("settings.language")}
+              description={t("settings.languageDesc")}
             />
             <div className="flex flex-1">
               <Select
                 variant="secondary"
                 className="flex w-[256px] flex-col gap-2"
                 selectedKey={language}
-                onSelectionChange={(key) => setLanguage((key as string) ?? "en")}
+                onSelectionChange={(key) =>
+                  setLanguage((key as Language) ?? "en")
+                }
               >
                 <Select.Trigger>
                   <Select.Value />
@@ -608,7 +615,7 @@ export function SettingsScreen({
               onPress={resetForm}
               isDisabled={busy || !dirty}
             >
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button
               className="rounded-full"
@@ -616,7 +623,7 @@ export function SettingsScreen({
               isPending={busy}
               onPress={submitProfile}
             >
-              Save changes
+              {t("common.save")}
             </Button>
           </div>
         </div>

@@ -23,7 +23,7 @@ from cryptography.fernet import Fernet, InvalidToken
 from fastapi import Body, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from starlette.middleware.sessions import SessionMiddleware
 
 from . import auth, availability, graph
@@ -356,6 +356,7 @@ def _profile_payload(profile: dict | None, email: str | None = None) -> dict | N
         "preferred_rooms": row.get("preferred_rooms") or [],
         "book_without_confirmation": bool(row.get("book_without_confirmation")),
         "theme": row.get("theme") or "system",
+        "language": row.get("language") or "vi",
         "role": row.get("role") or "user",
     }
 
@@ -371,7 +372,7 @@ def _read_user_profile(profile_id: str | None, email: str | None = None) -> dict
             .table("user_profiles")
             .select(
                 "id, email, email_username, office, floor, building, "
-                "preferred_rooms, book_without_confirmation, theme, role"
+                "preferred_rooms, book_without_confirmation, theme, language, role"
             )
             .limit(1)
         )
@@ -1340,6 +1341,22 @@ async def run_room_scouts_now(request: Request):
 # --------------------------------------------------------------------------- #
 # Bookings
 # --------------------------------------------------------------------------- #
+ATTENDEE_EMAIL_DOMAIN = "@vng.com.vn"
+
+
+def _normalize_attendees(values: list[str] | None) -> list[str]:
+    """The booking modal lets users type bare domains (e.g. "cuongdm4"); append
+    the org email suffix so we store and send full addresses. Entries that
+    already contain "@" are kept as-is. Blanks are dropped."""
+    normalized: list[str] = []
+    for raw in values or []:
+        value = (raw or "").strip()
+        if not value:
+            continue
+        normalized.append(value if "@" in value else f"{value}{ATTENDEE_EMAIL_DOMAIN}")
+    return normalized
+
+
 class BookingRequest(BaseModel):
     room_email: str
     room_name: str | None = None
@@ -1352,6 +1369,11 @@ class BookingRequest(BaseModel):
     attendees: list[str] = []
     body: str | None = None
 
+    @field_validator("attendees")
+    @classmethod
+    def _normalize(cls, value: list[str]) -> list[str]:
+        return _normalize_attendees(value)
+
 
 class UpdateBookingRequest(BaseModel):
     """Editable fields of an existing booking. All optional — only sent fields change."""
@@ -1362,6 +1384,12 @@ class UpdateBookingRequest(BaseModel):
     subject: str | None = None
     attendees: list[str] | None = None
     body: str | None = None
+
+    @field_validator("attendees")
+    @classmethod
+    def _normalize(cls, value: list[str] | None) -> list[str] | None:
+        # None means "leave attendees unchanged" — preserve it.
+        return None if value is None else _normalize_attendees(value)
 
 
 class ChatSendRequest(BaseModel):
@@ -1389,6 +1417,7 @@ class UserProfileUpdateRequest(BaseModel):
     preferred_rooms: list[str] = Field(default_factory=list)
     book_without_confirmation: bool | None = None
     theme: str | None = None
+    language: str | None = None
 
 
 @app.get("/api/users/profile-options")
@@ -1420,6 +1449,11 @@ def update_my_profile(request: Request, payload: UserProfileUpdateRequest):
         if theme not in ("system", "light", "dark"):
             raise HTTPException(400, "Theme không hợp lệ.")
         cleaned["theme"] = theme
+    if payload.language is not None:
+        language = str(payload.language).strip().lower()
+        if language not in ("en", "vi"):
+            raise HTTPException(400, "Language không hợp lệ.")
+        cleaned["language"] = language
 
     profile_id = _upsert_user_profile(claims)
     if not profile_id:
