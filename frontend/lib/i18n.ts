@@ -84,6 +84,11 @@ const en = {
   "settings.saveFailed": "Save failed",
   "settings.saveFailedAuth": "Please sign in again to continue.",
   "settings.saveFailedGeneric": "Could not save your settings. Please try again.",
+  "settings.session": "Session",
+  "settings.sessionDesc": "Time remaining before your auth token expires.",
+  "settings.sessionExpiresIn": "Expires in",
+  "settings.sessionExpired": "Expired",
+  "settings.sessionUnavailable": "No active session.",
 
   // --- Login --------------------------------------------------------------
   "login.welcome": "Welcome to VNG Meet",
@@ -445,6 +450,11 @@ const vi: Partial<Record<TranslationKey, string>> = {
   "settings.saveFailed": "Lưu thất bại",
   "settings.saveFailedAuth": "Vui lòng đăng nhập lại để tiếp tục.",
   "settings.saveFailedGeneric": "Không thể lưu cài đặt. Vui lòng thử lại.",
+  "settings.session": "Phiên đăng nhập",
+  "settings.sessionDesc": "Thời gian còn lại trước khi token xác thực hết hạn.",
+  "settings.sessionExpiresIn": "Hết hạn sau",
+  "settings.sessionExpired": "Đã hết hạn",
+  "settings.sessionUnavailable": "Không có phiên đang hoạt động.",
 
   // --- Login --------------------------------------------------------------
   "login.welcome": "Chào mừng đến với VNG Meet",

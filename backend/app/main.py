@@ -483,6 +483,7 @@ def me(request: Request):
                 "graphLinked": auth.has_refresh_token(claims["sub"]),
                 "profile": profile,
                 "profileComplete": profile_complete,
+                "tokenExpiresAt": claims.get("exp"),
             }
         )
     sid = auth.session_id(request)
@@ -491,6 +492,9 @@ def me(request: Request):
         return JSONResponse({"authenticated": False})
     claims = auth.get_manual_claims(sid)
     profile, profile_complete = _me_profile_response(claims)
+    # The pasted Graph token is a JWT; surface its `exp` so the UI can count down
+    # to expiry (the manual token does not auto-refresh).
+    token_exp = auth.decode_jwt_claims(token).get("exp")
     return JSONResponse(
         {
             "authenticated": True,
@@ -498,6 +502,7 @@ def me(request: Request):
             "email": _profile_email(claims),
             "profile": profile,
             "profileComplete": profile_complete,
+            "tokenExpiresAt": token_exp,
         }
     )
 

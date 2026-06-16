@@ -30,6 +30,7 @@ import {
 } from "@/lib/api";
 import { useLanguage, useTheme } from "@/app/providers";
 import { LANGUAGE_OPTIONS } from "@/lib/i18n";
+import { supabase } from "@/lib/supabase";
 
 // --- Display preference ------------------------------------------------------
 
@@ -95,6 +96,88 @@ function SectionLabel({ title, description }: { title: string; description: stri
     <div className="flex min-w-[200px] max-w-[280px] flex-1 flex-col">
       <p className="text-sm font-medium text-[#18181b] dark:text-[#f7f7f7]">{title}</p>
       <p className="text-sm text-[#71717a] dark:text-[#94979c]">{description}</p>
+    </div>
+  );
+}
+
+// --- Auth token countdown ----------------------------------------------------
+
+// Ticks down to the auth token's expiry once a second. Two auth flows exist:
+//  - Supabase OAuth: read the live session `expires_at` (auto-refreshed in the
+//    background, so we re-read it on every auth state change).
+//  - Manual Graph token (pasted): the backend surfaces the JWT `exp` via
+//    `me.tokenExpiresAt`; that token does not auto-refresh.
+function SessionCountdown({ me }: { me: Me }) {
+  const { t } = useLanguage();
+  const [sessionExpiresAt, setSessionExpiresAt] = useState<number | null>(null);
+  const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
+
+  useEffect(() => {
+    const client = supabase;
+    if (client) {
+      let active = true;
+
+      const syncSession = async () => {
+        const { data } = await client.auth.getSession();
+        if (active) setSessionExpiresAt(data.session?.expires_at ?? null);
+      };
+      syncSession();
+
+      const { data: sub } = client.auth.onAuthStateChange((_event, session) => {
+        setSessionExpiresAt(session?.expires_at ?? null);
+      });
+
+      const interval = setInterval(() => {
+        setNow(Math.floor(Date.now() / 1000));
+      }, 1000);
+
+      return () => {
+        active = false;
+        sub.subscription.unsubscribe();
+        clearInterval(interval);
+      };
+    }
+
+    // Manual-token flow: no Supabase session, just tick the clock.
+    const interval = setInterval(() => {
+      setNow(Math.floor(Date.now() / 1000));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Prefer the live Supabase session; fall back to the backend-reported token exp.
+  const expiresAt = sessionExpiresAt ?? me.tokenExpiresAt ?? null;
+
+  if (expiresAt === null) {
+    return (
+      <span className="text-sm text-[#71717a] dark:text-[#94979c]">
+        {t("settings.sessionUnavailable")}
+      </span>
+    );
+  }
+
+  const remaining = Math.max(0, expiresAt - now);
+  const expired = remaining <= 0;
+  const h = Math.floor(remaining / 3600);
+  const m = Math.floor((remaining % 3600) / 60);
+  const s = remaining % 60;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const formatted = h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
+  // Warn (amber) under 2 min, danger (red) once expired.
+  const tone = expired
+    ? "text-danger"
+    : remaining < 120
+      ? "text-[#dc6803] dark:text-[#f79009]"
+      : "text-[#181d27] dark:text-[#f7f7f7]";
+
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-sm text-[#71717a] dark:text-[#94979c]">
+        {t("settings.sessionExpiresIn")}
+      </span>
+      <span className={`font-mono text-base font-semibold tabular-nums ${tone}`}>
+        {expired ? t("settings.sessionExpired") : formatted}
+      </span>
     </div>
   );
 }
@@ -596,6 +679,19 @@ export function SettingsScreen({
                   </ListBox>
                 </Select.Popover>
               </Select>
+            </div>
+          </div>
+
+          <div className="h-px w-full bg-[#e9eaeb] dark:bg-[#373a41]" />
+
+          {/* Auth token countdown */}
+          <div className="flex flex-wrap items-start gap-x-8 gap-y-4">
+            <SectionLabel
+              title={t("settings.session")}
+              description={t("settings.sessionDesc")}
+            />
+            <div className="flex min-w-[280px] flex-1 items-center">
+              <SessionCountdown me={me} />
             </div>
           </div>
 

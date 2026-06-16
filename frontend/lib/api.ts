@@ -35,6 +35,9 @@ export interface Me {
   graphLinked?: boolean;
   profile?: UserProfile | null;
   profileComplete?: boolean;
+  // Unix seconds at which the current auth token expires (Supabase JWT `exp` or
+  // the pasted Graph token's `exp`). Used by the Settings session countdown.
+  tokenExpiresAt?: number | null;
 }
 
 export type ThemeMode = "system" | "light" | "dark";
