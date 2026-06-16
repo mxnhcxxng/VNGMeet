@@ -118,19 +118,54 @@ interface LanguageContextValue {
 
 const LanguageContext = createContext<LanguageContextValue | null>(null);
 
-export function LanguageProvider({ children }: { children: React.ReactNode }) {
-  // Mirror ThemeProvider: read the localStorage value the user last chose so the
-  // first client render is already in the right language.
-  const [language, setLanguageState] = useState<Language>(() => {
-    if (typeof window === "undefined") return DEFAULT_LANGUAGE;
+function readLanguageCookie(): Language | null {
+  if (typeof document === "undefined") return null;
+  const match = document.cookie.match(
+    new RegExp(`(?:^|; )${LANGUAGE_STORAGE_KEY}=([^;]*)`),
+  );
+  const value = match ? decodeURIComponent(match[1]) : null;
+  return value === "vi" || value === "en" ? value : null;
+}
+
+function writeLanguageCookie(lang: Language) {
+  if (typeof document === "undefined") return;
+  // 1-year persistent cookie so the server can render the right language on the
+  // first request — no client-side flash. SameSite=Lax is enough for first-party.
+  document.cookie = `${LANGUAGE_STORAGE_KEY}=${lang}; path=/; max-age=31536000; samesite=lax`;
+}
+
+export function LanguageProvider({
+  children,
+  initialLanguage,
+}: {
+  children: React.ReactNode;
+  // Language resolved on the server from the request cookie, so the first client
+  // render matches the server-rendered HTML (no hydration mismatch, no flash).
+  initialLanguage?: Language;
+}) {
+  const [language, setLanguageState] = useState<Language>(
+    initialLanguage ?? DEFAULT_LANGUAGE,
+  );
+
+  // One-time migration for users who picked a language before cookies were used:
+  // their choice lives only in localStorage, which the server can't see. Adopt it
+  // and mirror it into a cookie so every later load renders correctly server-side.
+  useEffect(() => {
+    if (readLanguageCookie()) return;
     const stored = window.localStorage.getItem(LANGUAGE_STORAGE_KEY);
-    return stored === "vi" || stored === "en" ? stored : DEFAULT_LANGUAGE;
-  });
+    if (stored === "vi" || stored === "en") {
+      writeLanguageCookie(stored);
+      if (stored !== language) setLanguageState(stored);
+    }
+    // Only runs once on mount; `language` is the initial server value here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const setLanguage = useCallback((lang: Language) => {
     setLanguageState(lang);
     if (typeof window !== "undefined") {
       window.localStorage.setItem(LANGUAGE_STORAGE_KEY, lang);
+      writeLanguageCookie(lang);
     }
   }, []);
 
@@ -167,10 +202,16 @@ export function useT(): TFunction {
   return useLanguage().t;
 }
 
-export function Providers({ children }: { children: React.ReactNode }) {
+export function Providers({
+  children,
+  initialLanguage,
+}: {
+  children: React.ReactNode;
+  initialLanguage?: Language;
+}) {
   return (
     <ThemeProvider>
-      <LanguageProvider>
+      <LanguageProvider initialLanguage={initialLanguage}>
         {children}
         <ToastProvider placement="top end" />
       </LanguageProvider>

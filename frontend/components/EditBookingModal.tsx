@@ -40,12 +40,6 @@ export function EditBookingModal({
 
   const isScheduled = booking.booking_type === "scheduled";
   const roomName = booking.room_name || booking.room_email;
-  const initials = roomName
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((w) => w[0])
-    .join("")
-    .toUpperCase();
 
   const closeFromBackdrop = (event: MouseEvent<HTMLDivElement>) => {
     if (event.target === event.currentTarget) onClose();
@@ -103,18 +97,12 @@ export function EditBookingModal({
         {/* Room thumbnail (meeting_room_metadata.thumbnail_link) */}
         <div className="px-6 pt-6">
           <div className="relative h-[120px] w-full overflow-hidden rounded-lg bg-default-100">
-            {thumbnail ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={thumbnail}
-                alt={roomName}
-                className="h-full w-full object-cover"
-              />
-            ) : (
-              <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-primary to-secondary text-2xl font-bold text-white">
-                {initials}
-              </div>
-            )}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={thumbnail || "/default-room-thumbnail.png"}
+              alt={roomName}
+              className="h-full w-full object-cover"
+            />
             {isScheduled && (
               <div className="absolute bottom-2 left-2 inline-flex items-center gap-1 rounded-md bg-[var(--accent)] px-2 py-1 text-sm font-medium leading-5 text-[var(--accent-foreground)] shadow-sm">
                 <Clock width={16} height={16} />

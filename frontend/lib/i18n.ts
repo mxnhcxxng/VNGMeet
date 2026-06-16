@@ -36,7 +36,7 @@ const en = {
   // --- Sidebar ------------------------------------------------------------
   "sidebar.browseRooms": "Browse rooms",
   "sidebar.chat": "Chat",
-  "sidebar.roomScout": "Room Scout",
+  "sidebar.roomScout": "Scout Rooms",
   "sidebar.bookingHistory": "Booking history",
   "sidebar.settings": "Settings",
   "sidebar.newChat": "New chat",

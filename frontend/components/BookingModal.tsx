@@ -111,13 +111,6 @@ export function BookingModal({
 
   if (!slot || !isOpen) return null;
 
-  const initials = slot.roomName
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((w) => w[0])
-    .join("")
-    .toUpperCase();
-
   const submit = async () => {
     if (!subject.trim()) {
       setError(t("booking.titleRequired"));
@@ -185,18 +178,12 @@ export function BookingModal({
         {/* Room thumbnail (meeting_room_metadata.thumbnail_link) */}
         <div className="px-6 pt-6">
           <div className="relative h-[120px] w-full overflow-hidden rounded-lg bg-default-100">
-            {slot.thumbnail ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={slot.thumbnail}
-                alt={slot.roomName}
-                className="h-full w-full object-cover"
-              />
-            ) : (
-              <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-primary to-secondary text-2xl font-bold text-white">
-                {initials}
-              </div>
-            )}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={slot.thumbnail || "/default-room-thumbnail.png"}
+              alt={slot.roomName}
+              className="h-full w-full object-cover"
+            />
             {slot.schedule && (
               <div className="absolute bottom-2 left-2 inline-flex items-center gap-1 rounded-md bg-[var(--accent)] px-2 py-1 text-sm font-medium leading-5 text-[var(--accent-foreground)] shadow-sm">
                 <Clock width={16} height={16} />
