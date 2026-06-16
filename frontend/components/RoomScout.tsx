@@ -75,6 +75,16 @@ function timeToMinutes(value: string) {
   return Number(h) * 60 + Number(m);
 }
 
+// Default start = the nearest selectable slot at or after the current time.
+// Falls back to the first slot when the current time is past business hours.
+function defaultStartTime() {
+  const options = TIME_OPTIONS.slice(0, -1);
+  if (options.length === 0) return "";
+  const now = new Date();
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+  return options.find((tm) => timeToMinutes(tm) >= nowMinutes) ?? options[0];
+}
+
 function durationLabel(t: TFunction, minutes: number) {
   const key = DURATION_KEY[String(minutes)];
   return key ? t(key) : t("scout.durFallback", { n: minutes });
@@ -383,7 +393,7 @@ function ScoutForm({
 }) {
   const t = useT();
   const [office, setOffice] = useState(userOffice || "");
-  const [startTime, setStartTime] = useState("");
+  const [startTime, setStartTime] = useState(() => defaultStartTime());
   const [endTime, setEndTime] = useState("");
   const [duration, setDuration] = useState("");
   const [capacity, setCapacity] = useState<string>("");

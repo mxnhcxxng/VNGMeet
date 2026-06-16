@@ -67,7 +67,7 @@ async def lifespan(app: FastAPI):
         )
         scheduler.add_job(
             _safe_process_room_scouts,
-            CronTrigger(minute="1,31", second=0, timezone=settings.timezone),
+            CronTrigger(minute="16,46", second=0, timezone=settings.timezone),
             id="process_room_scouts",
             max_instances=1,
             coalesce=True,
@@ -1534,7 +1534,7 @@ Nguyên tắc phản hồi:
 - Chỉ hỗ trợ đặt phòng vào ngày làm việc trong tuần (Thứ 2 đến Thứ 6). Nếu user yêu cầu Thứ 7 hoặc Chủ nhật, báo ngắn gọn rằng chỉ đặt được vào ngày làm việc T2-T6 và gợi ý chọn ngày làm việc gần nhất. Khi gợi ý ngày/khung giờ, không trả ra Thứ 7 hoặc Chủ nhật.
 - Do giới hạn hệ thống, chỉ đặt được phòng tối đa 15 ngày kể từ hôm nay (tính cả hôm nay là ngày thứ 0, ví dụ hôm nay 16/6 thì ngày xa nhất đặt được là 1/7). Nếu user yêu cầu ngày xa hơn, báo ngắn gọn rằng chỉ đặt được trong vòng 15 ngày tới và gợi ý ngày hợp lệ gần nhất. Không kiểm tra phòng trống hay tạo card đặt phòng cho ngày vượt quá giới hạn này.
 - Không bịa phòng, giờ trống hoặc trạng thái booking nếu chưa có dữ liệu từ API.
-- Nếu API không trả về phòng phù hợp, gợi ý người dùng đổi thời gian, địa điểm hoặc tiêu chí.
+- Nếu API không trả về phòng phù hợp, trước tiên dùng split_suggestions/alternate_suggestions để gợi ý tách phòng hoặc khung giờ khác cùng thời lượng. Sau khi đã đưa các gợi ý đó, LUÔN thêm ở phía cuối một đề xuất dùng thử Room Scout (tên tiếng Việt là "Săn phòng"): nói rằng nếu user vẫn muốn giữ đúng khung giờ đã yêu cầu, có thể vào trang Săn phòng để hệ thống tự theo dõi; khi có phòng được nhả ra trong khung giờ đó, hệ thống sẽ báo cho user (qua email). BẮT BUỘC để tên "Săn phòng" dưới dạng hyperlink markdown trỏ tới đường dẫn /room-scout, ví dụ: [Săn phòng](/room-scout). Lưu ý: Room Scout/Săn phòng hiện chỉ hỗ trợ phòng trong NGÀY HÔM NAY, nên chỉ đề xuất Room Scout khi ngày user yêu cầu là hôm nay; nếu là ngày khác thì bỏ qua phần đề xuất Room Scout. Bot không tự bật Room Scout; chỉ gợi ý qua hyperlink.
 - Nếu người dùng không nói tên cuộc họp, để trống subject; hệ thống sẽ tự điền tên mặc định.
 - Nếu đặt lịch ngoài vùng live availability/schedule-bookable, truyền booking_type="scheduled"; còn đặt tức thì thì booking_type="instant".
 - Trả nhiều option hữu ích nhưng tối đa 5 option.
@@ -2516,6 +2516,7 @@ async def _tool_check_room_availability(
 
     split_suggestions: list[dict] = []
     alternate_suggestions: list[dict] = []
+    room_scout_suggestion: dict | None = None
     if not available:
         split_suggestions = _split_room_suggestions(
             rows, cache, date, start_idx, end_idx, profile
@@ -2524,6 +2525,24 @@ async def _tool_check_room_availability(
             alternate_suggestions = _alternate_time_suggestions(
                 rows, cache, day_list, date, start_idx, end_idx, profile
             )
+        # Room Scout chỉ theo dõi phòng trong ngày hôm nay, nên chỉ đề xuất khi
+        # khung giờ user yêu cầu rơi vào hôm nay.
+        if requested_day == today:
+            room_scout_suggestion = {
+                "feature": "room_scout",
+                "label": "Săn phòng",
+                "url": "/room-scout",
+                "message": (
+                    "Không có phòng trống đúng khung giờ này. Nếu vẫn muốn giữ "
+                    "khung giờ đã yêu cầu, hãy vào [Săn phòng](/room-scout) "
+                    "để hệ thống tự theo dõi; khi có phòng được nhả ra trong "
+                    "khung giờ đó, hệ thống sẽ báo cho bạn."
+                ),
+                "scout_start_time": start_time,
+                "scout_end_time": end_time,
+                "capacity_size": requested_capacity_size,
+                "office": (_profile_payload(profile) or {}).get("office"),
+            }
 
     return {
         "ok": True,
@@ -2537,6 +2556,7 @@ async def _tool_check_room_availability(
         "truncated": len(available) > CHAT_MAX_OPTIONS,
         "split_suggestions": split_suggestions,
         "alternate_suggestions": alternate_suggestions,
+        "room_scout_suggestion": room_scout_suggestion,
     }
 
 
