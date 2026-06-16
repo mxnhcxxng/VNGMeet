@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -32,7 +33,7 @@ import {
   Xmark,
 } from "@gravity-ui/icons";
 import { api, type BookingRequest, type ChatMessage, type ChatThread, type UserRole } from "@/lib/api";
-import { useT } from "@/app/providers";
+import { useLanguage, useT } from "@/app/providers";
 import type { TranslationKey } from "@/lib/i18n";
 import { BrandIcon } from "./BrandIcon";
 
@@ -597,9 +598,7 @@ function AdminAssistantMessage({ content }: { content: string }) {
               <div className="mb-1 font-semibold uppercase tracking-wide">
                 {t("chatp.think")}
               </div>
-              <pre className="whitespace-pre-wrap break-words font-mono">
-                {part.content}
-              </pre>
+              <MarkdownMessage content={part.content} />
             </div>
           );
         }
@@ -622,7 +621,7 @@ export function ChatPanel({
   userRole?: UserRole;
   userDomain?: string;
 }) {
-  const t = useT();
+  const { language, t } = useLanguage();
   const [messages, setMessages] = useState<ChatMessage[]>(() =>
     threadId ? cachedMessagesByThread.get(threadId) ?? [] : []
   );
@@ -782,6 +781,22 @@ export function ChatPanel({
 
   const empty = !threadId && messages.length === 0 && !sending;
 
+  // Tonight's booking can reach 15 days out (the max bookable date).
+  const maxBookableDate = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 15);
+    return d.toLocaleDateString(
+      language === "vi" ? "vi-VN" : "en-US",
+      language === "vi"
+        ? { day: "numeric", month: "numeric" }
+        : { month: "long", day: "numeric" }
+    );
+  }, [language]);
+
+  const suggestionVars: Partial<Record<TranslationKey, Record<string, string>>> = {
+    "chatp.suggestion3": { date: maxBookableDate },
+  };
+
   return (
     <ImageZoomContext.Provider value={setZoomImage}>
     <div className="flex h-full w-full flex-col">
@@ -825,9 +840,9 @@ export function ChatPanel({
               <p className="mt-2 max-w-md text-sm text-[#535862] dark:text-[#94979c]">
                 {t("chatp.greetingSubtitle")}
               </p>
-              <div className="mt-8 grid w-full max-w-xl gap-2 sm:grid-cols-2">
+              <div className="mt-8 grid w-full max-w-3xl gap-2 sm:grid-cols-2">
                 {SUGGESTION_KEYS.map((key) => {
-                  const text = t(key);
+                  const text = t(key, suggestionVars[key]);
                   return (
                     <button
                       key={key}

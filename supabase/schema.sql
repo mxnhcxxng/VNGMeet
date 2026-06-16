@@ -101,7 +101,7 @@ values
   ('floor', '2', '2', 'office', 'campus', 20),
   ('floor', '3', '3', 'office', 'campus', 30),
   ('floor', '4', '4', 'office', 'campus', 40),
-  ('building', 'V1', 'V1 (VNG, Zalo, Greennode)', 'office', 'campus', 10),
+  ('building', 'V1', 'V1 (VNGGames, Zalo, GreenNode)', 'office', 'campus', 10),
   ('building', 'V2', 'V2 (Zalopay)', 'office', 'campus', 20)
 on conflict (field, value) do update set
   label = excluded.label,

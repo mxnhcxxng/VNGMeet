@@ -1127,6 +1127,17 @@ def _room_scout_signature(day: str, start_time: str, end_time: str, rooms: list[
     return f"{day}|{start_time}|{end_time}|{emails}"
 
 
+# Inline VNG Meet brand mark (same artwork as the web app's BrandIcon), embedded
+# directly so the email renders the logo without depending on an externally hosted
+# image. Kept as a module constant to avoid rebuilding the markup on every send.
+_VNG_MEET_EMAIL_ICON = (
+    '<img width="32" height="32" alt="VNG Meet" style="display:block;border:0" '
+    'src="data:image/svg+xml;base64,'
+    "PHN2ZyB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHZpZXdCb3g9IjAgMCAzMiAzMiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTE2LjY0MzggMy4wMjY2OUMxNy41ODAxIDIuNjk4NjIgMTguNTU5NyAzLjM5Mjk2IDE4LjU1OTggNC4zODUwOVYyNi44NTY4QzE4LjU1OTYgMjcuNzI4NSAxNy43OTA5IDI4LjQwMDQgMTYuOTI3IDI4LjI4MzVMNy45NjcwNCAyNy4wNjc3QzcuMjUzMTUgMjYuOTcwOCA2LjcxOTk3IDI2LjM2MDQgNi43MTk5NyAyNS42NFY3LjUyNjY5QzYuNzE5OTkgNi45MTUwNyA3LjEwNjY2IDYuMzY5NjggNy42ODM4NCA2LjE2NzMyTDE2LjY0MzggMy4wMjY2OVpNMTQuNzIgMTQuMzk5N0MxNC4xMDE0IDE0LjM5OTcgMTMuNTk5OSAxNS4xMTU4IDEzLjU5OTkgMTUuOTk5M0MxMy41OTk5IDE2Ljg4MyAxNC4xMDE0IDE3LjU5OTkgMTQuNzIgMTcuNTk5OUMxNS4zMzg1IDE3LjU5OTkgMTUuODQwMSAxNi44ODMgMTUuODQwMSAxNS45OTkzQzE1Ljg0IDE1LjExNTggMTUuMzM4NSAxNC4zOTk3IDE0LjcyIDE0LjM5OTdaIiBmaWxsPSIjRjA1QTIyIi8+CjxwYXRoIGQ9Ik0xOS44NCA3LjM1OTk5SDIzLjg0QzIzLjkyODMgNy4zNTk5OSAyNCA3LjQzMTYyIDI0IDcuNTE5OTlWMjUuNkMyNCAyNS42ODg0IDIzLjkyODMgMjUuNzYgMjMuODQgMjUuNzZIMTkuODQiIHN0cm9rZT0iI0YwNUEyMiIgc3Ryb2tlLXdpZHRoPSIyLjU2IiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz4KPC9zdmc+"
+    '" />'
+)
+
+
 def _room_scout_email_body(scout: dict, rooms: list[dict], day: str, start_time: str, end_time: str) -> str:
     rows = "\n".join(
         "<tr>"
@@ -1139,8 +1150,15 @@ def _room_scout_email_body(scout: dict, rooms: list[dict], day: str, start_time:
     )
     extra = "" if len(rooms) <= 12 else f"<p>And {len(rooms) - 12} more room(s).</p>"
     size = str(scout.get("capacity_size") or "any").strip().lower() or "any"
+    book_url = html.escape(settings.public_url)
     return f"""
     <div style="font-family:Arial,sans-serif;color:#18181b;line-height:1.5">
+      <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 16px">
+        <tr>
+          <td style="vertical-align:middle;padding-right:10px">{_VNG_MEET_EMAIL_ICON}</td>
+          <td style="vertical-align:middle;font-size:20px;font-weight:700;color:#18181b">VNG Meet</td>
+        </tr>
+      </table>
       <h2 style="margin:0 0 12px">Room Scout found available rooms</h2>
       <p>Window: <strong>{html.escape(day)} {html.escape(start_time)} - {html.escape(end_time)}</strong></p>
       <p>Free for {int(scout.get("duration_minutes") or 0)} minutes. Capacity: {html.escape(size)}.</p>
@@ -1156,7 +1174,7 @@ def _room_scout_email_body(scout: dict, rooms: list[dict], day: str, start_time:
         <tbody>{rows}</tbody>
       </table>
       {extra}
-      <p style="margin-top:16px"><a href="{html.escape(settings.public_url)}">Open VNG Meet to book</a></p>
+      <p style="margin-top:16px"><a href="{book_url}" style="color:#F05A22">Open VNG Meet to book</a></p>
     </div>
     """
 
@@ -2134,7 +2152,18 @@ def _half_day_group(start_idx: int) -> str:
     return "morning" if start_idx < (12 * 60 // settings.availability_slot_minutes) else "afternoon"
 
 
-def _alternate_priority(requested_date: date_cls, candidate_date: date_cls, start_idx: int, requested_start_idx: int) -> tuple:
+def _overlaps_lunch(start_idx: int, end_idx: int) -> bool:
+    """True if [start_idx, end_idx) overlaps the 12:00-13:00 lunch window.
+
+    Used to deprioritize lunch-time slots when the system *chooses* an
+    alternate meeting time (the user's exact requested range is never moved).
+    """
+    lunch_start = 12 * 60 // settings.availability_slot_minutes
+    lunch_end = 13 * 60 // settings.availability_slot_minutes
+    return start_idx < lunch_end and end_idx > lunch_start
+
+
+def _alternate_priority(requested_date: date_cls, candidate_date: date_cls, start_idx: int, end_idx: int, requested_start_idx: int) -> tuple:
     same_day = candidate_date == requested_date
     same_half = _half_day_group(start_idx) == _half_day_group(requested_start_idx)
     if same_day and same_half:
@@ -2143,11 +2172,14 @@ def _alternate_priority(requested_date: date_cls, candidate_date: date_cls, star
         tier = 1
     else:
         tier = 2
+    # Lunch-overlapping slots are deprioritized within a tier: they still appear
+    # as a last resort, but any non-lunch option in the same tier ranks ahead.
+    lunch_penalty = 1 if _overlaps_lunch(start_idx, end_idx) else 0
     distance = abs(
         (datetime.combine(candidate_date, datetime.min.time()) + timedelta(minutes=start_idx * settings.availability_slot_minutes))
         - (datetime.combine(requested_date, datetime.min.time()) + timedelta(minutes=requested_start_idx * settings.availability_slot_minutes))
     )
-    return (tier, distance, candidate_date.isoformat(), abs(start_idx - requested_start_idx))
+    return (tier, lunch_penalty, distance, candidate_date.isoformat(), abs(start_idx - requested_start_idx))
 
 
 def _alternate_time_suggestions(
@@ -2193,7 +2225,7 @@ def _alternate_time_suggestions(
                 candidates.append(
                     (
                         _alternate_priority(
-                            requested_day, candidate_day, candidate_start, start_idx
+                            requested_day, candidate_day, candidate_start, candidate_end, start_idx
                         ),
                         {
                             "date": day,
@@ -2878,6 +2910,16 @@ async def _call_llm_with_tools(
                     args = {}
                 result = await _run_chat_tool(
                     request, name, args, graph_token, user_profile_id, auth_user_id
+                )
+                # Log the tool name + args the LLM actually produced so we can see
+                # which date/time it resolved (e.g. "ngày mai") and the outcome.
+                log.info(
+                    "chat tool call: name=%s args=%s ok=%s count=%s error=%s",
+                    name,
+                    args,
+                    result.get("ok") if isinstance(result, dict) else None,
+                    result.get("count") if isinstance(result, dict) else None,
+                    result.get("error") if isinstance(result, dict) else None,
                 )
                 tool_results.append({"name": name, "arguments": args, "result": result})
                 messages.append(

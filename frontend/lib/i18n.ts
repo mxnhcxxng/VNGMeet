@@ -340,10 +340,10 @@ const en = {
   "browse.noMeetingRooms": "No rooms marked as a meeting room were found.",
 
   // --- Chat panel ---------------------------------------------------------
-  "chatp.suggestion1": "I need a room for 6 people from 2 to 4 this afternoon",
-  "chatp.suggestion2": "Book a room for tomorrow's team meeting",
-  "chatp.suggestion3": "Show available rooms close to my location",
-  "chatp.suggestion4": "Find a room for a 10-person review session next week",
+  "chatp.suggestion1": "Book a room for 6 at campus, 2–4pm today",
+  "chatp.suggestion2": "Find the nearest free room for 4 today",
+  "chatp.suggestion3": "Tonight, book a room for {date}",
+  "chatp.suggestion4": "Help me get directions to a meeting room",
   "chatp.typing": "Typing a reply",
   "chatp.mapAlt": "Map",
   "chatp.confirmSubtitle": "Confirm your booking to secure this room",
@@ -705,10 +705,10 @@ const vi: Partial<Record<TranslationKey, string>> = {
   "browse.noMeetingRooms": "Không tìm thấy phòng nào được đánh dấu là meeting room.",
 
   // --- Chat panel ---------------------------------------------------------
-  "chatp.suggestion1": "Tôi cần một phòng cho 6 người từ 2 đến 4 giờ chiều nay",
-  "chatp.suggestion2": "Đặt phòng cho cuộc họp nhóm ngày mai",
-  "chatp.suggestion3": "Hiển thị các phòng trống gần vị trí của tôi",
-  "chatp.suggestion4": "Tìm phòng cho buổi review 10 người vào tuần sau",
+  "chatp.suggestion1": "Đặt phòng 6 người, 2–4h chiều nay ở campus",
+  "chatp.suggestion2": "Tìm phòng trống gần nhất cho 4 người hôm nay",
+  "chatp.suggestion3": "Đêm nay đặt phòng cho ngày {date}",
+  "chatp.suggestion4": "Tìm đường đến phòng họp giúp tôi",
   "chatp.typing": "Đang soạn trả lời",
   "chatp.mapAlt": "Bản đồ",
   "chatp.confirmSubtitle": "Xác nhận để giữ phòng này",

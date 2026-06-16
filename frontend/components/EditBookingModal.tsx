@@ -4,6 +4,7 @@ import { useEffect, useState, type MouseEvent } from "react";
 import { Button, Input, Label, TextArea, TextField, toast } from "@heroui/react";
 import { Clock } from "@gravity-ui/icons";
 import { api, type Booking } from "@/lib/api";
+import { attendeesToInput } from "@/lib/attendees";
 import { useT } from "@/app/providers";
 
 export function EditBookingModal({
@@ -30,7 +31,7 @@ export function EditBookingModal({
   useEffect(() => {
     if (!isOpen || !booking) return;
     setSubject(booking.subject ?? "");
-    setAttendees((booking.attendees ?? []).join(", "));
+    setAttendees(attendeesToInput(booking.attendees));
     setNotes(booking.body ?? "");
     setError(null);
   }, [isOpen, booking]);
