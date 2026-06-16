@@ -42,12 +42,6 @@ html.dark {
   --event-mine-bg-hover: #042b16;
 }
 
-/* Hover feedback for the clickable "My Booking" cell. The fill background is set
-   via inline style, so override it with !important on hover (both light/dark). */
-.my-booking-cell:hover .my-booking-fill {
-  background-color: var(--event-mine-bg-hover) !important;
-}
-
 /* Brand color comes solely from --accent (set below). The `primary` button
    variant already reads var(--accent) / var(--accent-hover) / var(--accent-foreground),
    so it picks up the orange automatically. All other variants (tertiary, ghost,

@@ -449,6 +449,10 @@ export function BrowseRooms({
     headIndex: number;
   };
   const [drag, setDrag] = useState<DragState | null>(null);
+  // Key of the "my booking" block currently hovered. A booking block spans
+  // several slot rows, so we light the whole run (not just the slot under the
+  // cursor) by matching this key on every cell of the run.
+  const [hoveredBooking, setHoveredBooking] = useState<string | null>(null);
   const dragRef = useRef<DragState | null>(null);
   function setDragState(next: DragState | null) {
     dragRef.current = next;
@@ -897,10 +901,28 @@ export function BrowseRooms({
                     // Busy block — styled as the design's event card, merged across
                     // consecutive slots of the same status.
                     const palette = myBooking ? EVENT_MINE : EVENT_BOOKED;
+                    // Stable key for the whole booking run (room + day + the run's
+                    // first slot). Every cell of the run resolves to the same key,
+                    // so hovering any of them lights the entire block.
+                    let bookingKey: string | null = null;
+                    if (myBooking && bi !== undefined) {
+                      let start = bi;
+                      while (start > 0 && (r.grid[start - 1]?.[dayIndex] ?? 0) === status) {
+                        start -= 1;
+                      }
+                      bookingKey = `${r.email}:${dayIndex}:${start}`;
+                    }
+                    const blockHovered = bookingKey !== null && hoveredBooking === bookingKey;
                     return (
                       <div
                         key={r.email}
-                        onMouseEnter={() => extendDrag(ti)}
+                        onMouseEnter={() => {
+                          extendDrag(ti);
+                          setHoveredBooking(bookingKey);
+                        }}
+                        onMouseLeave={() => {
+                          if (bookingKey !== null) setHoveredBooking(null);
+                        }}
                         {...(myBooking
                           ? {
                               role: "button",
@@ -925,9 +947,9 @@ export function BrowseRooms({
                           style={{ paddingTop: prevBusy ? 0 : 6, paddingBottom: nextBusy ? 0 : 6 }}
                         >
                           <div
-                            className={`h-full overflow-hidden px-2 ${myBooking ? "my-booking-fill" : ""}`}
+                            className={`h-full overflow-hidden px-2 transition-colors ${myBooking ? "my-booking-fill" : ""}`}
                             style={{
-                              backgroundColor: palette.bg,
+                              backgroundColor: blockHovered ? "var(--event-mine-bg-hover)" : palette.bg,
                               borderLeft: `1px solid ${palette.border}`,
                               borderRight: `1px solid ${palette.border}`,
                               borderTop: prevBusy ? "none" : `1px solid ${palette.border}`,

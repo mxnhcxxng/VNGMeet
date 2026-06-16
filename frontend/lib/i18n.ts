@@ -110,6 +110,8 @@ const en = {
   "settings.sessionExpiresIn": "Expires in",
   "settings.sessionExpired": "Expired",
   "settings.sessionUnavailable": "No active session.",
+  "settings.feedback": "Send feedback",
+  "settings.feedbackTitle": "Send feedback",
 
   // --- Login --------------------------------------------------------------
   "login.welcome": "Welcome to VNG Meet",
@@ -499,6 +501,8 @@ const vi: Partial<Record<TranslationKey, string>> = {
   "settings.sessionExpiresIn": "Hết hạn sau",
   "settings.sessionExpired": "Đã hết hạn",
   "settings.sessionUnavailable": "Không có phiên đang hoạt động.",
+  "settings.feedback": "Gửi ý kiến phản hồi",
+  "settings.feedbackTitle": "Gửi ý kiến phản hồi",
 
   // --- Login --------------------------------------------------------------
   "login.welcome": "Chào mừng đến với VNG Meet",
