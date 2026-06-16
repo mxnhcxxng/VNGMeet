@@ -1151,7 +1151,7 @@ def _room_scout_email_body(scout: dict, rooms: list[dict], day: str, start_time:
         <tbody>{rows}</tbody>
       </table>
       {extra}
-      <p style="margin-top:16px"><a href="{html.escape(settings.frontend_url)}">Open VNG Meet to book</a></p>
+      <p style="margin-top:16px"><a href="{html.escape(settings.public_url)}">Open VNG Meet to book</a></p>
     </div>
     """
 

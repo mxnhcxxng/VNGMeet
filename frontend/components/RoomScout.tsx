@@ -635,6 +635,7 @@ function ScoutingCard({
           }
         />
         <DetailRow label={t("scout.capacity")} value={capacityLabel(t, scout.capacity_size)} />
+        <DetailRow label={t("scout.lastChecked")} value={formatLastChecked(scout.last_checked_at)} />
       </dl>
 
       <div className="mt-4 flex items-start gap-1.5 text-sm leading-5 text-default-500">
@@ -663,6 +664,18 @@ function ScoutingCard({
       </div>
     </div>
   );
+}
+
+function formatLastChecked(value: string | null | undefined): string {
+  if (!value) return "-";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "-";
+  return d.toLocaleString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    day: "2-digit",
+    month: "2-digit",
+  });
 }
 
 function DetailRow({ label, value }: { label: string; value: string }) {

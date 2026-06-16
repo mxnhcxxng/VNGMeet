@@ -68,6 +68,24 @@ class Settings(BaseSettings):
     llm_model: str = ""
 
     @property
+    def public_url(self) -> str:
+        """Canonical, browser-reachable URL of the frontend for use in links
+        (e.g. Room Scout emails).
+
+        FRONTEND_URL may be a comma-separated list of CORS origins mixing local
+        dev with the deployed AgentBase endpoint. For a link we want a single,
+        real URL: prefer the first non-localhost entry, falling back to the
+        first entry overall.
+        """
+        candidates = [o.strip() for o in self.frontend_url.split(",") if o.strip()]
+        if not candidates:
+            return self.frontend_url
+        for url in candidates:
+            if "localhost" not in url and "127.0.0.1" not in url:
+                return url
+        return candidates[0]
+
+    @property
     def supabase_enabled(self) -> bool:
         return bool(self.supabase_url and self.supabase_service_role_key)
 
