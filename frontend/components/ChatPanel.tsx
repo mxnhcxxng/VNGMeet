@@ -1,6 +1,14 @@
 "use client";
 
-import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  createContext,
+  memo,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
@@ -21,6 +29,7 @@ import {
   PaperPlane,
   ThumbsDown,
   ThumbsUp,
+  Xmark,
 } from "@gravity-ui/icons";
 import { api, type BookingRequest, type ChatMessage, type ChatThread, type UserRole } from "@/lib/api";
 import { useT } from "@/app/providers";
@@ -45,12 +54,69 @@ function TypingDots() {
   );
 }
 
+type ZoomImage = { src: string; alt: string };
+
+const ImageZoomContext = createContext<((image: ZoomImage) => void) | null>(null);
+
+function ImageZoomModal({
+  image,
+  onClose,
+}: {
+  image: ZoomImage | null;
+  onClose: () => void;
+}) {
+  const t = useT();
+
+  useEffect(() => {
+    if (!image) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [image, onClose]);
+
+  if (!image) return null;
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-4 sm:p-8"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <button
+        type="button"
+        onClick={onClose}
+        aria-label={t("common.close")}
+        className="absolute right-4 top-4 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white backdrop-blur-sm transition-colors hover:bg-white/25"
+      >
+        <Xmark width={22} />
+      </button>
+      <img
+        src={image.src}
+        alt={image.alt}
+        className="max-h-full max-w-full rounded-lg object-contain shadow-2xl"
+        onMouseDown={(event) => event.stopPropagation()}
+      />
+    </div>
+  );
+}
+
 const MarkdownMessage = memo(function MarkdownMessage({
   content,
 }: {
   content: string;
 }) {
   const t = useT();
+  const openZoom = useContext(ImageZoomContext);
   return (
     <div className="text-sm leading-7 text-[#252b37] dark:text-[#f7f7f7]">
       <ReactMarkdown
@@ -71,14 +137,20 @@ const MarkdownMessage = memo(function MarkdownMessage({
               {children}
             </a>
           ),
-          img: ({ src, alt }) => (
-            <img
-              src={src ?? ""}
-              alt={alt ?? t("chatp.mapAlt")}
-              className="mt-2 max-h-72 w-full rounded-lg border border-[#e9eaeb] dark:border-[#373a41] object-contain"
-              loading="lazy"
-            />
-          ),
+          img: ({ src, alt }) => {
+            const resolvedAlt = alt ?? t("chatp.mapAlt");
+            return (
+              <img
+                src={src ?? ""}
+                alt={resolvedAlt}
+                className="mt-2 max-h-72 w-full cursor-zoom-in rounded-lg border border-[#e9eaeb] dark:border-[#373a41] object-contain transition-opacity hover:opacity-90"
+                loading="lazy"
+                onClick={() =>
+                  typeof src === "string" && src && openZoom?.({ src, alt: resolvedAlt })
+                }
+              />
+            );
+          },
           ul: ({ children }) => (
             <ul className="mb-3 list-disc space-y-1 pl-5 last:mb-0">{children}</ul>
           ),
@@ -561,6 +633,7 @@ export function ChatPanel({
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showScrollDown, setShowScrollDown] = useState(false);
+  const [zoomImage, setZoomImage] = useState<ZoomImage | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -710,6 +783,7 @@ export function ChatPanel({
   const empty = !threadId && messages.length === 0 && !sending;
 
   return (
+    <ImageZoomContext.Provider value={setZoomImage}>
     <div className="flex h-full w-full flex-col">
       <ScrollShadow
         ref={scrollRef}
@@ -903,6 +977,8 @@ export function ChatPanel({
           {t("chatp.aiDisclaimer")}
         </p>
       </div>
+      <ImageZoomModal image={zoomImage} onClose={() => setZoomImage(null)} />
     </div>
+    </ImageZoomContext.Provider>
   );
 }

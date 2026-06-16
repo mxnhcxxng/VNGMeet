@@ -453,12 +453,22 @@ export function BrowseRooms({
 
   // Furthest row reachable from `anchor` toward `target` (either direction)
   // while every slot in between stays bookable in `room`. Stops at the first
-  // busy/disabled slot, so the selection never spans an unbookable gap.
+  // busy/disabled slot, so the selection never spans an unbookable gap. On
+  // schedule days the span is also capped at SCHEDULE_MAX_DURATION_MINUTES, so
+  // dragging past 3h just pins the selection at 3h instead of growing further.
   function clampHead(room: ScheduleRoom, anchor: number, target: number) {
+    const schedule = statusFor(room, allTimes[anchor]) >= 3;
     const step = target >= anchor ? 1 : -1;
     let head = anchor;
     for (let i = anchor + step; step > 0 ? i <= target : i >= target; i += step) {
       if (!isBookableSlot(room, allTimes[i])) break;
+      if (schedule) {
+        const lo = Math.min(anchor, i);
+        const hi = Math.max(anchor, i);
+        const span =
+          timeToMinutes(allTimes[hi]) - timeToMinutes(allTimes[lo]) + slotMinutes;
+        if (span > SCHEDULE_MAX_DURATION_MINUTES) break;
+      }
       head = i;
     }
     return head;
