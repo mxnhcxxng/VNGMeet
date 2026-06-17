@@ -1177,7 +1177,7 @@ def _room_scout_email_body(scout: dict, rooms: list[dict], day: str, start_time:
           <td style="vertical-align:middle;font-size:20px;font-weight:700;color:#18181b">VNG Meet</td>
         </tr>
       </table>
-      <h2 style="margin:0 0 12px">Room Scout found available rooms</h2>
+      <h2 style="margin:0 0 12px">Available Rooms Found</h2>
       <p>Window: <strong>{html.escape(day)} {html.escape(start_time)} - {html.escape(end_time)}</strong></p>
       <p>Free for {int(scout.get("duration_minutes") or 0)} minutes. Capacity: {html.escape(size)}.</p>
       <table style="border-collapse:collapse;margin-top:12px">

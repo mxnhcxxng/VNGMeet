@@ -4,8 +4,8 @@ export const LANGUAGE_STORAGE_KEY = "vng-language";
 export const DEFAULT_LANGUAGE: Language = "vi";
 
 export const LANGUAGE_OPTIONS: { value: Language; label: string }[] = [
-  { value: "en", label: "English" },
-  { value: "vi", label: "Tiếng Việt" },
+  { value: "vi", label: "🇻🇳 Tiếng Việt" },
+  { value: "en", label: "🇬🇧 English" },
 ];
 
 // Flat key → string maps per language. Keys are namespaced with a dot prefix

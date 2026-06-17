@@ -163,6 +163,7 @@ export function RoomScout({
             <ScoutingCard
               scout={activeScout}
               thumbnails={roomThumbnails}
+              officeOptions={officeOptions}
               onChanged={load}
             />
           ) : showGuide ? (
@@ -590,10 +591,12 @@ function ScoutForm({
 function ScoutingCard({
   scout,
   thumbnails,
+  officeOptions,
   onChanged,
 }: {
   scout: RoomScoutRow;
   thumbnails: string[];
+  officeOptions: UserProfileOption[];
   onChanged: () => void | Promise<void>;
 }) {
   const t = useT();
@@ -674,7 +677,14 @@ function ScoutingCard({
       <p className="mt-1.5 text-sm leading-5 text-default-500">{t("scout.subtitle")}</p>
 
       <dl className="mt-5 grid gap-2.5 text-sm">
-        <DetailRow label={t("scout.office")} value={scout.office || t("scout.allOffices")} />
+        <DetailRow
+            label={t("scout.office")}
+            value={
+              scout.office
+                ? (officeOptions.find((o) => o.value === scout.office)?.label ?? scout.office)
+                : t("scout.allOffices")
+            }
+          />
         <DetailRow label={t("scout.duration")} value={durationLabel(t, scout.duration_minutes)} />
         <DetailRow
           label={t("scout.scoutRangeLabel")}
