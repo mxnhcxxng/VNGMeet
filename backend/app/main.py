@@ -3246,7 +3246,7 @@ async def chat_booking_action(request: Request, payload: ChatBookingActionReques
                 f"- Giờ: {payload.booking.start_time}-{payload.booking.end_time}"
             )
         if result.get("webLink"):
-            content += f"\n- Link: {result['webLink']}"
+            content += f"\n- [Xem trên Outlook]({result['webLink']})"
         metadata["booking_action"]["status"] = "ok"
         metadata["booking_action"]["result"] = result
     except HTTPException as e:
