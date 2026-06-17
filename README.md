@@ -1,5 +1,7 @@
 # 🏢 VNGMeet — Vì Starter xứng đáng có phòng họp
 
+![VNGMeet](vngmeet_thumbnail.png)
+
 VNGMeet là AI agent tích hợp trực tiếp với hệ thống đặt phòng nội bộ của VNG — giúp Starter tìm, book, và quản lý phòng họp một cách thông minh, không cần mò phòng từng giờ; không cần thức khuya canh phòng, mà vẫn có phòng họp phù hợp cho cả team.
 
 ---
