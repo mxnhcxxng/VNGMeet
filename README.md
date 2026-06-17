@@ -169,9 +169,10 @@ Do giới hạn thời gian, hệ thống hiện tại xác thực người dùn
 
 Dự án được phát triển bởi team **Texas Chicken** gồm 3 starter: CuongDM4, HuyenNN, AnhDT11
 
+- Auth: Microsoft Access Token
+- Server: GreenNode AgentBase
+- Model: MiniMax M2.5
 - Library UI: Hero UI
 - Icon: Gravity Icon
-- Auth: Microsoft Access Token
-- Model: MiniMax M2.5
-- Room thumbnail: My VNG
+- Image/thumbnail: My VNG & Fanpage VNG
 - Inspired by: HoanDN
