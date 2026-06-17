@@ -147,7 +147,25 @@ Starter vào tab Browse để thấy toàn bộ availability của tất cả ph
 
 ---
 
-## 🙌 Credit
+## 🔧 TECHNICAL NOTE
+
+Do giới hạn thời gian, hệ thống hiện tại xác thực người dùng bằng **Microsoft Graph access token** dán thủ công, thay vì luồng OAuth đầy đủ qua Azure AD.
+
+**Lưu ý quan trọng:** Token có hiệu lực tối đa **24 giờ**. Khi hết hạn, các tính năng sẽ ngừng hoạt động và người dùng cần đăng nhập lại bằng cách cung cấp token mới.
+
+**Bảo mật:** Token được mã hoá bằng **Fernet (AES-128-CBC)** trước khi lưu vào hệ thống, và chỉ được sử dụng cho các mục đích sau:
+
+| Permission | Mục đích |
+|---|---|
+| `Place.Read.All` | Liệt kê danh sách phòng họp trong tổ chức |
+| `Calendars.Read.Shared` | Đọc trạng thái trống/bận của phòng (free-busy) |
+| `Calendars.ReadWrite` | Đặt phòng, chỉnh sửa, huỷ meeting trên lịch người dùng |
+| `Mail.Send` | Gửi email thông báo khi có phòng trống (Room Scout) |
+| `User.Read` | Đọc thông tin cơ bản của người dùng đang đăng nhập |
+
+---
+
+## 🙌 CREDIT
 
 Dự án được phát triển bởi team **Texas Chicken** gồm 3 starter: CuongDM4, HuyenNN, AnhDT11
 
