@@ -1,299 +1,157 @@
-# 🏢 VNGMeet — Vì Starter xứng đáng được họp trong phòng
+# 🏢 VNGMeet — Vì Starter xứng đáng có phòng họp
 
-## 😩 Problem
-
-Gọi phòng họp ở VNG là vàng vì ngày nào Starter cũng đào mãi không ra. Outlook không
-hiện view tổng quan, nên *"xem khung giờ khác còn phòng không"* dịch cabin ra là *"ngồi
-check từng giờ, ăn may thì ra"*. Nếu team có lịch họp cố định — trước đó 14 ngày, Starter
-phải thức đến 12 giờ đêm nhưng không phải để săn sale mà để canh đúng giờ mở slot book phòng.
-
-## 👤 User
-
-Toàn bộ **Starter tại VNG** trên khắp Việt Nam, nếu Starter từng book phòng họp.
-
-## 💡 Solution
-
-**VNGMeet** là **AI chatbot** tích hợp trực tiếp với hệ thống đặt phòng tại VNG.
-
-### 🗓️ Use case 1 — Book phòng
-
-- Starter input khung giờ họp (kết hợp với dữ liệu vị trí của Starter trong **Setting**)
-- VNGMeet truy vấn **real-time** → trả về danh sách phòng trống
-- Nếu không có → VNGMeet **gợi ý slot lân cận** có phòng trống
-- Starter xác nhận → VNGMeet **book phòng** và gửi confirm qua **Outlook**
-- Starter **edit** hoặc **cancel** phòng → chat trực tiếp
-
-### ⏰ Use case 2 — Đặt gạch để book phòng
-
-- Starter chọn trước **phòng + khung giờ**
-- Đúng thời điểm hệ thống mở đăng ký → VNGMeet **tự động** thực hiện booking
-- Starter nhận confirm qua **Outlook** — không cần thức đêm hay thao tác thủ công
-
-### 🗺️ Feature bổ sung
-
-VNGMeet tích hợp **map nội bộ**, chỉ đường đến bất kỳ phòng họp nào.
-
-## 🎯 Value
-
-- ⚡ Starter tìm phòng trống nhanh hơn, không còn cảnh tìm phòng phút chót, họp muộn,
-  hủy họp, hay... **họp đứng** (chuyện có thật)
-- 💬 Starter tiết kiệm thời gian book phòng vì chỉ cần **1 lệnh chat**
-- 😴 Starter được ngủ đủ giấc, sáng dậy vẫn có phòng
+VNGMeet là AI agent tích hợp trực tiếp với hệ thống đặt phòng nội bộ của VNG — giúp Starter tìm, book, và quản lý phòng họp một cách thông minh, không cần mò phòng từng giờ; không cần thức khuya canh phòng, mà vẫn có phòng họp phù hợp cho cả team.
 
 ---
 
-## Tổng quan kỹ thuật
+## 😩 PROBLEM
 
-Đăng nhập bằng tài khoản **Microsoft (work)**, quét tất cả phòng được đánh dấu là
-**meeting room** trong tổ chức, và hiển thị tình trạng đặt phòng dưới dạng **lưới**:
+Gọi phòng họp ở VNG là vàng vì ngày nào Starter cũng đào mãi mà không ra.
 
-- **Cột = ngày**, **hàng = giờ**
-- 🟩 xanh = trống · 🟥 đỏ = đã book
+**😤 Không tìm được phòng trống nhanh chóng.** Trên Outlook không có view tổng quan — muốn biết khung giờ nào còn phòng, Starter phải tự mò vào từng slot một như đi đào vàng. Ăn may thì có phòng, không thì thôi. Kết quả là mất 10–15 phút chỉ để biết "hết phòng rồi."
 
-## Kiến trúc
+**🌙 Phải thức đêm để canh slot mở.** Phòng họp chỉ được đặt trước tối đa 14 ngày. Với các lịch họp cố định, Starter buộc phải ngồi canh đúng 12 giờ đêm — thời điểm slot mới mở ra — để book phòng trước người khác. Không phải săn sale, nhưng cảm giác y chang.
 
-| Thành phần | Công nghệ | Cổng local | Cổng container |
-|---|---|---|---|
-| Backend | FastAPI + Microsoft Graph | `:8000` | `:8080` |
-| Frontend | Next.js 14 (App Router) + HeroUI | `:3000` | `:8080` |
-| Auth + DB | Supabase (Azure OAuth provider, Postgres) | — | — |
+**🎰 Có phòng trống nhưng không ai biết.** Trong ngày, phòng họp bị hủy hoặc trả lại liên tục — nhưng không có cơ chế thông báo. Starter muốn tận dụng slot vừa trống phải tự vào check tay như chơi xổ số. Cơ hội đến rồi đi trong khi Starter đang bận làm việc khác.
 
-> **Cổng:** cả hai container mặc định nghe port `8080` (chuẩn của GreenNode AgentBase
-> Runtime) và expose `GET /health`. Khi chạy local bằng `docker compose`, biến `PORT`
-> được ghim lại để giữ backend ở `:8000` và frontend ở `:3000`. Mỗi service có thể đổi
-> port qua biến môi trường `PORT`.
-
-Luồng: user bấm **Đăng nhập** → **Supabase** chạy OAuth với **Azure (Microsoft)** làm
-provider → user login bằng tài khoản MS work → Supabase trả session JWT + `provider_token`
-(Graph access token) + `provider_refresh_token`. Frontend gửi `provider_refresh_token`
-cho backend (`POST /api/auth/link`) lưu vào bảng `provider_tokens`. Mỗi lần gọi Graph,
-backend đổi refresh token đó lấy access token mới tại endpoint token của Azure (vì
-**Supabase không tự refresh provider token**), rồi gọi `/places/microsoft.graph.room`
-(liệt kê phòng) và `/me/calendar/getSchedule` (free/busy).
+Phòng họp chỉ là nơi để ngồi họp. Nhưng việc tìm được nó đang tốn thời gian của Starter nhiều hơn cả việc chuẩn bị nội dung buổi họp đó.
 
 ---
 
-## 1. Tạo Azure AD App Registration
+## 👤 USER
 
-> Graph Explorer (developer.microsoft.com/graph/graph-explorer) chỉ để **test query**,
-> không phải nơi lấy credential. Credential nằm ở **Azure Portal**.
-
-1. Vào https://portal.azure.com → **Microsoft Entra ID** → **App registrations** → **New registration**.
-2. Name: `VNG Meet`. Supported account types: *Accounts in this organizational directory only* (hoặc multi-tenant tuỳ nhu cầu).
-3. **Redirect URI**: chọn type **Web**, giá trị `https://<project-ref>.supabase.co/auth/v1/callback` (lấy từ Supabase → Authentication → Providers → Azure).
-4. Bấm **Register**. Ghi lại **Application (client) ID** và **Directory (tenant) ID**.
-5. **Certificates & secrets** → **New client secret** → copy giá trị cột **Value** (chỉ hiện 1 lần).
-6. **API permissions** → **Add a permission** → **Microsoft Graph** → **Delegated permissions**, thêm:
-   - `Place.Read.All` — liệt kê phòng họp
-   - `Calendars.Read.Shared` — đọc free/busy của phòng
-   - `Calendars.ReadWrite` — tạo event (đặt phòng)
-   - `User.Read`
-   Sau đó bấm **Grant admin consent** (`Place.Read.All` cần admin đồng ý).
-
-## 2. Cấu hình Supabase
-
-1. Tạo project tại https://supabase.com (nếu chưa có).
-2. **Authentication → Providers → Azure**: Enable, điền Azure `Application (client) ID`,
-   `Secret Value`, và **Azure Tenant URL** = `https://login.microsoftonline.com/<TENANT_ID>`.
-3. **SQL Editor**: chạy [`supabase/schema.sql`](supabase/schema.sql) để tạo bảng
-   `provider_tokens`, `bookings`, `favorite_rooms` (kèm RLS).
-4. **Project Settings → API**: lấy `Project URL`, `anon key`, `service_role key`, và
-   `JWT Secret`.
-
-## 3. Cấu hình `.env`
-
-```bash
-cp .env.example .env
-# điền CLIENT_ID, CLIENT_SECRET, TENANT_ID + SUPABASE_URL / ANON_KEY /
-# SERVICE_ROLE_KEY / JWT_SECRET
-# điền thêm LLM_BASE_URL, LLM_API_KEY, LLM_MODEL để bật chat bot
-
-cp frontend/.env.local.example frontend/.env.local
-# điền NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY
-```
-
-> **`FRONTEND_URL`** dùng cho CORS của backend và có thể là **danh sách nhiều origin
-> phân tách bằng dấu phẩy** — để vừa chạy local vừa chạy bản deploy, đặt ví dụ:
-> `FRONTEND_URL=http://localhost:3000,https://<frontend-endpoint>.agentbase-runtime.aiplatform.vngcloud.vn`
-
-## 4. Chạy bằng Docker (khuyến nghị)
-
-```bash
-docker compose up --build
-```
-
-- Frontend: http://localhost:3000
-- Backend docs: http://localhost:8000/docs
-
-## 5. Chạy thủ công (dev, không Docker)
-
-Backend:
-```bash
-cd backend
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-# nạp biến môi trường từ .env ở thư mục gốc, hoặc copy .env vào backend/
-uvicorn app.main:app --reload --port 8000
-```
-
-Frontend:
-```bash
-cd frontend
-npm install
-npm run dev
-```
+| Who | How to Use |
+|---|---|
+| **Starters** — Nhân viên bất kể cấp bậc | Người trực tiếp book phòng họp hàng ngày — tìm slot, xác nhận phòng, gửi invite cho cả team. Dùng VNGMeet để tìm và book nhanh qua một lệnh chat (Book qua chat) hoặc một lượt scan (Book qua Browse Room). |
+| **Team Leads & Quản lý** | Người có lịch họp cố định — thường cần book phòng xa trước hoặc tìm phòng bất chợt. Dùng VNGMeet để tự động book phòng ngay khi slot mở lúc nửa đêm (Scheduled booking), hoặc nhận thông báo có phòng trống nhanh (Room Scouting). |
 
 ---
 
-## 6. Deploy lên GreenNode AgentBase
+## 💡 SOLUTION
 
-App được deploy thành **2 Custom Agent runtime** (backend + frontend) trên
-[GreenNode AgentBase](https://aiplatform.console.vngcloud.vn/agent-runtime?tab=runtime);
-Supabase vẫn là dịch vụ ngoài. Mọi thao tác dùng bộ skill kèm trong repo tại
-`greennode-agentbase-skills/.claude/skills/` (đặt `SK` cho gọn):
+VNGMeet là AI agent tích hợp trực tiếp với hệ thống đặt phòng nội bộ VNG. Starter không cần nhớ tên phòng, không cần lên Outlook mò — chỉ cần nói nhu cầu.
 
-```bash
-SK=greennode-agentbase-skills/.claude/skills/agentbase/scripts
-```
+### ✅ Use case 1 — "Đào" phòng
 
-> **Hợp đồng runtime:** container phải nghe port `8080` và có `GET /health` → 200.
-> Repo này đã thoả sẵn (xem mục Kiến trúc) nên không cần chỉnh gì thêm.
+Thay vì mò vào hệ thống tìm từng slot, Starter chỉ cần nhắn nhu cầu và VNGMeet trả về phòng phù hợp ngay lập tức — bao gồm cả gợi ý slot lân cận nếu khung giờ mong muốn đã kín. Ai lười chat thì có thể dùng chế độ browse để xem toàn bộ phòng trống trực quan và book luôn.
 
-### 6.1. Chuẩn bị credentials (chỉ làm 1 lần)
+**User flow:**
 
-Cần **GreenNode IAM Service Account** — **khác hoàn toàn** với `CLIENT_ID`/`CLIENT_SECRET`
-của Azure trong `.env` (Azure là để gọi Microsoft Graph; IAM là để gọi API quản trị
-AgentBase lúc deploy).
+1. Starter nhập vào khung chat khung giờ họp, số người
+2. VNGMeet search real-time → trả về list phòng trống phù hợp
+3. Nếu không có → VNGMeet gợi ý slot lân cận có phòng trống
+4. Starter chọn phòng → VNGMeet book và gửi confirm qua Outlook
+5. Starter cần chỉnh sửa hoặc hủy phòng họp → Starter chat trực tiếp với VNGMeet
 
-1. Tạo Service Account tại https://iam.console.vngcloud.vn/service-accounts, gán policy
-   `AgentBaseFullAccess`, `vcrFullAccess`, `AiPlatformFullAccess`.
-2. Lưu cặp client_id/secret vào `.greennode.json` ở thư mục gốc (đã được `.gitignore`):
-   ```json
-   { "client_id": "<IAM client id>", "client_secret": "<IAM client secret>" }
-   ```
-3. Kiểm tra: `bash $SK/check_credentials.sh iam`
+**Ví dụ hội thoại:**
 
-> IAM credentials chỉ dùng trên máy local khi deploy. Khi container chạy, AgentBase tự
-> inject `GREENNODE_*` vào container — **không** đặt các biến này trong `.env`.
-
-### 6.2. Đăng nhập Container Registry
-
-Mỗi tài khoản có sẵn 1 repo trong AgentBase managed CR:
-
-```bash
-bash $SK/cr.sh repo get                    # xem registryUrl + tên repo
-bash $SK/cr.sh credentials docker-login    # đăng nhập docker (không ghi file)
-```
-
-Đường dẫn image có dạng `{registryUrl}/{repo}/{image}:{tag}`
-(ví dụ `vcr.vngcloud.vn/<repo>/vng-meet-backend:<tag>`).
-
-### 6.3. Deploy lần đầu
-
-Máy Apple Silicon (arm64) phải build `--platform linux/amd64`. **Thứ tự quan trọng:**
-backend trước (lấy URL), rồi frontend (trỏ vào URL backend), rồi cập nhật CORS backend.
-
-```bash
-REPO=$(bash $SK/cr.sh repo get | python3 -c "import sys,json;d=json.load(sys.stdin);print(d['registryUrl']+'/'+d['name'])")
-
-# --- Backend ---
-TAG="v$(date +%Y%m%d%H%M%S)"; IMG="$REPO/vng-meet-backend:$TAG"
-docker build --platform linux/amd64 -t "$IMG" ./backend && docker push "$IMG"
-bash $SK/runtime.sh create --name vng-meet-backend --image "$IMG" \
-  --flavor runtime-s2-general-2x4 --env-file .env --from-cr --network-mode PUBLIC \
-  --min-replicas 1 --max-replicas 1 --cpu-scale 50 --mem-scale 50
-# Lấy backend URL:
-BURL=$(bash $SK/runtime.sh endpoints list <backend-runtime-id> | python3 -c "import sys,json;d=json.load(sys.stdin);items=d if isinstance(d,list) else d['listData'];print([e['url'] for e in items if e['name']=='DEFAULT'][0])")
-
-# --- Frontend (cần BURL ở build time) ---
-SUPA_URL=$(grep -E '^SUPABASE_URL=' .env | cut -d= -f2-)
-SUPA_ANON=$(grep -E '^SUPABASE_ANON_KEY=' .env | cut -d= -f2-)
-TAG="v$(date +%Y%m%d%H%M%S)"; IMG="$REPO/vng-meet-frontend:$TAG"
-docker build --platform linux/amd64 \
-  --build-arg NEXT_PUBLIC_API_URL="$BURL" \
-  --build-arg NEXT_PUBLIC_SUPABASE_URL="$SUPA_URL" \
-  --build-arg NEXT_PUBLIC_SUPABASE_ANON_KEY="$SUPA_ANON" \
-  -t "$IMG" ./frontend && docker push "$IMG"
-bash $SK/runtime.sh create --name vng-meet-frontend --image "$IMG" \
-  --flavor runtime-s2-general-2x4 --from-cr --network-mode PUBLIC \
-  --min-replicas 1 --max-replicas 1 --cpu-scale 50 --mem-scale 50
-```
-
-Sau khi có frontend URL, thêm nó vào `FRONTEND_URL` (xem mục 3) rồi redeploy backend để
-CORS cho phép origin frontend (mục 6.4).
-
-### 6.4. Redeploy khi sửa code
-
-URL endpoint **không đổi** qua các lần update — chỉ build image mới, push, rồi `update`:
-
-```bash
-# Backend
-TAG="v$(date +%Y%m%d%H%M%S)"; IMG="$REPO/vng-meet-backend:$TAG"
-docker build --platform linux/amd64 -t "$IMG" ./backend && docker push "$IMG"
-bash $SK/runtime.sh update <backend-runtime-id> --image "$IMG" \
-  --flavor runtime-s2-general-2x4 --env-file .env --from-cr
-
-# Frontend (nhớ truyền lại build-arg NEXT_PUBLIC_*)
-TAG="v$(date +%Y%m%d%H%M%S)"; IMG="$REPO/vng-meet-frontend:$TAG"
-docker build --platform linux/amd64 \
-  --build-arg NEXT_PUBLIC_API_URL="$BURL" \
-  --build-arg NEXT_PUBLIC_SUPABASE_URL="$SUPA_URL" \
-  --build-arg NEXT_PUBLIC_SUPABASE_ANON_KEY="$SUPA_ANON" \
-  -t "$IMG" ./frontend && docker push "$IMG"
-bash $SK/runtime.sh update <frontend-runtime-id> --image "$IMG" \
-  --flavor runtime-s2-general-2x4 --from-cr
-```
-
-> ⚠️ **Bẫy CORS:** redeploy backend dùng `--env-file .env`, nên hãy đảm bảo `FRONTEND_URL`
-> trong `.env` đã chứa origin frontend đã deploy (mục 3), nếu không CORS sẽ chỉ còn localhost.
-
-### 6.5. Cấu hình Supabase cho bản deploy
-
-Login chạy OAuth với `redirectTo = window.location.origin` (= URL frontend đã deploy),
-nên phải whitelist URL đó trong **Supabase → Authentication → URL Configuration**:
-
-- **Site URL**: `https://<frontend-endpoint>...vngcloud.vn`
-- **Redirect URLs**: thêm `https://<frontend-endpoint>...vngcloud.vn/**` (giữ thêm
-  `http://localhost:3000/**` nếu vẫn dev local)
-
-Azure redirect URI **không đổi** — vẫn là Supabase callback
-`https://<project-ref>.supabase.co/auth/v1/callback`.
-
-### 6.6. Theo dõi & quản lý
-
-```bash
-bash $SK/runtime.sh list                      # liệt kê runtime
-bash $SK/runtime.sh get <runtime-id>          # trạng thái / version
-curl -s -o /dev/null -w "%{http_code}\n" <endpoint-url>/health
-```
-
-Xem logs/metrics bằng skill `/agentbase-monitor`; xoá toàn bộ tài nguyên bằng
-`/agentbase-teardown`. Chi tiết các skill xem `greennode-agentbase-skills/README.md`.
+> **Starter:** Mình cần 1 phòng họp lúc 9h sáng mai cho 4 người
+>
+> **VNGMeet:** Khung giờ trên hiện tại đã hết phòng trống phù hợp. Tuy nhiên, mình thấy khung 10:00 sáng mai còn 2 phòng phù hợp cho bạn:
+> - 📍 Phòng Amsterdam – V2 – F3 – 4 Seats
+> - 📍 Phòng Beijing – V1 – F1 – 8 Seats
+>
+> Bạn muốn book phòng nào?
+>
+> **Starter:** Amsterdam
+>
+> **VNGMeet:** Mình đã book Phòng Amsterdam – V2 – F3 – 4 Seats lúc 10:00–11:00 ngày mai. Bạn có thể check lại Outlook để nhận confirm nhé!
 
 ---
 
-## Tuỳ chỉnh
+### ✅ Use case 2 — "Đặt gạch" phòng
 
-| Biến | Ý nghĩa | Mặc định |
-|---|---|---|
-| `TIMEZONE` | Múi giờ hiển thị (IANA) | `Asia/Ho_Chi_Minh` |
-| `BUSINESS_START_HOUR` / `BUSINESS_END_HOUR` | Khung giờ làm việc trên lưới | `9` / `18` |
-| `SLOT_MINUTES` | Độ phân giải mỗi ô (phút) | `30` |
-| `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL` | Provider chat OpenAI-compatible | — |
+Với những lịch họp cố định cần book phòng đúng ngày slot book phòng mở, VNGMeet cho phép Starter đăng ký trước ý định — rồi tự động book phòng đúng thời điểm lịch book mở mà không cần ai thức canh. Starter không cần thức khuya để có phòng đẹp nữa.
 
-## Ghi chú
+**User flow:**
 
-- Chỉ phòng có **room mailbox** (đăng ký trong Exchange) mới xuất hiện qua
-  `/places/microsoft.graph.room`. Phòng tạo thủ công nhưng chưa phải room mailbox sẽ không hiện.
-- `provider_refresh_token` được lưu bền trong Supabase (`provider_tokens`); Graph access
-  token chỉ cache **in-memory** theo user (mất khi restart nhưng tự dựng lại từ refresh
-  token). Supabase **không** tự refresh provider token — backend phải tự đổi.
-- Browse grid đọc `/api/availability` từ bảng `room_availability`; nếu cache thiếu hoặc
-  `updated_at` cũ hơn 5 phút, backend dùng delegated Graph token của user hiện tại để
-  refresh bảng rồi mới trả UI.
-- Supabase cron job `seed_room_availability_midnight_gmt7` chạy mỗi 00:00 GMT+7
-  để tạo các row `room_availability` còn thiếu cho ngày thứ 18 tính từ ngày mới.
-  Row đã tồn tại trong DB sẽ được bỏ qua.
-- Trạng thái map từ Graph `availabilityView`: `0` free, `1` tentative, `2` busy,
-  `3` out-of-office, `4` working-elsewhere. Mọi thứ khác `0` đều coi là "đã book" (đỏ).
-```
+1. Starter nhập vào khung chat tên phòng + khung giờ mong muốn trong tương lai
+2. VNGMeet lưu yêu cầu và theo dõi thời điểm slot mở
+3. Đúng lúc hệ thống mở đăng ký → VNGMeet tự động book
+4. Starter nhận confirm qua Outlook — không cần thức khuya canh
+
+**Ví dụ hội thoại:**
+
+> **Starter:** Tôi muốn book phòng Amsterdam lúc 9:00 sáng ngày 01/07.
+>
+> **VNGMeet:** Phòng này hiện chưa cho phép Starter book. Mình sẽ book phòng Amsterdam, 9:00 sáng ngày 01/07 ngay khi phòng này mở cho Starter book nhé!
+>
+> *(Ngày 17/06, 00:01)*
+>
+> **VNGMeet:** Mình đã book thành công Phòng Amsterdam, 9:00 sáng ngày 01/07. Bạn có thể check lại Outlook để nhận confirm nhé!
+
+---
+
+### ✅ Use case 3 — "Trinh sát" phòng
+
+Đôi khi phòng họp bị hủy giữa chừng và trả lại — nhưng người thật sự cần thì không biết. VNGMeet giải quyết bằng cách chủ động rà soát mỗi 30 phút và báo ngay cho Starter khi có phòng phù hợp xuất hiện trong ngày.
+
+**User flow:**
+
+1. Starter nhập vào tab "Scout Rooms" khung giờ muốn có phòng, thời lượng họp, số người
+2. VNGMeet tự động check hệ thống mỗi 30 phút
+3. VNGMeet phát hiện phòng thoả mãn → gửi thông báo phòng trống về Outlook ngay
+4. Starter chọn phòng và book — hoặc nhờ VNGMeet book luôn qua chat
+
+**Ví dụ thao tác:**
+
+> **Starter** điền các nội dung tương ứng:
+> - Office: Campus
+> - Duration: 1 hour
+> - Scout Range: 14:00 – 18:00
+> - Capacity: 4 people
+>
+> **VNGMeet:** Đã bật chế độ tìm phòng trống. Tôi sẽ check phòng trống mỗi 30 phút và thông báo cho bạn ngay khi có phòng trống phù hợp.
+>
+> *(2 tiếng sau — email về Outlook)*
+>
+> **VNGMeet:** 📬 Tìm thấy phòng trống phù hợp: Phòng Amsterdam – V2 – F3 – 4 Seats, lúc 14:00 – 15:00 hôm nay. Chat với VNGMeet để book ngay!
+
+---
+
+### ✅ Add-in Function — "Soi" phòng
+
+Starter vào tab Browse để thấy toàn bộ availability của tất cả phòng họp theo dạng calendar, filter theo vị trí, ngày, hoặc khung giờ, và book luôn tại chỗ mà không cần chat.
+
+**User flow:**
+
+1. Starter vào tab "Browse"
+2. VNGMeet hiển thị toàn bộ phòng và availability theo dạng calendar
+3. Starter filter theo vị trí / ngày / khung giờ nếu cần
+4. Starter thấy phòng phù hợp → click book luôn, không cần quay lại chat
+
+**Ví dụ thao tác:**
+
+> Starter mở tab "Browse Rooms", filter vị trí "Campus", thời gian "Thứ 4, 17/06/2026" → Starter thấy ngay Phòng Amsterdam trống 2h–4h chiều trong khi các phòng khác đã kín. Starter click book luôn, và nhận confirm qua Outlook. Starter không cần nhắn một chữ nào.
+
+---
+
+### ✅ More Convenience
+
+- **Map nội bộ** — Tích hợp map chỉ đường đến bất kỳ phòng họp nào
+- **Phòng yêu thích** — Lưu vị trí ngồi làm việc để được ưu tiên gợi ý những phòng gần mình nhất. Lưu các phòng hay dùng để book nhanh hơn lần sau
+- **Giao diện song ngữ** — Tiếng Việt / English, tự động theo ngôn ngữ Starter nhắn
+- **Dark / Light mode** — Muốn mình trông dễ thương hay quyến rũ?
+
+---
+
+## 🎯 VALUES
+
+- 🔍 **Tìm được phòng họp:** Không còn tìm phòng phút chót, họp muộn, hủy họp, hay.... họp đứng.
+- 😴 **Ngủ ngon vẫn có phòng:** Đặt phòng trước bất cứ lúc nào, tới đúng ngày giờ là có phòng để họp mà không cần thức khuya canh phòng
+- 🔔 **Canh phòng trống tự động:** Có phòng vừa trống là biết ngay, không cần ngồi canh mà vẫn làm được việc khác
+- 📅 **Nhìn toàn bộ phòng trên Calendar:** Thấy ngay toàn cảnh phòng trống một lượt — không cần mò từng slot như lật bài
+- 🗺️ **Đến đúng phòng, đúng giờ:** 1 câu lệnh duy nhất để có map tới bất cứ phòng họp nào
+
+---
+
+## 🙌 Credit
+
+Dự án được phát triển bởi team **Texas Chicken** gồm 3 starter: CuongDM4, HuyenNN, AnhDT11
+
+- Library UI: Hero UI
+- Icon: Gravity Icon
+- Auth: Microsoft Access Token
+- Model: MiniMax M2.5
+- Room thumbnail: My VNG
+- Inspired by: HoanDN
