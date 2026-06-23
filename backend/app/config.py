@@ -111,13 +111,15 @@ class Settings(BaseSettings):
     slot_minutes: int = 30
 
     # Availability cache (room_availability table). A background job refreshes it
-    # app-only from Graph every 15 min and the browse grid reads from the cache
-    # instead of calling Graph live. The cache always stores the FULL day at
+    # app-only from Graph on the cron below (default: every 2 minutes) and the browse
+    # grid reads from the cache instead of calling Graph live. The cache always
+    # stores the FULL day at
     # 15-min granularity (96 slots) for `availability_days` days starting today.
     availability_days: int = 15
     availability_slot_minutes: int = 15  # 24h / 15min = 96 slots per day
-    # Cron minutes the refresh fires on (aligned to the quarter hour: :00 :15 :30 :45).
-    availability_refresh_minutes: str = "0,15,30,45"
+    # Cron minutes the refresh fires on. "*/2" = every 2 minutes; "*" = every
+    # minute; a CSV list like "0,15,30,45" pins it to specific minutes of the hour.
+    availability_refresh_minutes: str = "*/2"
     # Set true to disable the scheduler even when app creds are present.
     availability_refresh_disabled: bool = False
     # Hard limit on how far ahead a room can be booked (system constraint).

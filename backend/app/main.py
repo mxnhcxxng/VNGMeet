@@ -32,7 +32,7 @@ from .config import get_settings
 
 log = logging.getLogger("vngmeet")
 settings = get_settings()
-AVAILABILITY_CACHE_TTL = timedelta(minutes=5)
+AVAILABILITY_CACHE_TTL = timedelta(minutes=1)
 SCHEDULE_MAX_DURATION_MINUTES = 3 * 60
 _AVAILABILITY_REFRESH_LOCK = None
 
@@ -60,7 +60,7 @@ async def lifespan(app: FastAPI):
             )
         scheduler.add_job(
             _safe_process_scheduled_bookings,
-            CronTrigger(hour=0, minute=0, second=15, timezone=settings.timezone),
+            CronTrigger(hour=0, minute=0, second=1, timezone=settings.timezone),
             id="process_scheduled_bookings",
             max_instances=1,
             coalesce=True,

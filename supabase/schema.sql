@@ -471,6 +471,6 @@ where jobname = 'seed_room_availability_midnight_gmt7';
 
 select cron.schedule(
   'seed_room_availability_midnight_gmt7',
-  '0 17 * * *',
+  '5 17 * * *',
   $$select * from app_private.seed_room_availability();$$
 );

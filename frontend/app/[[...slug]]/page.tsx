@@ -939,7 +939,7 @@ export default function Home() {
     setRefreshing(true);
     setError(null);
     try {
-      // Read from the cached availability table (refreshed every 15 min) instead
+      // Read from the cached availability table (refreshed by a background job, and
       // of querying Graph live. Fall back to a live Graph query when the cache
       // isn't available (e.g. manual-token dev mode without Supabase → 503).
       try {
