@@ -10,13 +10,18 @@ import {
   Button,
   Checkbox,
   Chip,
+  DateField,
   Label,
   ListBox,
   ListBoxItem,
   Select,
   Spinner,
+  Tag,
+  TagGroup,
   toast,
 } from "@heroui/react";
+import { parseDate } from "@internationalized/date";
+import { I18nProvider } from "react-aria-components";
 import {
   Check,
   ChevronLeft,
@@ -35,11 +40,11 @@ import {
 import { useT } from "@/app/providers";
 import type { TFunction, TranslationKey } from "@/lib/i18n";
 import { BrandIcon } from "./BrandIcon";
-import { useTokenExpiry } from "./TokenExpiryProvider";
 
-// Scouting can only start within business hours; after 18:00 it's blocked until
-// midnight (all scan windows would already be in the past).
+// Same-day scouting can only start within business hours. Future dates remain
+// selectable after 18:00 because their scan windows have not started yet.
 const SCOUT_CUTOFF_HOUR = 18;
+const SCOUT_MAX_ADVANCE_DAYS = 14;
 
 const DURATION_VALUES = ["30", "60", "90", "120", "150", "180"] as const;
 const DURATION_KEY: Record<string, TranslationKey> = {
@@ -78,6 +83,26 @@ const TIME_OPTIONS = (() => {
 function timeToMinutes(value: string) {
   const [h, m] = value.split(":");
   return Number(h) * 60 + Number(m);
+}
+
+function formatLocalDate(value: Date) {
+  return [
+    value.getFullYear(),
+    String(value.getMonth() + 1).padStart(2, "0"),
+    String(value.getDate()).padStart(2, "0"),
+  ].join("-");
+}
+
+function localDateAfter(days: number) {
+  const value = new Date();
+  value.setHours(12, 0, 0, 0);
+  value.setDate(value.getDate() + days);
+  return formatLocalDate(value);
+}
+
+function formatDmy(value: string) {
+  const [year, month, day] = value.split("-");
+  return year && month && day ? `${day}/${month}/${year}` : value;
 }
 
 // Default start = the nearest selectable slot at or after the current time.
@@ -398,12 +423,12 @@ function ScoutForm({
   onCreated: () => void | Promise<void>;
 }) {
   const t = useT();
-  const { ensureTokenTime } = useTokenExpiry();
   const [office, setOffice] = useState(userOffice || "");
+  const [scoutDate, setScoutDate] = useState(() => localDateAfter(0));
   const [startTime, setStartTime] = useState(() => defaultStartTime());
   const [endTime, setEndTime] = useState("");
   const [duration, setDuration] = useState("");
-  const [capacity, setCapacity] = useState<string>("");
+  const [capacities, setCapacities] = useState<CapacitySize[]>([]);
   const [ignoreLunch, setIgnoreLunch] = useState(false);
   const [saving, setSaving] = useState(false);
   // Re-evaluate the after-hours cutoff each minute so the form locks at 18:00.
@@ -418,7 +443,10 @@ function ScoutForm({
     return () => clearInterval(id);
   }, []);
 
-  const afterHours = new Date(nowMs).getHours() >= SCOUT_CUTOFF_HOUR;
+  const today = localDateAfter(0);
+  const maxScoutDate = localDateAfter(SCOUT_MAX_ADVANCE_DAYS);
+  const afterHours =
+    scoutDate === today && new Date(nowMs).getHours() >= SCOUT_CUTOFF_HOUR;
 
   const startOptions = useMemo(
     () => TIME_OPTIONS.slice(0, -1).map((tm) => ({ value: tm, label: tm })),
@@ -437,6 +465,10 @@ function ScoutForm({
       toast.warning(t("scout.chooseOffice"));
       return;
     }
+    if (!scoutDate || scoutDate < today || scoutDate > maxScoutDate) {
+      toast.warning(t("scout.chooseDate"));
+      return;
+    }
     if (!startTime || !endTime) {
       toast.warning(t("scout.chooseRange"));
       return;
@@ -445,7 +477,7 @@ function ScoutForm({
       toast.warning(t("scout.chooseDuration"));
       return;
     }
-    if (!capacity) {
+    if (capacities.length === 0) {
       toast.warning(t("scout.chooseCapacity"));
       return;
     }
@@ -457,18 +489,12 @@ function ScoutForm({
       toast.warning(t("scout.afterHoursNote"));
       return;
     }
-    // A scout runs until its end time today; the token must outlive that window
-    // (with buffer). Otherwise block and prompt a refresh.
-    const endMin = timeToMinutes(endTime);
-    const endAt = new Date();
-    endAt.setHours(Math.floor(endMin / 60), endMin % 60, 0, 0);
-    const neededSeconds = Math.floor((endAt.getTime() - Date.now()) / 1000);
-    if (!ensureTokenTime(neededSeconds)) return;
     setSaving(true);
     try {
       await api.createRoomScout({
+        scout_date: scoutDate,
         duration_minutes: Number(duration),
-        capacity_size: capacity as CapacitySize,
+        capacity_sizes: capacities,
         scout_start_time: startTime,
         scout_end_time: endTime,
         ignore_lunch_break: ignoreLunch,
@@ -504,6 +530,26 @@ function ScoutForm({
           onChange={setOffice}
           options={officeOptions.map((o) => ({ value: o.value, label: o.label }))}
         />
+
+        <I18nProvider locale="en-GB">
+          <DateField
+            fullWidth
+            aria-label={t("scout.date")}
+            value={parseDate(scoutDate)}
+            minValue={parseDate(today)}
+            maxValue={parseDate(maxScoutDate)}
+            onChange={(value) => {
+              if (value) setScoutDate(value.toString());
+            }}
+          >
+            <Label>{t("scout.date")}</Label>
+            <DateField.Group variant="secondary">
+              <DateField.Input>
+                {(segment) => <DateField.Segment segment={segment} />}
+              </DateField.Input>
+            </DateField.Group>
+          </DateField>
+        </I18nProvider>
 
         <div>
           <Label className="mb-1.5 block">{t("scout.scoutRange")}</Label>
@@ -553,18 +599,71 @@ function ScoutForm({
           options={durationOptions(t)}
         />
 
-        <SelectField
-          label={t("scout.capacity")}
+        <Select<{ value: CapacitySize; label: string }, "multiple">
+          variant="secondary"
+          fullWidth
+          className="flex flex-col gap-1.5"
           placeholder={t("scout.selectCapacity")}
-          value={capacity}
-          onChange={setCapacity}
-          options={capacityOptions(t)}
-        />
+          selectionMode="multiple"
+          value={capacities}
+          onChange={(keys) =>
+            setCapacities(keys.map(String) as CapacitySize[])
+          }
+        >
+          <Label>{t("scout.capacity")}</Label>
+          <Select.Trigger>
+            <Select.Value>
+              {({ defaultChildren, isPlaceholder }) => {
+                if (isPlaceholder || capacities.length === 0) {
+                  return defaultChildren;
+                }
+                return (
+                  <TagGroup
+                    size="sm"
+                    variant="surface"
+                    onRemove={(keys) =>
+                      setCapacities((current) =>
+                        current.filter((item) => !keys.has(item)),
+                      )
+                    }
+                  >
+                    <TagGroup.List>
+                      {capacities.map((size) => {
+                        return (
+                          <Tag key={size} id={size}>
+                            {capacityLabel(t, size)}
+                          </Tag>
+                        );
+                      })}
+                    </TagGroup.List>
+                  </TagGroup>
+                );
+              }}
+            </Select.Value>
+            <Select.Indicator />
+          </Select.Trigger>
+          <Select.Popover className="w-[var(--trigger-width)]">
+            <ListBox>
+              {capacityOptions(t).map((item) => (
+                <ListBoxItem
+                  key={item.value}
+                  id={item.value}
+                  textValue={item.label}
+                >
+                  {item.label}
+                  <ListBoxItem.Indicator />
+                </ListBoxItem>
+              ))}
+            </ListBox>
+          </Select.Popover>
+        </Select>
 
         {!afterHours && (
           <div className="flex items-start gap-1.5 text-sm leading-5 text-default-500">
             <CircleInfo className="mt-0.5 size-4 shrink-0 text-[#F05A22]" />
-            <span>{t("scout.sameDayNote")}</span>
+            <span>
+              {t("scout.dateRangeNote", { date: formatDmy(maxScoutDate) })}
+            </span>
           </div>
         )}
 
@@ -687,6 +786,10 @@ function ScoutingCard({
           />
         <DetailRow label={t("scout.duration")} value={durationLabel(t, scout.duration_minutes)} />
         <DetailRow
+          label={t("scout.date")}
+          value={scout.scout_date ? formatDmy(scout.scout_date) : "-"}
+        />
+        <DetailRow
           label={t("scout.scoutRangeLabel")}
           value={
             scout.scout_start_time && scout.scout_end_time
@@ -694,13 +797,21 @@ function ScoutingCard({
               : "-"
           }
         />
-        <DetailRow label={t("scout.capacity")} value={capacityLabel(t, scout.capacity_size)} />
+        <DetailRow
+          label={t("scout.capacity")}
+          value={(scout.capacity_sizes?.length
+            ? scout.capacity_sizes
+            : scout.capacity_size
+              ? [scout.capacity_size]
+              : []
+          ).map((size) => capacityLabel(t, size)).join(", ") || t("scout.capAny")}
+        />
         <DetailRow label={t("scout.lastChecked")} value={formatLastChecked(scout.last_checked_at)} />
       </dl>
 
       <div className="mt-4 flex items-start gap-1.5 text-sm leading-5 text-default-500">
         <CircleInfo className="mt-0.5 size-4 shrink-0 text-[#F05A22]" />
-        <span>{t("scout.sameDayNote")}</span>
+        <span>{t("scout.endsAtMidnightNote")}</span>
       </div>
 
       <div className="mt-5 flex items-center gap-2">

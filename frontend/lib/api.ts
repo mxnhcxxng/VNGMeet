@@ -153,8 +153,10 @@ export type CapacitySize = "small" | "medium" | "large";
 export interface RoomScout {
   id: string;
   email: string;
+  scout_date: string; // "YYYY-MM-DD"
   duration_minutes: number;
   capacity_size?: CapacitySize | null;
+  capacity_sizes?: CapacitySize[] | null;
   scout_start_time?: string | null; // "HH:MM"
   scout_end_time?: string | null; // "HH:MM"
   ignore_lunch_break?: boolean;
@@ -167,8 +169,9 @@ export interface RoomScout {
 }
 
 export interface RoomScoutPayload {
+  scout_date: string; // "YYYY-MM-DD"
   duration_minutes: number;
-  capacity_size: CapacitySize;
+  capacity_sizes: CapacitySize[];
   scout_start_time: string; // "HH:MM"
   scout_end_time: string; // "HH:MM"
   ignore_lunch_break?: boolean;

@@ -345,16 +345,18 @@ alter table room_availability enable row level security;
 create policy "authenticated_can_read_availability" on room_availability
   for select to authenticated using (true);
 
--- Room Scout: user asks the app to watch today's availability and email them
--- when a room is free for the desired duration/capacity.
+-- Room Scout: user asks the app to watch availability on a selected date and
+-- email them when a room is free for the desired duration/capacity.
 create table if not exists room_scouts (
   id uuid primary key default gen_random_uuid(),
   user_id uuid references public.user_profiles(id) on delete cascade,
   auth_user_id uuid references auth.users on delete cascade,
   email text not null,
+  scout_date date not null default current_date,
   duration_minutes integer not null,
   min_capacity integer default 1,
   capacity_size text,
+  capacity_sizes text[] not null default '{}',
   scout_start_time text,
   scout_end_time text,
   office text,
@@ -372,10 +374,25 @@ create table if not exists room_scouts (
   constraint room_scouts_status_check check (status in ('active', 'stopped', 'expired', 'failed', 'canceled', 'success'))
 );
 alter table room_scouts add column if not exists auth_user_id uuid references auth.users on delete cascade;
+alter table room_scouts add column if not exists scout_date date;
+update room_scouts
+set scout_date = (created_at at time zone 'Asia/Ho_Chi_Minh')::date
+where scout_date is null;
+alter table room_scouts alter column scout_date set not null;
 alter table room_scouts add column if not exists graph_access_token text;
 alter table room_scouts add column if not exists office text;
 alter table room_scouts add column if not exists last_notified_signature text;
 alter table room_scouts add column if not exists capacity_size text;
+alter table room_scouts add column if not exists capacity_sizes text[] not null default '{}';
+update room_scouts
+set capacity_sizes = array[capacity_size]
+where capacity_size is not null and cardinality(capacity_sizes) = 0;
+alter table room_scouts
+  drop constraint if exists room_scouts_capacity_sizes_check;
+alter table room_scouts
+  add constraint room_scouts_capacity_sizes_check check (
+    capacity_sizes <@ array['small', 'medium', 'large']::text[]
+  );
 alter table room_scouts add column if not exists scout_start_time text;
 alter table room_scouts add column if not exists scout_end_time text;
 -- When true, scouting treats the 12:00-13:00 lunch window as free/skippable.

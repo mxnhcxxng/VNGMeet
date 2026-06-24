@@ -976,8 +976,12 @@ async def availability_refresh(request: Request):
 # Room Scout
 # --------------------------------------------------------------------------- #
 class RoomScoutRequest(BaseModel):
+    scout_date: date_cls | None = None
     duration_minutes: int = Field(ge=15, le=480)
     capacity_size: Literal["small", "medium", "large"] | None = None
+    capacity_sizes: list[Literal["small", "medium", "large"]] = Field(
+        default_factory=list, max_length=3
+    )
     scout_start_time: str | None = None  # "HH:MM"
     scout_end_time: str | None = None  # "HH:MM"
     ignore_lunch_break: bool = False
@@ -1000,7 +1004,7 @@ def _minutes_to_label(minutes: int) -> str:
 
 
 def _scout_scan_window(tz: ZoneInfo, scout: dict) -> tuple[int, int, int]:
-    """Slot range to scan today for a free `duration` block.
+    """Slot range to scan on the selected date for a free `duration` block.
 
     Returns (scan_start_idx, scan_end_idx, duration_slots). We scan the whole
     configured scout range [scout_start_time, scout_end_time) and report a match
@@ -1090,9 +1094,16 @@ def _available_room_scout_matches(sb, scout: dict, day: str) -> tuple[list[dict]
         query = query.eq("office", office)
     rooms = [r for r in (query.execute().data or []) if r.get("id") and r.get("email")]
 
-    wanted_size = str(scout.get("capacity_size") or "").strip().lower()
-    if wanted_size:
-        rooms = [r for r in rooms if _effective_capacity_size(r) == wanted_size]
+    wanted_sizes = {
+        str(size).strip().lower()
+        for size in (scout.get("capacity_sizes") or [])
+        if str(size).strip()
+    }
+    legacy_size = str(scout.get("capacity_size") or "").strip().lower()
+    if legacy_size:
+        wanted_sizes.add(legacy_size)
+    if wanted_sizes:
+        rooms = [r for r in rooms if _effective_capacity_size(r) in wanted_sizes]
     if not rooms:
         return [], start_time, end_time
 
@@ -1167,7 +1178,14 @@ def _room_scout_email_body(scout: dict, rooms: list[dict], day: str, start_time:
         for room in rooms[:12]
     )
     extra = "" if len(rooms) <= 12 else f"<p>And {len(rooms) - 12} more room(s).</p>"
-    size = str(scout.get("capacity_size") or "any").strip().lower() or "any"
+    sizes = [
+        str(size).strip().lower()
+        for size in (scout.get("capacity_sizes") or [])
+        if str(size).strip()
+    ]
+    if not sizes and scout.get("capacity_size"):
+        sizes = [str(scout["capacity_size"]).strip().lower()]
+    size = ", ".join(sizes) or "any"
     book_url = html.escape(settings.public_url)
     return f"""
     <div style="font-family:Arial,sans-serif;color:#18181b;line-height:1.5">
@@ -1212,9 +1230,7 @@ async def process_room_scouts() -> dict:
     sb = get_supabase()
     tz = ZoneInfo(settings.timezone)
     now = datetime.now(timezone.utc)
-    today = datetime.now(tz).date().isoformat()
-
-    # Auto-cancel scouts whose end time has passed (expires_at = scout end time).
+    # Auto-cancel scouts at midnight after the day they were created.
     sb.table("room_scouts").update(
         {"status": "canceled", "updated_at": now.isoformat()}
     ).eq("status", "active").lte("expires_at", now.isoformat()).execute()
@@ -1222,8 +1238,8 @@ async def process_room_scouts() -> dict:
     scouts = (
         sb.table("room_scouts")
         .select(
-            "id, user_id, auth_user_id, email, duration_minutes, capacity_size, "
-            "scout_start_time, scout_end_time, ignore_lunch_break, office, "
+            "id, user_id, auth_user_id, email, duration_minutes, capacity_size, capacity_sizes, "
+            "scout_date, scout_start_time, scout_end_time, ignore_lunch_break, office, "
             "graph_access_token, last_notified_signature"
         )
         .eq("status", "active")
@@ -1250,9 +1266,12 @@ async def process_room_scouts() -> dict:
 
     for scout in scouts:
         scout_id = scout["id"]
+        scout_day = str(scout.get("scout_date") or "")
         checked_at = datetime.now(timezone.utc).isoformat()
         try:
-            rooms, start_time, end_time = _available_room_scout_matches(sb, scout, today)
+            rooms, start_time, end_time = _available_room_scout_matches(
+                sb, scout, scout_day
+            )
             total_matches += len(rooms)
             update = {"last_checked_at": checked_at, "updated_at": checked_at}
             if rooms:
@@ -1260,14 +1279,18 @@ async def process_room_scouts() -> dict:
                 # so we don't re-email the same match set as the day advances.
                 sig_start = scout.get("scout_start_time") or start_time
                 sig_end = scout.get("scout_end_time") or end_time
-                signature = _room_scout_signature(today, sig_start, sig_end, rooms)
+                signature = _room_scout_signature(
+                    scout_day, sig_start, sig_end, rooms
+                )
                 if signature != scout.get("last_notified_signature"):
                     token = await _room_scout_graph_token(scout)
                     await graph.send_mail(
                         token,
                         scout["email"],
                         f"Room Scout: {len(rooms)} room(s) available at {start_time}",
-                        _room_scout_email_body(scout, rooms, today, start_time, end_time),
+                        _room_scout_email_body(
+                            scout, rooms, scout_day, start_time, end_time
+                        ),
                         inline_images=_vng_meet_inline_images(),
                     )
                     update["last_notified_at"] = checked_at
@@ -1301,7 +1324,7 @@ async def list_room_scouts(request: Request):
         get_supabase()
         .table("room_scouts")
         .select(
-            "id, email, duration_minutes, capacity_size, scout_start_time, scout_end_time, "
+            "id, email, scout_date, duration_minutes, capacity_size, capacity_sizes, scout_start_time, scout_end_time, "
             "ignore_lunch_break, office, status, last_checked_at, last_notified_at, "
             "expires_at, created_at"
         )
@@ -1335,18 +1358,27 @@ async def create_room_scout(request: Request, payload: RoomScoutRequest):
         raise HTTPException(422, "Scout range must be at least as long as the duration.")
 
     tz = ZoneInfo(settings.timezone)
+    local_today = datetime.now(tz).date()
+    scout_date = payload.scout_date or local_today
+    max_scout_date = local_today + timedelta(days=14)
+    if scout_date < local_today or scout_date > max_scout_date:
+        raise HTTPException(
+            422, "Scout date must be between today and 14 days from today."
+        )
     now = datetime.now(timezone.utc).isoformat()
-    # The scout auto-stops once "now" passes its end time today; after that the
-    # background job marks it canceled (see process_room_scouts).
-    scout_end_local = datetime.now(tz).replace(
-        hour=end_minutes // 60, minute=end_minutes % 60, second=0, microsecond=0
+    # The selected date controls which availability row is checked. The job
+    # itself only runs until midnight of the day it was created.
+    scout_end_local = datetime.combine(
+        local_today + timedelta(days=1), datetime.min.time(), tzinfo=tz
     )
     row = {
         "user_id": user_profile_id,
         "auth_user_id": auth_user_id,
         "email": email,
+        "scout_date": scout_date.isoformat(),
         "duration_minutes": payload.duration_minutes,
         "capacity_size": payload.capacity_size,
+        "capacity_sizes": list(dict.fromkeys(payload.capacity_sizes)),
         "scout_start_time": _minutes_to_label(start_minutes),
         "scout_end_time": _minutes_to_label(end_minutes),
         "ignore_lunch_break": payload.ignore_lunch_break,
@@ -1591,7 +1623,7 @@ Nguyên tắc phản hồi:
 - Chỉ hỗ trợ đặt phòng vào ngày làm việc trong tuần (Thứ 2 đến Thứ 6). Nếu user yêu cầu Thứ 7 hoặc Chủ nhật, báo ngắn gọn rằng chỉ đặt được vào ngày làm việc T2-T6 và gợi ý chọn ngày làm việc gần nhất. Khi gợi ý ngày/khung giờ, không trả ra Thứ 7 hoặc Chủ nhật.
 - Do giới hạn hệ thống, chỉ đặt được phòng tối đa 15 ngày kể từ hôm nay (tính cả hôm nay là ngày thứ 0, ví dụ hôm nay 16/6 thì ngày xa nhất đặt được là 1/7). Nếu user yêu cầu ngày xa hơn, báo ngắn gọn rằng chỉ đặt được trong vòng 15 ngày tới và gợi ý ngày hợp lệ gần nhất. Không kiểm tra phòng trống hay tạo card đặt phòng cho ngày vượt quá giới hạn này.
 - Không bịa phòng, giờ trống hoặc trạng thái booking nếu chưa có dữ liệu từ API.
-- Nếu API không trả về phòng phù hợp, trước tiên dùng split_suggestions/alternate_suggestions để gợi ý tách phòng hoặc khung giờ khác cùng thời lượng. Sau khi đã đưa các gợi ý đó, LUÔN thêm ở phía cuối một đề xuất dùng thử Room Scout (tên tiếng Việt là "Săn phòng"): nói rằng nếu user vẫn muốn giữ đúng khung giờ đã yêu cầu, có thể vào trang Săn phòng để hệ thống tự theo dõi; khi có phòng được nhả ra trong khung giờ đó, hệ thống sẽ báo cho user (qua email). BẮT BUỘC để tên "Săn phòng" dưới dạng hyperlink markdown trỏ tới đường dẫn /room-scout, ví dụ: [Săn phòng](/room-scout). Lưu ý: Room Scout/Săn phòng hiện chỉ hỗ trợ phòng trong NGÀY HÔM NAY, nên chỉ đề xuất Room Scout khi ngày user yêu cầu là hôm nay; nếu là ngày khác thì bỏ qua phần đề xuất Room Scout. Bot không tự bật Room Scout; chỉ gợi ý qua hyperlink.
+- Nếu API không trả về phòng phù hợp, trước tiên dùng split_suggestions/alternate_suggestions để gợi ý tách phòng hoặc khung giờ khác cùng thời lượng. Sau khi đã đưa các gợi ý đó, LUÔN thêm ở phía cuối một đề xuất dùng thử Room Scout (tên tiếng Việt là "Săn phòng"): nói rằng nếu user vẫn muốn giữ đúng khung giờ đã yêu cầu, có thể vào trang Săn phòng để hệ thống tự theo dõi; khi có phòng được nhả ra trong khung giờ đó, hệ thống sẽ báo cho user (qua email). BẮT BUỘC để tên "Săn phòng" dưới dạng hyperlink markdown trỏ tới đường dẫn /room-scout, ví dụ: [Săn phòng](/room-scout). Room Scout/Săn phòng hỗ trợ ngày từ hôm nay đến 14 ngày tới. Bot không tự bật Room Scout; chỉ gợi ý qua hyperlink.
 - Nếu người dùng không nói tên cuộc họp, để trống subject; hệ thống sẽ tự điền tên mặc định.
 - Nếu đặt lịch ngoài vùng live availability/schedule-bookable, truyền booking_type="scheduled"; còn đặt tức thì thì booking_type="instant".
 - Trả nhiều option hữu ích nhưng tối đa 5 option.
@@ -2630,9 +2662,8 @@ async def _tool_check_room_availability(
             alternate_suggestions = _alternate_time_suggestions(
                 rows, cache, day_list, date, start_idx, end_idx, profile, now
             )
-        # Room Scout chỉ theo dõi phòng trong ngày hôm nay, nên chỉ đề xuất khi
-        # khung giờ user yêu cầu rơi vào hôm nay.
-        if requested_day == today:
+        # Room Scout supports today through 14 days from today.
+        if requested_day <= today + timedelta(days=14):
             room_scout_suggestion = {
                 "feature": "room_scout",
                 "label": "Săn phòng",
@@ -2645,6 +2676,7 @@ async def _tool_check_room_availability(
                 ),
                 "scout_start_time": start_time,
                 "scout_end_time": end_time,
+                "scout_date": date,
                 "capacity_size": requested_capacity_size,
                 "office": (_profile_payload(profile) or {}).get("office"),
             }
