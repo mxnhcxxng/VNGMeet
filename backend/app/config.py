@@ -115,7 +115,9 @@ class Settings(BaseSettings):
     # grid reads from the cache instead of calling Graph live. The cache always
     # stores the FULL day at
     # 15-min granularity (96 slots) for `availability_days` days starting today.
-    availability_days: int = 15
+    # The final day is Graph-scanned for conflicts but remains scheduled-booking
+    # territory: free slots are stored as -1 and busy slots as 1.
+    availability_days: int = 16
     availability_slot_minutes: int = 15  # 24h / 15min = 96 slots per day
     # Cron minutes the refresh fires on. "*/2" = every 2 minutes; "*" = every
     # minute; a CSV list like "0,15,30,45" pins it to specific minutes of the hour.

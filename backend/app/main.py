@@ -38,6 +38,11 @@ SCHEDULE_MAX_DURATION_MINUTES = 3 * 60
 _AVAILABILITY_REFRESH_LOCK = None
 
 
+def _live_availability_horizon_end(today: date_cls) -> date_cls:
+    """Last instant-booking day; the final cache day remains scheduled."""
+    return today + timedelta(days=max(0, settings.availability_days - 2))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Start background jobs when their required integrations are configured."""
@@ -930,9 +935,11 @@ async def availability_grid(
             row = cache.get((r["id"], day))
             slots = row.get("slots") if row else []
             slot_owner_ids = row.get("slot_owner_ids") if row else []
-            # A day still holding seeded -1 slots hasn't been refreshed from Graph
-            # yet (it's beyond the live-availability window). Bookings made there
-            # are "schedule" bookings, so the grid uses a distinct status band:
+            # Any day containing -1 is not treated as a normal instant day. The
+            # final cache day intentionally keeps Graph-free slots at -1 while
+            # Graph-busy slots are 1, so bookings there remain scheduled but
+            # existing admin bookings stay blocked.
+            # The grid uses a distinct status band:
             #   3 = free / schedule-bookable, 4 = scheduled by someone else,
             #   5 = your scheduled. Instant days keep 0/1/2.
             schedule_day = any(s == -1 for s in slots)
@@ -953,12 +960,16 @@ async def availability_grid(
                 )
                 is_your_booking = bool(owner_email and owner_email == current_user_email)
                 if schedule_day:
-                    # No Graph busy data here; only app schedule bookings (tracked
-                    # via slot_owner_ids) occupy slots. Everything else is bookable.
+                    busy = any(
+                        start + k < len(slots) and slots[start + k] == 1
+                        for k in range(sub_per_slot)
+                    )
                     if is_your_booking:
                         final_value = 5
                     elif owner_profile_id:
                         final_value = 4
+                    elif busy:
+                        final_value = 1
                     else:
                         final_value = 3
                 else:
@@ -2811,9 +2822,9 @@ async def _tool_book_room(
     _ = (graph_token, auth_user_id)
     profile = _read_user_profile(user_profile_id) if user_profile_id else None
     # The bot must not pick instant vs scheduled itself: a date is "scheduled"
-    # only when it falls beyond the live-availability window
-    # (today .. today + availability_days - 1). Anything inside the window is
-    # instant. Compute it from the date so the LLM's booking_type is overridden.
+    # only when it falls on the final cache day. The first
+    # (availability_days - 1) days are instant; the last day is scanned from
+    # Graph for admin conflicts but remains scheduled.
     booking_date = str(args.get("date") or "").strip()
     booking_type = str(args.get("booking_type") or "instant").strip()
     if booking_type not in {"instant", "schedule", "scheduled"}:
@@ -2831,7 +2842,7 @@ async def _tool_book_room(
                     f"(đến hết ngày {max_booking_day.isoformat()})."
                 ),
             }
-        horizon_end = today + timedelta(days=settings.availability_days - 1)
+        horizon_end = _live_availability_horizon_end(today)
         booking_type = "scheduled" if target_day > horizon_end else "instant"
     except ValueError:
         pass
@@ -3851,6 +3862,11 @@ async def create_booking(request: Request, payload: BookingRequest):
             f"{settings.max_booking_advance_days} ngày từ hôm nay "
             f"(đến hết ngày {max_booking_day.isoformat()}).",
         )
+    payload.booking_type = (
+        "scheduled"
+        if target_day > _live_availability_horizon_end(today)
+        else "instant"
+    )
     if _payload_is_scheduled(payload):
         duration = _booking_duration_minutes(payload)
         if duration is None:
@@ -4142,7 +4158,9 @@ async def process_scheduled_bookings() -> dict:
 
     tz = ZoneInfo(settings.timezone)
     today = datetime.now(tz).date()
-    horizon_end = today + timedelta(days=settings.availability_days - 1)
+    # The final cache day remains scheduled. Process it only after it rolls into
+    # the first (availability_days - 1) live/instant days.
+    horizon_end = _live_availability_horizon_end(today)
     sb = get_supabase()
     rows = (
         sb.table("user_activity")

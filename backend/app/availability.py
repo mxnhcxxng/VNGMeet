@@ -30,13 +30,17 @@ log = logging.getLogger("vngmeet.availability")
 SLOTS_PER_DAY = 96  # 24h / 15min
 
 
-def _av_char_to_status(ch: str) -> int:
+def _av_char_to_status(ch: str, *, scheduled_day: bool = False) -> int:
     """Map a Graph availabilityView digit to our 0=free / 1=busy encoding.
 
     availabilityView: 0=free, 1=tentative, 2=busy, 3=oof, 4=workingElsewhere.
-    Anything other than free counts as busy for booking purposes.
+    Anything other than free counts as busy for booking purposes. On the final
+    cache day, Graph-free slots remain -1 so the day is still handled as a
+    scheduled-booking day, while Graph-busy slots remain blocked as 1.
     """
-    return 0 if ch == "0" else 1
+    if ch == "0":
+        return -1 if scheduled_day else 0
+    return 1
 
 
 def _in_use_rooms() -> list[dict]:
@@ -148,10 +152,15 @@ async def refresh_availability() -> dict:
         view = views.get(email, "")
         for di, day in enumerate(day_list):
             chunk = view[di * SLOTS_PER_DAY : (di + 1) * SLOTS_PER_DAY]
-            slots = [_av_char_to_status(c) for c in chunk]
+            scheduled_day = di == len(day_list) - 1
+            slots = [
+                _av_char_to_status(c, scheduled_day=scheduled_day)
+                for c in chunk
+            ]
             # Pad if Graph returned a short view (defensive; treat missing as free).
             if len(slots) < SLOTS_PER_DAY:
-                slots += [0] * (SLOTS_PER_DAY - len(slots))
+                pad_value = -1 if scheduled_day else 0
+                slots += [pad_value] * (SLOTS_PER_DAY - len(slots))
             slot_owner_ids = _merge_owner_ids_with_slots(
                 existing_owner_ids.get((room["id"], day.isoformat())),
                 slots,
@@ -251,10 +260,15 @@ async def refresh_availability_delegated(token: str) -> dict:
                 continue
             for di, day in enumerate(day_list):
                 chunk = view[di * SLOTS_PER_DAY : (di + 1) * SLOTS_PER_DAY]
-                slots = [_av_char_to_status(c) for c in chunk]
+                scheduled_day = di == len(day_list) - 1
+                slots = [
+                    _av_char_to_status(c, scheduled_day=scheduled_day)
+                    for c in chunk
+                ]
                 # Pad if Graph returned a short view (defensive; missing = free).
                 if len(slots) < SLOTS_PER_DAY:
-                    slots += [0] * (SLOTS_PER_DAY - len(slots))
+                    pad_value = -1 if scheduled_day else 0
+                    slots += [pad_value] * (SLOTS_PER_DAY - len(slots))
                 slot_owner_ids = _merge_owner_ids_with_slots(
                     existing_owner_ids.get((room["id"], day.isoformat())),
                     slots,

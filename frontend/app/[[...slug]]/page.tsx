@@ -57,7 +57,7 @@ import { RoomScout } from "@/components/RoomScout";
 import { usePathname } from "next/navigation";
 
 // Keep the browse range aligned with backend availability_days.
-const RANGE_DAYS = 18;
+const RANGE_DAYS = 16;
 const BROWSE_REFRESH_INTERVAL_MS = 2 * 60 * 1000;
 
 // URL <-> view mapping. The whole app lives on a single client page, so instead
