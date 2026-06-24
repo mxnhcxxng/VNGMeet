@@ -210,12 +210,12 @@ export const api = {
       options: { scopes: SCOPES, redirectTo: window.location.origin },
     }),
   signOut: () => supabase?.auth.signOut(),
-  // Persist the Microsoft refresh token on the backend (once, after OAuth).
-  link: (provider_refresh_token: string) =>
+  // Persist the latest Microsoft refresh/access tokens after OAuth.
+  link: (provider_refresh_token: string, provider_access_token?: string | null) =>
     req<{ ok: boolean }>("/api/auth/link", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ provider_refresh_token }),
+      body: JSON.stringify({ provider_refresh_token, provider_access_token }),
     }),
   // Manual path: paste a Graph access token (no admin / no Supabase needed).
   setToken: (access_token: string) =>

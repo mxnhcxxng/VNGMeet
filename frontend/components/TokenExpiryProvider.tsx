@@ -14,9 +14,8 @@ import { CircleInfo, Xmark, TriangleExclamation } from "@gravity-ui/icons";
 import { useT } from "@/app/providers";
 import { supabase } from "@/lib/supabase";
 
-// A task must finish at least this long before the token would otherwise be
-// usable, i.e. it may only run up to BUFFER seconds past the remaining token
-// time. (See the Vietnamese spec: block if needed > remaining + 10 minutes.)
+// Require the token to remain valid for this long after a task is expected to
+// run. This gives scheduled jobs a small margin for startup and API latency.
 export const TOKEN_BUFFER_SECONDS = 10 * 60;
 
 type ModalReason = "info" | "refresh";
@@ -88,7 +87,7 @@ export function TokenExpiryProvider({
     (neededSeconds: number) => {
       const remaining = getRemainingSeconds();
       if (remaining === null) return true; // unknown → don't block
-      if (neededSeconds > remaining + TOKEN_BUFFER_SECONDS) {
+      if (neededSeconds + TOKEN_BUFFER_SECONDS > remaining) {
         setModal({ open: true, reason: "refresh" });
         return false;
       }

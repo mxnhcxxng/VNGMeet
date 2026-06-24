@@ -58,6 +58,7 @@ import { usePathname } from "next/navigation";
 
 // Keep the browse range aligned with backend availability_days.
 const RANGE_DAYS = 18;
+const BROWSE_REFRESH_INTERVAL_MS = 2 * 60 * 1000;
 
 // URL <-> view mapping. The whole app lives on a single client page, so instead
 // of separate route files we mirror the active `view` into the path (and a
@@ -924,7 +925,10 @@ export default function Home() {
         // Supabase exposes the Microsoft refresh token only right after OAuth.
         if (session.provider_refresh_token) {
           try {
-            await api.link(session.provider_refresh_token);
+            await api.link(
+              session.provider_refresh_token,
+              session.provider_token,
+            );
           } catch {
             /* non-fatal */
           }
@@ -963,6 +967,25 @@ export default function Home() {
   useEffect(() => {
     if (canEnterBooking) loadSchedule();
   }, [canEnterBooking, loadSchedule]);
+
+  useEffect(() => {
+    if (!canEnterBooking || view !== "browse") return;
+
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") loadSchedule();
+    };
+
+    const interval = window.setInterval(
+      refreshWhenVisible,
+      BROWSE_REFRESH_INTERVAL_MS,
+    );
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, [canEnterBooking, loadSchedule, view]);
 
   const loadChatThreads = useCallback(async () => {
     try {

@@ -12,6 +12,7 @@ import hashlib
 import html
 import json
 import logging
+import time
 from contextlib import asynccontextmanager
 from datetime import date as date_cls, datetime, timedelta, timezone
 from pathlib import Path
@@ -453,12 +454,20 @@ async def set_token(request: Request, access_token: str = Body(..., embed=True))
     claims = await auth.verify_manual_graph_token(access_token)
     sid = auth.session_id(request)
     auth.set_manual_token(sid, access_token, claims)
-    _upsert_user_profile(claims)
+    user_profile_id = _upsert_user_profile(claims)
+    _update_pending_scheduled_graph_token(
+        access_token,
+        user_profile_id=user_profile_id,
+    )
     return JSONResponse({"ok": True, "username": _profile_display_name(claims)})
 
 
 @app.post("/api/auth/link")
-def link_microsoft(request: Request, provider_refresh_token: str = Body(..., embed=True)):
+async def link_microsoft(
+    request: Request,
+    provider_refresh_token: str = Body(..., embed=True),
+    provider_access_token: str | None = Body(None, embed=True),
+):
     """Supabase mode: store the Microsoft refresh token after Azure sign-in."""
     bearer = request.headers.get("Authorization", "")
     if not bearer.startswith("Bearer "):
@@ -466,7 +475,28 @@ def link_microsoft(request: Request, provider_refresh_token: str = Body(..., emb
     claims = auth.verify_jwt(bearer[len("Bearer ") :])
     if not provider_refresh_token or not provider_refresh_token.strip():
         raise HTTPException(400, "provider_refresh_token rỗng")
-    auth.store_refresh_token(claims["sub"], provider_refresh_token.strip())
+    auth_user_id = claims["sub"]
+    auth.store_refresh_token(auth_user_id, provider_refresh_token.strip())
+
+    graph_token = (provider_access_token or "").strip()
+    if graph_token:
+        token_exp = auth.decode_jwt_claims(graph_token).get("exp")
+        expires_in = (
+            max(0, int(token_exp) - int(time.time()))
+            if isinstance(token_exp, (int, float))
+            else 3600
+        )
+        auth.cache_graph_token(auth_user_id, graph_token, expires_in)
+    else:
+        auth.invalidate_graph_token(auth_user_id)
+        graph_token = await auth.get_graph_token(auth_user_id)
+
+    user_profile_id = _upsert_user_profile(claims)
+    _update_pending_scheduled_graph_token(
+        graph_token,
+        user_profile_id=user_profile_id,
+        auth_user_id=auth_user_id,
+    )
     return {"ok": True}
 
 
@@ -3392,6 +3422,42 @@ def _decrypt_scheduled_graph_token(value: object) -> str:
         raise RuntimeError("could not decrypt scheduled Graph token") from e
 
 
+def _update_pending_scheduled_graph_token(
+    graph_access_token: str,
+    *,
+    user_profile_id: str | None = None,
+    auth_user_id: str | None = None,
+) -> None:
+    """Store the latest login token on this user's pending scheduled bookings."""
+    if not settings.supabase_enabled or not graph_access_token:
+        return
+    encrypted_token = _encrypt_scheduled_graph_token(graph_access_token)
+    try:
+        from .supabase_client import get_supabase
+
+        sb = get_supabase()
+        if auth_user_id:
+            (
+                sb.table("user_activity")
+                .update({"graph_access_token": encrypted_token})
+                .eq("booking_type", "scheduled")
+                .eq("status", "pending")
+                .eq("auth_user_id", auth_user_id)
+                .execute()
+            )
+        if user_profile_id:
+            (
+                sb.table("user_activity")
+                .update({"graph_access_token": encrypted_token})
+                .eq("booking_type", "scheduled")
+                .eq("status", "pending")
+                .eq("user_id", user_profile_id)
+                .execute()
+            )
+    except Exception as e:  # noqa: BLE001 - token mirroring must not block login
+        log.warning("could not update pending scheduled booking token: %s", e)
+
+
 def _set_active_booking(user_profile_id: str | None, active: bool) -> None:
     if not user_profile_id or not settings.supabase_enabled:
         return
@@ -3548,10 +3614,8 @@ def _create_pending_scheduled_booking(
                 {
                     "user_id": user_profile_id,
                     "auth_user_id": auth_user_id,
-                    "graph_access_token": (
-                        _encrypt_scheduled_graph_token(graph_access_token)
-                        if not auth_user_id
-                        else None
+                    "graph_access_token": _encrypt_scheduled_graph_token(
+                        graph_access_token
                     ),
                     "room_email": payload.room_email,
                     "room_name": payload.room_name,

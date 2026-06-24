@@ -116,11 +116,17 @@ export function BookingModal({
       setError(t("booking.titleRequired"));
       return;
     }
-    // Scheduled bookings run at the meeting start time, so the token must still
-    // be valid then (with buffer). Block + prompt a refresh otherwise.
+    // The backend processes scheduled bookings at 00:00:01 the next day, when
+    // the target date enters the live booking window. Keep the token valid
+    // until that run, plus the shared safety buffer.
     if (slot.schedule) {
-      const startAt = new Date(`${slot.date}T${slot.startTime}:00`).getTime();
-      const neededSeconds = Math.floor((startAt - Date.now()) / 1000);
+      const nextRun = new Date();
+      nextRun.setDate(nextRun.getDate() + 1);
+      nextRun.setHours(0, 0, 1, 0);
+      const neededSeconds = Math.max(
+        0,
+        Math.ceil((nextRun.getTime() - Date.now()) / 1000),
+      );
       if (!ensureTokenTime(neededSeconds)) return;
     }
     setLoading(true);

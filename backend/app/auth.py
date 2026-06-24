@@ -33,6 +33,19 @@ _MANUAL_CLAIMS: dict[str, dict] = {}
 _GRAPH_TOKEN_CACHE: dict[str, tuple[str, float]] = {}
 
 
+def cache_graph_token(user_id: str, access_token: str, expires_in: int = 3600) -> None:
+    """Seed the Graph token cache with a fresh token returned by OAuth."""
+    _GRAPH_TOKEN_CACHE[user_id] = (
+        access_token.strip(),
+        time.time() + max(0, expires_in),
+    )
+
+
+def invalidate_graph_token(user_id: str) -> None:
+    """Force the next Graph request to exchange the latest refresh token."""
+    _GRAPH_TOKEN_CACHE.pop(user_id, None)
+
+
 def decode_jwt_claims(token: str) -> dict:
     """Best-effort read of JWT claims without verifying the signature."""
     try:

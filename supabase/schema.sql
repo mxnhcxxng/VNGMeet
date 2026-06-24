@@ -261,7 +261,7 @@ create table if not exists user_activity (
 alter table user_activity add column if not exists auth_user_id uuid references auth.users on delete set null;
 alter table user_activity add column if not exists graph_access_token text;
 comment on column user_activity.graph_access_token is
-  'Encrypted manual Graph access token for pending scheduled bookings. Values must use fernet:<ciphertext>.';
+  'Latest encrypted Graph access token for pending scheduled bookings. Values must use fernet:<ciphertext>.';
 alter table user_activity add column if not exists subject text;
 alter table user_activity add column if not exists attendees text[] not null default '{}';
 alter table user_activity add column if not exists body text;
@@ -378,6 +378,8 @@ alter table room_scouts add column if not exists scout_date date;
 update room_scouts
 set scout_date = (created_at at time zone 'Asia/Ho_Chi_Minh')::date
 where scout_date is null;
+alter table room_scouts
+  alter column scout_date set default ((now() at time zone 'Asia/Ho_Chi_Minh')::date);
 alter table room_scouts alter column scout_date set not null;
 alter table room_scouts add column if not exists graph_access_token text;
 alter table room_scouts add column if not exists office text;
@@ -393,6 +395,23 @@ alter table room_scouts
   add constraint room_scouts_capacity_sizes_check check (
     capacity_sizes <@ array['small', 'medium', 'large']::text[]
   );
+create or replace function sync_room_scout_capacity_sizes()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if new.capacity_size is not null
+     and (new.capacity_sizes is null or cardinality(new.capacity_sizes) = 0) then
+    new.capacity_sizes := array[new.capacity_size];
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists trg_sync_room_scout_capacity_sizes on room_scouts;
+create trigger trg_sync_room_scout_capacity_sizes
+before insert or update of capacity_size, capacity_sizes on room_scouts
+for each row execute function sync_room_scout_capacity_sizes();
 alter table room_scouts add column if not exists scout_start_time text;
 alter table room_scouts add column if not exists scout_end_time text;
 -- When true, scouting treats the 12:00-13:00 lunch window as free/skippable.
