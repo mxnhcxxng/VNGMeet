@@ -116,7 +116,7 @@ export function BookingModal({
       setError(t("booking.titleRequired"));
       return;
     }
-    // The backend processes scheduled bookings at 00:00:01 the next day, when
+    // The backend processes scheduled bookings at 00:00:00 the next day, when
     // the target date enters the live booking window. Keep the token valid
     // until that run, plus the shared safety buffer.
     if (slot.schedule) {

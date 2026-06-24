@@ -61,7 +61,7 @@ async def lifespan(app: FastAPI):
             )
         scheduler.add_job(
             _safe_process_scheduled_bookings,
-            CronTrigger(hour=0, minute=0, second=1, timezone=settings.timezone),
+            CronTrigger(hour=0, minute=0, second=0, timezone=settings.timezone),
             id="process_scheduled_bookings",
             max_instances=1,
             coalesce=True,
@@ -4158,15 +4158,28 @@ async def process_scheduled_bookings() -> dict:
         .data
         or []
     )
+    log.warning(
+        "process_scheduled_bookings started (today=%s, horizon_end=%s, bookings=%s)",
+        today.isoformat(),
+        horizon_end.isoformat(),
+        len(rows),
+    )
 
-    processed = 0
-    failed = 0
-    for row in rows:
+    async def process_one(row: dict) -> bool:
+        """Process one booking independently so all Graph requests can overlap."""
         activity_id = row.get("id")
         user_profile_id = str(row.get("user_id") or "")
         auth_user_id = str(row.get("auth_user_id") or "")
         payload = _activity_to_booking_request(row)
         now_iso = datetime.now(timezone.utc).isoformat()
+        log.warning(
+            "processing scheduled booking %s (date=%s, start=%s, end=%s, room=%s)",
+            activity_id,
+            payload.date,
+            payload.start_time,
+            payload.end_time,
+            payload.room_email,
+        )
 
         try:
             if not auth_user_id:
@@ -4215,9 +4228,9 @@ async def process_scheduled_bookings() -> dict:
                 ).execute()
             except Exception as e:  # noqa: BLE001
                 log.warning("could not mirror scheduled booking metadata: %s", e)
-            processed += 1
+            log.warning("scheduled booking %s processed successfully", activity_id)
+            return True
         except Exception as e:  # noqa: BLE001 - keep processing the queue
-            failed += 1
             sb.table("user_activity").update(
                 {
                     "status": "failed",
@@ -4227,7 +4240,21 @@ async def process_scheduled_bookings() -> dict:
             ).eq("id", activity_id).execute()
             _set_active_booking(user_profile_id, False)
             log.warning("scheduled booking %s failed: %s", activity_id, e)
+            return False
 
+    # Start every eligible booking in the same event-loop turn. Network requests to
+    # Microsoft Graph then run concurrently instead of waiting for the previous
+    # booking to finish.
+    log.warning("dispatching %s scheduled bookings concurrently", len(rows))
+    results = await asyncio.gather(*(process_one(row) for row in rows))
+    processed = sum(results)
+    failed = len(results) - processed
+
+    log.warning(
+        "process_scheduled_bookings finished (processed=%s, failed=%s)",
+        processed,
+        failed,
+    )
     return {"ok": True, "processed": processed, "failed": failed}
 
 
