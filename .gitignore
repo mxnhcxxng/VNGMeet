@@ -1,5 +1,7 @@
 # Secrets
 .env
+.env1
+.env2
 .greennode.json
 
 # Python
