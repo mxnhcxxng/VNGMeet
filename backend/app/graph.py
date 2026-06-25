@@ -186,8 +186,7 @@ async def get_schedule(
     return result
 
 
-async def create_event(
-    access_token: str,
+def build_event_body(
     subject: str,
     start_iso: str,
     end_iso: str,
@@ -197,17 +196,8 @@ async def create_event(
     attendees: list[str] | None = None,
     body_text: str | None = None,
 ) -> dict:
-    """Create an event on the signed-in user's calendar, booking a room.
-
-    The room is added as a resource attendee; if the room mailbox is set to
-    auto-accept, it will accept the invite and then show as busy in getSchedule.
-    Needs the Calendars.ReadWrite delegated permission.
-    """
-    headers = {
-        "Authorization": f"Bearer {access_token}",
-        "Content-Type": "application/json",
-        "Prefer": f'outlook.timezone="{timezone}"',
-    }
+    """Build the Graph event JSON body (pure, no I/O) so callers can pre-stage it
+    before the time-critical POST (see the scheduled-booking fire path)."""
     event_attendees: list[dict] = [
         {
             "emailAddress": {"address": room_email, "name": room_name or room_email},
@@ -230,13 +220,18 @@ async def create_event(
     }
     if body_text:
         body["body"] = {"contentType": "text", "content": body_text}
+    return body
 
-    url = f"{GRAPH_BASE}/me/events"
-    async with httpx.AsyncClient(timeout=60) as client:
-        resp = await client.post(url, headers=headers, json=body)
-        resp.raise_for_status()
-        data = resp.json()
 
+def _event_headers(access_token: str, timezone: str) -> dict:
+    return {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+        "Prefer": f'outlook.timezone="{timezone}"',
+    }
+
+
+def _event_result(data: dict) -> dict:
     return {
         "id": data.get("id"),
         "webLink": data.get("webLink"),
@@ -244,6 +239,50 @@ async def create_event(
         "start": data.get("start"),
         "end": data.get("end"),
     }
+
+
+async def post_event(
+    client: httpx.AsyncClient,
+    access_token: str,
+    body: dict,
+    timezone: str,
+) -> dict:
+    """POST a pre-built event body using a caller-supplied (possibly warm) client.
+
+    Splitting this out lets the scheduled-booking fire path reuse a connection
+    that was warmed before midnight, so the critical path is just one round-trip.
+    """
+    resp = await client.post(
+        f"{GRAPH_BASE}/me/events",
+        headers=_event_headers(access_token, timezone),
+        json=body,
+    )
+    resp.raise_for_status()
+    return _event_result(resp.json())
+
+
+async def create_event(
+    access_token: str,
+    subject: str,
+    start_iso: str,
+    end_iso: str,
+    timezone: str,
+    room_email: str,
+    room_name: str | None = None,
+    attendees: list[str] | None = None,
+    body_text: str | None = None,
+) -> dict:
+    """Create an event on the signed-in user's calendar, booking a room.
+
+    The room is added as a resource attendee; if the room mailbox is set to
+    auto-accept, it will accept the invite and then show as busy in getSchedule.
+    Needs the Calendars.ReadWrite delegated permission.
+    """
+    body = build_event_body(
+        subject, start_iso, end_iso, timezone, room_email, room_name, attendees, body_text
+    )
+    async with httpx.AsyncClient(timeout=60) as client:
+        return await post_event(client, access_token, body, timezone)
 
 
 async def update_event(

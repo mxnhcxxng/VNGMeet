@@ -28,7 +28,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import auth, availability, graph
+from . import auth, availability, booking_schedule, graph
 from .config import get_settings
 
 log = logging.getLogger("vngmeet")
@@ -64,13 +64,46 @@ async def lifespan(app: FastAPI):
                 coalesce=True,
                 misfire_grace_time=120,
             )
+        # Scheduled bookings race other users at the configured fire time (default
+        # 00:00:00 — see app/booking_schedule.py to override for testing). The work
+        # is split into three jobs, all derived from that fire time:
+        #   1. prep  (fire - PREP_LEAD_SECONDS) stages payloads + warms tokens/connections,
+        #   2. fire  (fire - FIRE_LEAD_SECONDS) busy-waits to the fire instant and only pays for the POST,
+        #   3. catch-up (fire + CATCHUP_DELAY_SECONDS) is an idempotent safety net if the box was down.
+        prep_h, prep_m, prep_s = booking_schedule.shifted_hms(-booking_schedule.PREP_LEAD_SECONDS)
+        fire_h, fire_m, fire_s = booking_schedule.shifted_hms(-booking_schedule.FIRE_LEAD_SECONDS)
+        cu_h, cu_m, cu_s = booking_schedule.shifted_hms(booking_schedule.CATCHUP_DELAY_SECONDS)
         scheduler.add_job(
-            _safe_process_scheduled_bookings,
-            CronTrigger(hour=0, minute=0, second=0, timezone=settings.timezone),
-            id="process_scheduled_bookings",
+            _safe_prepare_scheduled_bookings,
+            CronTrigger(hour=prep_h, minute=prep_m, second=prep_s, timezone=settings.timezone),
+            id="prepare_scheduled_bookings",
             max_instances=1,
             coalesce=True,
-            misfire_grace_time=300,
+            misfire_grace_time=15,
+        )
+        scheduler.add_job(
+            _safe_fire_scheduled_bookings,
+            CronTrigger(hour=fire_h, minute=fire_m, second=fire_s, timezone=settings.timezone),
+            id="fire_scheduled_bookings",
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=15,
+        )
+        scheduler.add_job(
+            _safe_process_scheduled_bookings,
+            CronTrigger(hour=cu_h, minute=cu_m, second=cu_s, timezone=settings.timezone),
+            id="catchup_scheduled_bookings",
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=600,
+        )
+        log.warning(
+            "Scheduled-booking jobs registered (fire_time=%s): prep=%02d:%02d:%02d, "
+            "fire=%02d:%02d:%02d, catchup=%02d:%02d:%02d",
+            booking_schedule.FIRE_TIME,
+            prep_h, prep_m, prep_s,
+            fire_h, fire_m, fire_s,
+            cu_h, cu_m, cu_s,
         )
         scheduler.add_job(
             _safe_process_room_scouts,
@@ -114,11 +147,27 @@ async def _safe_refresh() -> None:
 
 
 async def _safe_process_scheduled_bookings() -> None:
-    """Scheduler entry point for pending schedule bookings."""
+    """Scheduler entry point for pending schedule bookings (catch-up safety net)."""
     try:
         await process_scheduled_bookings()
     except Exception as e:  # noqa: BLE001
         log.exception("process_scheduled_bookings failed: %s", e)
+
+
+async def _safe_prepare_scheduled_bookings() -> None:
+    """Scheduler entry point: pre-stage tonight's bookings just before midnight."""
+    try:
+        await prepare_scheduled_bookings()
+    except Exception as e:  # noqa: BLE001
+        log.exception("prepare_scheduled_bookings failed: %s", e)
+
+
+async def _safe_fire_scheduled_bookings() -> None:
+    """Scheduler entry point: fire the pre-staged bookings at 00:00:00 sharp."""
+    try:
+        await fire_scheduled_bookings()
+    except Exception as e:  # noqa: BLE001
+        log.exception("fire_scheduled_bookings failed: %s", e)
 
 
 async def _safe_process_room_scouts() -> None:
@@ -4147,6 +4196,302 @@ async def delete_booking(request: Request, booking_id: str):
         _set_active_booking(user_profile_id, False)
 
     return {"ok": True}
+
+
+# --------------------------------------------------------------------------- #
+# Scheduled-booking midnight race: prep (warm) -> fire (00:00:00.000) -> catch-up
+# --------------------------------------------------------------------------- #
+# Populated by prepare_scheduled_bookings() ~30s before midnight and drained by
+# fire_scheduled_bookings() at the stroke of midnight. Keeping the heavy work
+# (DB read, token refresh, TLS handshake) off the 00:00:00 critical path is what
+# lets the booking POST land within a few ms of midnight instead of ~0.7s late.
+_PREPARED_BOOKINGS: list[dict] = []
+_PREPARED_FOR_DATE: str | None = None
+_GRAPH_WARM_CLIENT: httpx.AsyncClient | None = None
+
+
+def _new_graph_client(pool_size: int) -> httpx.AsyncClient:
+    """A keep-alive client for the fire path. Prefers HTTP/2 (one warm connection
+    multiplexes every booking); falls back to an HTTP/1.1 pool if h2 is absent."""
+    limits = httpx.Limits(
+        max_keepalive_connections=max(pool_size, 10),
+        max_connections=max(pool_size * 2, 20),
+        keepalive_expiry=300,
+    )
+    try:
+        client = httpx.AsyncClient(http2=True, timeout=30, limits=limits)
+        log.warning("scheduled-booking fire client: HTTP/2 enabled")
+        return client
+    except ImportError:
+        log.warning("scheduled-booking fire client: h2 missing, using HTTP/1.1 pool")
+        return httpx.AsyncClient(http2=False, timeout=30, limits=limits)
+
+
+async def _warm_graph_connections(client: httpx.AsyncClient, count: int) -> None:
+    """Open the TLS/TCP connection(s) to Graph ahead of time so midnight only pays
+    for the POST itself. An unauthenticated GET returns 401 but still warms the pool."""
+    url = f"{graph.GRAPH_BASE}/"
+
+    async def ping() -> None:
+        try:
+            await client.get(url)
+        except Exception:  # noqa: BLE001 - warming is best-effort
+            pass
+
+    await asyncio.gather(*(ping() for _ in range(max(count, 1))))
+
+
+async def _reset_prepared_state() -> None:
+    """Drop any staged batch and close the warm client."""
+    global _PREPARED_BOOKINGS, _PREPARED_FOR_DATE, _GRAPH_WARM_CLIENT
+    if _GRAPH_WARM_CLIENT is not None:
+        try:
+            await _GRAPH_WARM_CLIENT.aclose()
+        except Exception:  # noqa: BLE001
+            pass
+    _GRAPH_WARM_CLIENT = None
+    _PREPARED_BOOKINGS = []
+    _PREPARED_FOR_DATE = None
+
+
+async def prepare_scheduled_bookings() -> int:
+    """Stage the upcoming midnight's bookings: read pending rows, warm each user's
+    Graph token, pre-build the event body, and warm the HTTPS connection pool."""
+    global _PREPARED_BOOKINGS, _PREPARED_FOR_DATE, _GRAPH_WARM_CLIENT
+    await _reset_prepared_state()
+    if not settings.supabase_enabled:
+        return 0
+
+    from .supabase_client import get_supabase
+
+    tz = ZoneInfo(settings.timezone)
+    now = datetime.now(tz)
+    # Prep runs shortly before the fire time; bookings execute on the calendar day the
+    # fire instant falls on, so the horizon must be computed for that day or we miss the
+    # rows that only become eligible then. At the default 00:00:00 fire time this is
+    # "tomorrow"; for a test time later in the day it resolves to today.
+    fire_date = booking_schedule.next_fire_instant(now).date()
+    horizon_end = _live_availability_horizon_end(fire_date)
+    sb = get_supabase()
+    rows = (
+        sb.table("user_activity")
+        .select(
+            "id, user_id, auth_user_id, graph_access_token, room_email, room_name, date, start_time, "
+            "end_time, method, subject, attendees, body"
+        )
+        .eq("booking_type", "scheduled")
+        .eq("status", "pending")
+        .lte("date", horizon_end.isoformat())
+        .order("created_at")
+        .execute()
+        .data
+        or []
+    )
+
+    if not rows:
+        _PREPARED_FOR_DATE = fire_date.isoformat()
+        log.warning(
+            "prepare_scheduled_bookings: nothing to stage for %s (horizon_end=%s)",
+            _PREPARED_FOR_DATE,
+            horizon_end.isoformat(),
+        )
+        return 0
+
+    async def _stage_one(row: dict) -> dict:
+        """Resolve token + build payload for one booking (runs concurrently)."""
+        item: dict = {
+            "activity_id": row.get("id"),
+            "user_profile_id": str(row.get("user_id") or ""),
+            "auth_user_id": str(row.get("auth_user_id") or ""),
+            "payload": None,
+            "token": None,
+            "body": None,
+            "error": None,
+        }
+        try:
+            payload = _activity_to_booking_request(row)
+            item["payload"] = payload
+            if item["auth_user_id"]:
+                token = await auth.get_graph_token(item["auth_user_id"])
+            else:
+                token = _decrypt_scheduled_graph_token(row.get("graph_access_token"))
+            if not token:
+                raise RuntimeError("missing graph access token")
+            item["token"] = token
+            item["body"] = graph.build_event_body(
+                payload.subject,
+                f"{payload.date}T{payload.start_time}:00",
+                f"{payload.date}T{payload.end_time}:00",
+                settings.timezone,
+                payload.room_email,
+                payload.room_name,
+                payload.attendees,
+                payload.body,
+            )
+        except Exception as e:  # noqa: BLE001 - staging failures surface at fire time
+            item["error"] = str(e)
+            log.warning("prepare scheduled booking %s failed: %s", item["activity_id"], e)
+        return item
+
+    prepared = list(await asyncio.gather(*(_stage_one(row) for row in rows)))
+
+    # Warm a dedicated client + connections so midnight only pays the POST round-trip.
+    client = _new_graph_client(len(prepared))
+    await _warm_graph_connections(client, len(prepared))
+
+    _GRAPH_WARM_CLIENT = client
+    _PREPARED_BOOKINGS = prepared
+    _PREPARED_FOR_DATE = fire_date.isoformat()
+    ready = sum(1 for p in prepared if not p["error"])
+    log.warning(
+        "prepare_scheduled_bookings: staged %s booking(s) (%s ready) for %s (horizon_end=%s)",
+        len(prepared),
+        ready,
+        _PREPARED_FOR_DATE,
+        horizon_end.isoformat(),
+    )
+    return ready
+
+
+def _finalize_booking_result(result: dict) -> bool:
+    """Persist one fired booking's outcome to Supabase (off the midnight hot path)."""
+    from .supabase_client import get_supabase
+
+    sb = get_supabase()
+    item = result["item"]
+    activity_id = item["activity_id"]
+    user_profile_id = item["user_profile_id"]
+    payload = item.get("payload")
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    if result["ok"]:
+        ev = result["event"]
+        sb.table("user_activity").update(
+            {
+                "status": "ok",
+                "graph_event_id": ev.get("id"),
+                "web_link": ev.get("webLink"),
+                "processed_at": now_iso,
+                "error_message": None,
+            }
+        ).eq("id", activity_id).execute()
+        _set_active_booking(user_profile_id, False)
+        if payload is not None:
+            _mark_room_availability_owner(user_profile_id, payload)
+            try:
+                sb.table("bookings").insert(
+                    {
+                        "user_id": item["auth_user_id"] or None,
+                        "room_email": payload.room_email,
+                        "room_name": payload.room_name,
+                        "date": payload.date,
+                        "start_time": payload.start_time,
+                        "end_time": payload.end_time,
+                        "subject": payload.subject,
+                        "graph_event_id": ev.get("id"),
+                        "web_link": ev.get("webLink"),
+                    }
+                ).execute()
+            except Exception as e:  # noqa: BLE001
+                log.warning("could not mirror scheduled booking metadata: %s", e)
+        return True
+
+    sb.table("user_activity").update(
+        {
+            "status": "failed",
+            "error_message": result.get("error"),
+            "processed_at": now_iso,
+        }
+    ).eq("id", activity_id).execute()
+    _set_active_booking(user_profile_id, False)
+    return False
+
+
+async def fire_scheduled_bookings() -> dict:
+    """At 00:00:00.000, POST every pre-staged booking over the warm client, then
+    persist results. Falls back to the inline path if no batch was staged."""
+    tz = ZoneInfo(settings.timezone)
+    prepared = _PREPARED_BOOKINGS
+    client = _GRAPH_WARM_CLIENT
+    prepared_for = _PREPARED_FOR_DATE
+
+    # Busy-wait to the exact fire instant. The fire job is scheduled a few seconds
+    # early; coarse-sleep to ~30ms before, then 1ms steps for precision.
+    now = datetime.now(tz)
+    fire_at = booking_schedule.next_fire_instant(now)
+    wait = (fire_at - now).total_seconds()
+    target = fire_at if 0 < wait <= 120 else None  # None => already at/past fire time: fire now
+    if target is not None:
+        coarse = (target - datetime.now(tz)).total_seconds() - 0.03
+        if coarse > 0:
+            await asyncio.sleep(coarse)
+        while datetime.now(tz) < target:
+            await asyncio.sleep(0.001)
+    fire_instant = target or datetime.now(tz)
+
+    today_iso = datetime.now(tz).date().isoformat()
+    if not prepared or client is None or prepared_for != today_iso:
+        log.warning(
+            "fire_scheduled_bookings: no staged batch for %s (prepared_for=%s) "
+            "-> falling back to inline processing",
+            today_iso,
+            prepared_for,
+        )
+        await _reset_prepared_state()
+        return await process_scheduled_bookings()
+
+    async def fire_one(item: dict) -> dict:
+        if item.get("error") or not item.get("body"):
+            return {"item": item, "ok": False, "error": item.get("error") or "not staged"}
+        t_send = datetime.now(tz)
+        p0 = time.perf_counter()
+        offset_ms = (t_send - fire_instant).total_seconds() * 1000
+        try:
+            ev = await graph.post_event(client, item["token"], item["body"], settings.timezone)
+            dur_ms = (time.perf_counter() - p0) * 1000
+            log.warning(
+                "scheduled booking %s POST sent +%.1fms, ok in %.0fms (room=%s)",
+                item["activity_id"],
+                offset_ms,
+                dur_ms,
+                item["payload"].room_email,
+            )
+            return {"item": item, "ok": True, "event": ev, "offset_ms": offset_ms, "dur_ms": dur_ms}
+        except Exception as e:  # noqa: BLE001 - keep firing the rest of the batch
+            dur_ms = (time.perf_counter() - p0) * 1000
+            log.warning(
+                "scheduled booking %s POST sent +%.1fms, FAILED in %.0fms: %s",
+                item["activity_id"],
+                offset_ms,
+                dur_ms,
+                e,
+            )
+            return {"item": item, "ok": False, "error": str(e), "offset_ms": offset_ms, "dur_ms": dur_ms}
+
+    log.warning(
+        "fire_scheduled_bookings: firing %s booking(s) at %s",
+        len(prepared),
+        fire_instant.isoformat(),
+    )
+    batch0 = time.perf_counter()
+    results = await asyncio.gather(*(fire_one(it) for it in prepared))
+    batch_ms = (time.perf_counter() - batch0) * 1000
+
+    processed = sum(1 for r in results if _finalize_booking_result(r))
+    failed = len(results) - processed
+    await _reset_prepared_state()
+
+    offsets = [r["offset_ms"] for r in results if "offset_ms" in r]
+    log.warning(
+        "fire_scheduled_bookings finished: processed=%s failed=%s "
+        "(first POST +%.1fms, last POST +%.1fms, batch=%.0fms)",
+        processed,
+        failed,
+        min(offsets) if offsets else 0.0,
+        max(offsets) if offsets else 0.0,
+        batch_ms,
+    )
+    return {"ok": True, "processed": processed, "failed": failed}
 
 
 async def process_scheduled_bookings() -> dict:
