@@ -44,6 +44,9 @@ def _set_book_without_confirmation(user_profile_id: str | None, value: bool) -> 
 
 CHAT_BOT_EMAIL = "booking-bot@vngmeet.local"
 CHAT_MAX_OPTIONS = 5
+# Max number of time windows returned when scanning a flexible search frame
+# (ví dụ "chiều nay 1 tiếng" → quét toàn bộ khung 13:00-18:00).
+CHAT_MAX_FRAME_SLOTS = 6
 CHAT_SYSTEM_PROMPT = """Bạn là trợ lý đặt lịch cho app booking phòng họp.
 
 Phạm vi hỗ trợ:
@@ -64,14 +67,14 @@ Luồng xử lý:
 2. Kiểm tra thông tin đã có: ngày, giờ bắt đầu, giờ kết thúc hoặc thời lượng, nhu cầu phòng (nhỏ/vừa/lớn), địa điểm/khu vực.
 3. Nếu thiếu thông tin cần thiết, hỏi bổ sung ngắn gọn.
    Nếu user chỉ nhập con số hoặc khoảng số mơ hồ (ví dụ "2-4", "3", "2 đến 4") mà không nói rõ đó là ngày (mùng mấy), thứ trong tuần, hay khung giờ, KHÔNG được tự đoán; hãy hỏi lại để làm rõ ý của user là ngày, thứ hay giờ.
-4. Khi đủ thông tin, gọi function kiểm tra lịch/phòng trống.
-   QUAN TRỌNG về start_time/end_time: check_room_availability yêu cầu phòng phải trống SUỐT cả khoảng start_time→end_time. Vì vậy:
-   - Nếu user nói RÕ giờ bắt đầu và kết thúc cụ thể (ví dụ "9h-12h"), truyền đúng khoảng đó.
-   - Nếu user chỉ nói THỜI LƯỢNG, hoặc nói "giờ nào cũng được", "lúc nào cũng được", "buổi sáng", "buổi chiều", "trong ngày"... thì KHÔNG được truyền cả buổi (ví dụ 09:00-12:00) làm một khoảng liền. Phải truyền một cửa sổ đúng bằng thời lượng cần (ví dụ cần 1 tiếng thì 09:00-10:00). Nếu user không nói thời lượng, mặc định 1 tiếng.
-   - Khi user linh hoạt về giờ, cứ chọn một cửa sổ đúng thời lượng ở đầu khoảng mong muốn rồi gọi function; hệ thống sẽ tự trả alternate_suggestions các khung giờ khác CÙNG thời lượng (ví dụ 09:30-10:30, 10:00-11:00...) để bạn đề xuất thêm. Tuyệt đối không gộp cả buổi thành một khoảng dài rồi báo "không có phòng".
-5. Trả về danh sách phòng và khung giờ có thể đặt theo đúng thứ tự API trả về.
-   Nếu không có phòng trống trọn khoảng thời gian, dùng split_suggestions để gợi ý tách phòng.
-   Nếu cũng không tách được, dùng alternate_suggestions để gợi ý khung giờ khác cùng duration.
+4. Khi đủ thông tin, gọi function kiểm tra lịch/phòng trống. check_room_availability có 2 chế độ, hãy CHỌN ĐÚNG chế độ theo cách user nói giờ:
+   - CHẾ ĐỘ CỐ ĐỊNH: user nói RÕ cả giờ bắt đầu và kết thúc cụ thể (ví dụ "9h-12h") → truyền start_time + end_time đúng khoảng đó. Phòng phải trống SUỐT cả khoảng.
+   - CHẾ ĐỘ LINH HOẠT (frame): user chỉ nói THỜI LƯỢNG, hoặc KHÔNG nói giờ cụ thể — ví dụ "giờ nào cũng được", "lúc nào cũng được", "buổi sáng", "buổi chiều", "trong ngày", "hôm nay có phòng nào", "ngày mai còn phòng không"... → truyền duration_minutes (ví dụ 60 cho 1 tiếng; nếu user không nói thời lượng, mặc định 60). Nếu user khoanh vùng một buổi thì truyền thêm window_start/window_end của buổi đó (ví dụ chiều → window_start=13:00, window_end=18:00); nếu user KHÔNG khoanh buổi (chỉ nói "hôm nay/ngày mai") thì BỎ TRỐNG window_start/window_end để backend quét cả ngày làm việc. KHÔNG truyền start_time/end_time ở chế độ này, và TUYỆT ĐỐI không tự chọn trước một cửa sổ rồi chỉ kiểm tra mỗi cửa sổ đó. Lưu ý: backend tự cắt các cửa sổ đã qua trong hôm nay (bắt đầu từ mốc 30 phút liền trước hiện tại), bạn không cần tự tính.
+   - Ở chế độ linh hoạt, backend tự QUÉT MỌI cửa sổ đúng thời lượng trong khung và trả về mảng `slots` (mỗi phần tử gồm start_time/end_time và danh sách phòng trống của cửa sổ đó). Bạn chỉ việc tổng hợp `slots` để đề xuất; không cần đoán cửa sổ trước.
+5. Trả kết quả theo đúng dữ liệu function trả về:
+   - Chế độ cố định: `rooms` chứa đầy đủ danh sách phòng trống; ở lần hiển thị kết quả tìm kiếm chỉ liệt kê tối đa 5 phòng đầu, nếu `count` > 5 thì thêm "và N phòng khác" (N = count − số tên đã kê). Khi user hỏi chi tiết các phòng còn lại thì liệt kê đầy đủ từ `rooms`, không giới hạn 5. Nếu trống cả khoảng không có phòng nào, dùng split_suggestions để gợi ý tách phòng; nếu cũng không tách được, dùng alternate_suggestions để gợi ý khung giờ khác cùng thời lượng.
+   - Chế độ linh hoạt: liệt kê các khung giờ trong `slots`, trải đều trong buổi user hỏi; nếu `truncated`=true thì nói còn thêm khung khác. Với mỗi khung, `count` là TỔNG số phòng trống, còn `rooms` chứa ĐẦY ĐỦ danh sách phòng (không bị cắt). Ở LẦN TRẢ KẾT QUẢ TÌM KIẾM, mỗi khung chỉ hiển thị TỐI ĐA 5 tên phòng đầu; nếu `count` > 5 thì thêm "và N phòng khác" (N = count − số tên đã kê) — để bảng gọn, dễ đọc. Ở bảng này CHỈ hiển thị TÊN phòng, KHÔNG kèm vị trí (building/floor/zone như "V1-F3", "Red Zone"...) hay sức chứa. Nếu `slots` rỗng thì gợi ý Săn phòng.
+   - NHƯNG khi user hỏi chi tiết về số phòng còn lại (ví dụ "5 phòng khác là phòng nào", "liệt kê hết đi"), hãy trả lời ĐẦY ĐỦ tất cả phòng trong `rooms` của khung tương ứng, KHÔNG giới hạn 5 nữa. Giới hạn 5 chỉ áp dụng cho lần hiển thị bảng tìm kiếm ban đầu.
 6. Khi người dùng chọn phòng, kiểm tra lại các trường bắt buộc để đặt lịch.
 7. Khi người dùng muốn đặt phòng, gọi function book_room cho đặt tức thì hoặc schedule_room cho scheduled booking để tạo card xác nhận với các thông tin đã điền.
 8. Xử lý kết quả book_room/schedule_room theo trường trả về:
@@ -90,9 +93,9 @@ Luồng chỉ đường:
 Nguyên tắc phản hồi:
 - Trả lời ngắn gọn, rõ ràng, tập trung vào hành động tiếp theo.
 - Trả lời cùng ngôn ngữ với người dùng. Nếu user hỏi tiếng Việt, toàn bộ câu trả lời nên là tiếng Việt tự nhiên, kể cả hướng dẫn đường đi lấy từ metadata tiếng Anh.
-- Không hỏi số lượng người tham dự. Thay vào đó hỏi nhu cầu phòng để user chọn: nhỏ (4 người), vừa (5-12 người), lớn (13+ người); rồi truyền capacity_size là small/medium/large tương ứng. Nếu user tự nói rõ con số thì mới truyền capacity.
+- Không hỏi số lượng người tham dự. Thay vào đó hỏi nhu cầu phòng để user chọn: nhỏ (4 người), vừa (5-12 người), lớn (13+ người); rồi truyền capacity_size là small/medium/large tương ứng. Nếu user tự nói rõ con số thì quy thành capacity_size rồi truyền đi.
 - NGOẠI LỆ: nếu user đã gọi đích danh một phòng cụ thể (ví dụ "đặt phòng Barcelona", "Tokyo còn trống không"), thì KHÔNG hỏi về nhu cầu phòng/size nữa (hỏi size lúc này vô nghĩa vì user đã chốt phòng). Khi đó truyền tên phòng vào trường location và bỏ qua capacity_size/capacity. Chỉ hỏi size khi user nói chung chung về loại/sức chứa phòng mà chưa chỉ rõ phòng nào.
-- Sức chứa phòng được phân loại theo cột capacity_size (small/medium/large), không dựa trên con số capacity thô.
+- Sức chứa phòng được phân loại theo cột capacity_size (small/medium/large), không dựa trên con số capacity thô. Khi hiển thị sức chứa cho user, LUÔN dùng capacity_size quy đổi sang tiếng Việt: small = "Nhỏ", medium = "Vừa", large = "Lớn"; TUYỆT ĐỐI không hiển thị số người cụ thể (ví dụ "6 người", "12 người").
 - Chỉ hỗ trợ đặt phòng vào ngày làm việc trong tuần (Thứ 2 đến Thứ 6). Nếu user yêu cầu Thứ 7 hoặc Chủ nhật, báo ngắn gọn rằng chỉ đặt được vào ngày làm việc T2-T6 và gợi ý chọn ngày làm việc gần nhất. Khi gợi ý ngày/khung giờ, không trả ra Thứ 7 hoặc Chủ nhật.
 - Do giới hạn hệ thống, chỉ đặt được phòng tối đa 15 ngày kể từ hôm nay (tính cả hôm nay là ngày thứ 0, ví dụ hôm nay 16/6 thì ngày xa nhất đặt được là 1/7). Nếu user yêu cầu ngày xa hơn, báo ngắn gọn rằng chỉ đặt được trong vòng 15 ngày tới và gợi ý ngày hợp lệ gần nhất. Không kiểm tra phòng trống hay tạo card đặt phòng cho ngày vượt quá giới hạn này.
 - Không bịa phòng, giờ trống hoặc trạng thái booking nếu chưa có dữ liệu từ API.
@@ -112,7 +115,19 @@ CHAT_TOOLS = [
         "type": "function",
         "function": {
             "name": "check_room_availability",
-            "description": "Kiểm tra danh sách phòng họp còn trống theo ngày, giờ, sức chứa và khu vực.",
+            "description": (
+                "Kiểm tra phòng họp còn trống theo ngày, sức chứa và khu vực. "
+                "Hỗ trợ 2 chế độ:\n"
+                "1) Khung giờ CỐ ĐỊNH: user nói rõ giờ bắt đầu và kết thúc → "
+                "truyền start_time + end_time; kiểm tra đúng một khoảng đó.\n"
+                "2) LINH HOẠT (frame): user chỉ nói thời lượng, hoặc nói 'buổi "
+                "sáng/trưa/chiều', 'giờ nào cũng được', 'trong ngày'... → truyền "
+                "duration_minutes (+ window_start/window_end nếu muốn giới hạn "
+                "khung tìm kiếm, ví dụ chiều = 13:00 đến 18:00). Backend sẽ tự "
+                "QUÉT TẤT CẢ các cửa sổ dài đúng thời lượng trong khung và trả về "
+                "danh sách `slots` các khung giờ trống. KHÔNG cần bạn tự chọn "
+                "trước một cửa sổ."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -122,11 +137,23 @@ CHAT_TOOLS = [
                     },
                     "start_time": {
                         "type": "string",
-                        "description": "Giờ bắt đầu, định dạng HH:MM theo timezone Asia/Ho_Chi_Minh.",
+                        "description": "CHẾ ĐỘ CỐ ĐỊNH: giờ bắt đầu HH:MM (timezone Asia/Ho_Chi_Minh). Chỉ dùng khi user nói rõ cả giờ bắt đầu và kết thúc; khi đó bỏ trống duration_minutes.",
                     },
                     "end_time": {
                         "type": "string",
-                        "description": "Giờ kết thúc, định dạng HH:MM theo timezone Asia/Ho_Chi_Minh.",
+                        "description": "CHẾ ĐỘ CỐ ĐỊNH: giờ kết thúc HH:MM (timezone Asia/Ho_Chi_Minh). Đi kèm với start_time.",
+                    },
+                    "duration_minutes": {
+                        "type": "integer",
+                        "description": "CHẾ ĐỘ LINH HOẠT: thời lượng cần (phút), ví dụ 60 cho 1 tiếng. Dùng khi user chỉ nói thời lượng hoặc linh hoạt về giờ. Khi truyền trường này thì KHÔNG truyền start_time/end_time.",
+                    },
+                    "window_start": {
+                        "type": "string",
+                        "description": "CHẾ ĐỘ LINH HOẠT: giờ bắt đầu của khung tìm kiếm HH:MM (ví dụ buổi chiều = 13:00). Mặc định đầu giờ làm việc nếu bỏ trống.",
+                    },
+                    "window_end": {
+                        "type": "string",
+                        "description": "CHẾ ĐỘ LINH HOẠT: giờ kết thúc của khung tìm kiếm HH:MM (ví dụ buổi chiều = 18:00). Mặc định cuối giờ làm việc nếu bỏ trống.",
                     },
                     "capacity_size": {
                         "type": "string",
@@ -142,7 +169,7 @@ CHAT_TOOLS = [
                         "description": "Địa điểm/khu vực/tầng/toà/office user yêu cầu.",
                     },
                 },
-                "required": ["date", "start_time", "end_time"],
+                "required": ["date"],
             },
         },
     },
@@ -566,7 +593,8 @@ def _room_result(room: dict, include_map: bool = False) -> dict:
         "floor": room.get("floor"),
         "zone": room.get("zone"),
         "office": room.get("office"),
-        "capacity": room.get("capacity"),
+        # Chỉ trả capacity_size (small/medium/large), KHÔNG trả con số capacity
+        # để hiển thị sức chứa theo nhóm thay vì số người cụ thể.
         "capacity_size": _effective_capacity_size(room),
         "booking_type": room.get("_booking_type") or "instant",
     }
@@ -787,6 +815,69 @@ def _alternate_time_suggestions(
         if len(suggestions) >= CHAT_MAX_OPTIONS:
             break
     return suggestions
+
+
+def _frame_window_slots(
+    rows: list[dict],
+    cache: dict[tuple[str, str], dict],
+    date: str,
+    frame_start_idx: int,
+    frame_end_idx: int,
+    duration_slots: int,
+    now: datetime,
+) -> tuple[list[dict], bool]:
+    """Quét MỌI cửa sổ dài đúng `duration_slots` nằm trong khung
+    [frame_start_idx, frame_end_idx) và trả về các cửa sổ có ít nhất một phòng
+    đặt được.
+
+    Trả về (slots, truncated). Các cửa sổ được bước theo lưới 30 phút; nếu số
+    cửa sổ trống nhiều hơn CHAT_MAX_FRAME_SLOTS thì lấy mẫu đều nhau để kết quả
+    trải khắp khung thay vì dồn về đầu khung.
+    """
+    if duration_slots <= 0 or frame_end_idx - frame_start_idx < duration_slots:
+        return [], False
+    step = max(1, 30 // settings.availability_slot_minutes)
+    today = now.date()
+    is_today = date == today.isoformat()
+    # Hôm nay: bắt đầu từ cửa sổ trong quá khứ gần nhất, tức mốc 30 phút liền
+    # trước thời điểm hiện tại (ví dụ bây giờ 14:48 thì khung bắt đầu từ 14:30).
+    min_start_idx = frame_start_idx
+    if is_today:
+        now_idx = (now.hour * 60 + now.minute) // settings.availability_slot_minutes
+        min_start_idx = max(frame_start_idx, (now_idx // step) * step)
+    found: list[dict] = []
+    cand = frame_start_idx
+    while cand + duration_slots <= frame_end_idx:
+        cand_end = cand + duration_slots
+        if cand >= min_start_idx:
+            window_rooms = []
+            for room in rows:
+                booking_type = _room_bookable_for_range(
+                    cache.get((room["id"], date)), cand, cand_end
+                )
+                if booking_type:
+                    window_rooms.append({**room, "_booking_type": booking_type})
+            if window_rooms:
+                found.append(
+                    {
+                        "start_time": _chat_time_from_slot(cand),
+                        "end_time": _chat_time_from_slot(cand_end),
+                        "count": len(window_rooms),
+                        # Trả ĐỦ danh sách phòng để khi user hỏi chi tiết ("5
+                        # phòng khác là gì") bot vẫn có dữ liệu trả lời; việc giới
+                        # hạn hiển thị 5 phòng là do prompt xử lý, không cắt ở data.
+                        "rooms": [_room_result(room) for room in window_rooms],
+                    }
+                )
+        cand += step
+    if len(found) <= CHAT_MAX_FRAME_SLOTS:
+        return found, False
+    n = len(found)
+    picked = [
+        found[i * (n - 1) // (CHAT_MAX_FRAME_SLOTS - 1)]
+        for i in range(CHAT_MAX_FRAME_SLOTS)
+    ]
+    return picked, True
 
 
 def _norm_room_lookup(value: object) -> str:
@@ -1037,17 +1128,59 @@ async def _tool_check_room_availability(
     date = str(args.get("date") or "").strip()
     start_time = str(args.get("start_time") or "").strip()
     end_time = str(args.get("end_time") or "").strip()
+    window_start = str(args.get("window_start") or "").strip()
+    window_end = str(args.get("window_end") or "").strip()
+    duration_minutes_raw = args.get("duration_minutes")
     location = str(args.get("location") or "").strip().lower()
     # User chọn nhu cầu phòng trực tiếp (small/medium/large); giữ fallback cho
     # trường hợp model vẫn truyền con số capacity.
     requested_capacity_size = _normalize_capacity_size(
         args.get("capacity_size")
     ) or _capacity_size_for_people(args.get("capacity"))
+
     try:
-        start_idx, end_idx = _chat_slot_range(start_time, end_time)
         requested_day = date_cls.fromisoformat(date)
     except Exception:
-        return {"ok": False, "error": "date/start_time/end_time không hợp lệ."}
+        return {"ok": False, "error": "date không hợp lệ."}
+
+    slot_minutes = settings.availability_slot_minutes
+    business_start = settings.business_start_hour * 60 // slot_minutes
+    business_end = settings.business_end_hour * 60 // slot_minutes
+
+    # CHẾ ĐỘ LINH HOẠT: user chỉ nói thời lượng / buổi → quét cả khung tìm kiếm.
+    flexible = duration_minutes_raw is not None and not (start_time and end_time)
+    duration_minutes = 0
+    duration_slots = 0
+    frame_start_idx = business_start
+    frame_end_idx = business_end
+    if flexible:
+        try:
+            duration_minutes = int(duration_minutes_raw)
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "duration_minutes không hợp lệ."}
+        if duration_minutes <= 0:
+            return {"ok": False, "error": "duration_minutes phải lớn hơn 0."}
+        # Làm tròn lên bội số của slot.
+        duration_slots = max(1, -(-duration_minutes // slot_minutes))
+        fs = _availability_slot_index(window_start) if window_start else None
+        fe = _availability_slot_index(window_end) if window_end else None
+        frame_start_idx = max(fs if fs is not None else business_start, business_start)
+        frame_end_idx = min(fe if fe is not None else business_end, business_end)
+        if frame_end_idx - frame_start_idx < duration_slots:
+            return {
+                "ok": False,
+                "error": "Khung tìm kiếm ngắn hơn thời lượng yêu cầu.",
+            }
+        # Dùng đầu/cuối khung cho các bước kiểm tra (quá khứ, đã qua trong ngày).
+        start_idx, end_idx = frame_start_idx, frame_end_idx
+        # Giờ đại diện cho fallback live Graph + gợi ý Săn phòng (cửa sổ đầu khung).
+        start_time = _chat_time_from_slot(frame_start_idx)
+        end_time = _chat_time_from_slot(frame_start_idx + duration_slots)
+    else:
+        try:
+            start_idx, end_idx = _chat_slot_range(start_time, end_time)
+        except Exception:
+            return {"ok": False, "error": "start_time/end_time không hợp lệ."}
 
     from .supabase_client import get_supabase
 
@@ -1118,6 +1251,43 @@ async def _tool_check_room_availability(
             request, rows, date, start_time, end_time
         )
 
+    if flexible:
+        slots, slots_truncated = _frame_window_slots(
+            rows, cache, date, frame_start_idx, frame_end_idx, duration_slots, now
+        )
+        room_scout_suggestion = None
+        if not slots and requested_day <= today + timedelta(days=14):
+            room_scout_suggestion = {
+                "feature": "room_scout",
+                "label": "Săn phòng",
+                "url": "/room-scout",
+                "message": (
+                    "Không có phòng trống trong khung giờ này. Nếu vẫn muốn giữ "
+                    "khung giờ đã yêu cầu, hãy vào [Săn phòng](/room-scout) để hệ "
+                    "thống tự theo dõi; khi có phòng được nhả ra, hệ thống sẽ báo "
+                    "cho bạn."
+                ),
+                "scout_start_time": start_time,
+                "scout_end_time": end_time,
+                "scout_date": date,
+                "capacity_size": requested_capacity_size,
+                "office": (_profile_payload(profile) or {}).get("office"),
+            }
+        return {
+            "ok": True,
+            "date": date,
+            "mode": "flexible",
+            "window_start": _chat_time_from_slot(frame_start_idx),
+            "window_end": _chat_time_from_slot(frame_end_idx),
+            "duration_minutes": duration_minutes,
+            "user_context": _profile_payload(profile),
+            "requested_capacity_size": requested_capacity_size,
+            "slot_count": len(slots),
+            "slots": slots,
+            "truncated": slots_truncated,
+            "room_scout_suggestion": room_scout_suggestion,
+        }
+
     available = []
     for room in rows:
         booking_type = _room_bookable_for_range(cache.get((room["id"], date)), start_idx, end_idx)
@@ -1162,7 +1332,8 @@ async def _tool_check_room_availability(
         "user_context": _profile_payload(profile),
         "requested_capacity_size": requested_capacity_size,
         "count": len(available),
-        "rooms": [_room_result(room) for room in available[:CHAT_MAX_OPTIONS]],
+        # Trả đủ phòng trong data; giới hạn hiển thị 5 là do prompt xử lý.
+        "rooms": [_room_result(room) for room in available],
         "truncated": len(available) > CHAT_MAX_OPTIONS,
         "split_suggestions": split_suggestions,
         "alternate_suggestions": alternate_suggestions,
@@ -1404,7 +1575,14 @@ async def _call_llm_with_tools(
         "hãy quy đổi theo ngữ cảnh thời gian này trước khi gọi function.\n"
         "- Quy ước buổi trong ngày: sáng = 09:00-12:00, trưa = 12:00-13:00, "
         "chiều = 13:00-18:00. Khi user nói 'buổi sáng/trưa/chiều' mà không nói "
-        "giờ cụ thể, dùng khoảng giờ tương ứng này."
+        "giờ cụ thể, đây là KHUNG TÌM KIẾM (frame), KHÔNG phải một khoảng để đặt "
+        "liền. Hãy gọi check_room_availability ở CHẾ ĐỘ LINH HOẠT: truyền "
+        "duration_minutes (mặc định 60 nếu user không nói thời lượng) cùng "
+        "window_start/window_end đúng bằng khung của buổi đó (ví dụ 'chiều nay 1 "
+        "tiếng' → window_start=13:00, window_end=18:00, duration_minutes=60). "
+        "Backend sẽ tự quét tất cả các ca trong khung và trả về `slots`; tuyệt "
+        "đối KHÔNG tự chọn trước một cửa sổ (như 13:00-14:00) rồi chỉ kiểm tra "
+        "mỗi cửa sổ đó."
     )
     messages = [
         {"role": "system", "content": CHAT_SYSTEM_PROMPT + runtime_context + profile_context},
