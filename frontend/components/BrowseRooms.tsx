@@ -1037,6 +1037,7 @@ export function BrowseRooms({
         initialEndTime={initialEndTime}
         userDomain={userDomain}
         onBooked={() => {
+          clearBookingHistoryCache();
           onRefresh();
           loadMyBookings();
         }}

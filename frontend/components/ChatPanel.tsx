@@ -36,6 +36,7 @@ import { api, type BookingRequest, type ChatMessage, type ChatThread, type UserR
 import { useLanguage, useT } from "@/app/providers";
 import type { TranslationKey } from "@/lib/i18n";
 import { BrandIcon } from "./BrandIcon";
+import { clearBookingHistoryCache } from "./BookingHistory";
 
 const SUGGESTION_KEYS: TranslationKey[] = [
   "chatp.suggestion1",
@@ -366,6 +367,9 @@ function BookingConfirmationCard({
           action === "accept" ? { ...booking, method: "chatbot" as const } : undefined,
         book_without_confirmation: action === "accept" ? skipConfirmation : undefined,
       });
+      // A confirmed booking changes the user's history — drop the cache so the
+      // Booking History tab refetches fresh data next time it opens.
+      if (action === "accept") clearBookingHistoryCache();
       onActionMessage(res.message);
     } catch (e: any) {
       setLocalError(e.message);

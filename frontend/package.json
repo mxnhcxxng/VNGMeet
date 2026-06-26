@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@gravity-ui/icons": "^2.18.0",
-    "@heroui/react": "^3.1.0",
+    "@heroui/react": "^3.2.1",
     "@supabase/supabase-js": "^2.47.10",
     "@tailwindcss/postcss": "^4.3.0",
     "framer-motion": "^11.15.0",

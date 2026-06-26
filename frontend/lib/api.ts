@@ -259,7 +259,13 @@ export const api = {
     ),
   // Caller's own booking history. The owner id is derived server-side from the
   // auth token, so this only ever returns the current user's rows.
-  myBookings: () => req<{ bookings: Booking[] }>("/api/bookings"),
+  myBookings: (opts?: { sort?: string; order?: "asc" | "desc" }) => {
+    const qs = new URLSearchParams();
+    if (opts?.sort) qs.set("sort", opts.sort);
+    if (opts?.order) qs.set("order", opts.order);
+    const q = qs.toString();
+    return req<{ bookings: Booking[] }>(`/api/bookings${q ? `?${q}` : ""}`);
+  },
   book: (payload: BookingRequest) =>
     req<BookingResult>("/api/bookings", {
       method: "POST",

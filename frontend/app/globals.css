@@ -47,6 +47,43 @@ html.dark {
    so it picks up the orange automatically. All other variants (tertiary, ghost,
    secondary, danger…) keep their default HeroUI styling — do NOT override them here. */
 
+/* Secondary table (booking history): draw the hover highlight as an inset
+   pseudo-element instead of a background on the cell. This lets us round the
+   highlight (matching the header's corner radius) WITHOUT bending the cell's
+   bottom border — so the row divider line stays perfectly straight. */
+.table-root--secondary .table__cell {
+  position: relative;
+  /* Own stacking context so the z-index:-1 highlight always sits just above the
+     cell background and below its content, never behind an ancestor surface. */
+  isolation: isolate;
+}
+@media (hover: hover) {
+  /* Suppress HeroUI's default rectangular cell background on hover... */
+  .table-root--secondary .table__row:hover .table__cell,
+  .table-root--secondary .table__row[data-hovered="true"] .table__cell {
+    background-color: transparent;
+  }
+  /* ...and paint a rounded highlight behind the cell content instead. */
+  .table-root--secondary .table__row:hover .table__cell::before,
+  .table-root--secondary .table__row[data-hovered="true"] .table__cell::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    @apply bg-default/50;
+  }
+  .table-root--secondary .table__row:hover .table__cell:first-child::before,
+  .table-root--secondary .table__row[data-hovered="true"] .table__cell:first-child::before {
+    border-start-start-radius: min(32px, var(--radius-2xl));
+    border-end-start-radius: min(32px, var(--radius-2xl));
+  }
+  .table-root--secondary .table__row:hover .table__cell:last-child::before,
+  .table-root--secondary .table__row[data-hovered="true"] .table__cell:last-child::before {
+    border-start-end-radius: min(32px, var(--radius-2xl));
+    border-end-end-radius: min(32px, var(--radius-2xl));
+  }
+}
+
 /* Hide the browser-native password reveal "eye" / clear controls (Edge/IE). */
 input[type="password"]::-ms-reveal,
 input[type="password"]::-ms-clear {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type Key } from "react";
 import {
   Button,
   Chip,
@@ -53,8 +53,15 @@ const PAGE_SIZE_OPTS = [
 // on logout to drop another user's data.
 let cachedBookings: Booking[] | null = null;
 
+type SortState = { column: string; direction: "ascending" | "descending" };
+
+// Default sort mirrors the backend default (newest first).
+const DEFAULT_SORT: SortState = { column: "date", direction: "descending" };
+let cachedSort: SortState = DEFAULT_SORT;
+
 export function clearBookingHistoryCache() {
   cachedBookings = null;
+  cachedSort = DEFAULT_SORT;
 }
 
 type Option = { value: string; label: string };
@@ -179,6 +186,12 @@ export function BookingHistory() {
   const [bookingType, setBookingType] = useState("all");
   const [method, setMethod] = useState("all");
 
+  // Sorting is applied server-side (the API re-orders the rows). The ref lets
+  // the stable `load` callback read the latest descriptor without re-creating.
+  const [sortDescriptor, setSortDescriptor] = useState<SortState>(cachedSort);
+  const sortRef = useRef(sortDescriptor);
+  sortRef.current = sortDescriptor;
+
   // Pagination.
   const [pageSize, setPageSize] = useState(10);
   const [page, setPage] = useState(1);
@@ -196,8 +209,13 @@ export function BookingHistory() {
     setLoading(true);
     setError(null);
     try {
-      const res = await api.myBookings();
+      const s = sortRef.current;
+      const res = await api.myBookings({
+        sort: s.column,
+        order: s.direction === "ascending" ? "asc" : "desc",
+      });
       cachedBookings = res.bookings;
+      cachedSort = s;
       setBookings(res.bookings);
     } catch (e: any) {
       const expired = e.message === "UNAUTHENTICATED";
@@ -257,6 +275,19 @@ export function BookingHistory() {
     }
   }, [canceling, load]);
 
+  const handleSortChange = useCallback(
+    (desc: { column?: Key; direction?: "ascending" | "descending" }) => {
+      const next: SortState = {
+        column: String(desc.column ?? DEFAULT_SORT.column),
+        direction: desc.direction ?? "ascending",
+      };
+      setSortDescriptor(next);
+      sortRef.current = next;
+      load();
+    },
+    [load]
+  );
+
   const filtered = useMemo(
     () =>
       bookings.filter(
@@ -282,10 +313,15 @@ export function BookingHistory() {
   const rangeStart = total === 0 ? 0 : startIdx + 1;
   const rangeEnd = Math.min(startIdx + pageSize, total);
 
+  // Show the big centered spinner only on the very first load. Subsequent
+  // refetches (sort / refresh) keep the existing rows on screen and just dim
+  // them, so the table doesn't flash an empty state on every sort.
+  const initialLoading = loading && bookings.length === 0;
+
   return (
     <div className="flex h-full flex-col gap-4 p-4">
       {/* Filter bar */}
-      <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-3 px-4">
         <FilterSelect
           label={t("bh.filterTimeRange")}
           value={timeRange}
@@ -329,7 +365,7 @@ export function BookingHistory() {
         </div>
       )}
 
-      {loading ? (
+      {initialLoading ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-3">
           <Spinner />
           <span className="text-sm text-default-500">{t("bh.loading")}</span>
@@ -351,18 +387,68 @@ export function BookingHistory() {
               </p>
             </EmptyState>
           ) : (
-            <div className="min-h-0 flex-1 overflow-auto">
+            <div
+              className={`min-h-0 flex-1 overflow-auto transition-opacity duration-200 ${
+                loading ? "pointer-events-none opacity-60" : "opacity-100"
+              }`}
+            >
               <Table variant="secondary">
-                <TableContent aria-label={t("bh.tableLabel")}>
+                <TableContent
+                  aria-label={t("bh.tableLabel")}
+                  sortDescriptor={sortDescriptor}
+                  onSortChange={handleSortChange}
+                >
                   <TableHeader>
-                    <TableColumn isRowHeader>{t("bh.colDate")}</TableColumn>
-                    <TableColumn>{t("bh.colRoom")}</TableColumn>
-                    <TableColumn>{t("bh.colTime")}</TableColumn>
-                    <TableColumn>{t("bh.colSubject")}</TableColumn>
-                    <TableColumn>{t("bh.colType")}</TableColumn>
-                    <TableColumn>{t("bh.colMethod")}</TableColumn>
-                    <TableColumn>{t("bh.colStatus")}</TableColumn>
-                    <TableColumn>{t("bh.colActions")}</TableColumn>
+                    <TableColumn id="date" isRowHeader allowsSorting>
+                      {({ sortDirection }) => (
+                        <Table.SortableColumnHeader sortDirection={sortDirection}>
+                          {t("bh.colDate")}
+                        </Table.SortableColumnHeader>
+                      )}
+                    </TableColumn>
+                    <TableColumn id="room" allowsSorting>
+                      {({ sortDirection }) => (
+                        <Table.SortableColumnHeader sortDirection={sortDirection}>
+                          {t("bh.colRoom")}
+                        </Table.SortableColumnHeader>
+                      )}
+                    </TableColumn>
+                    <TableColumn id="time" allowsSorting>
+                      {({ sortDirection }) => (
+                        <Table.SortableColumnHeader sortDirection={sortDirection}>
+                          {t("bh.colTime")}
+                        </Table.SortableColumnHeader>
+                      )}
+                    </TableColumn>
+                    <TableColumn id="subject" allowsSorting>
+                      {({ sortDirection }) => (
+                        <Table.SortableColumnHeader sortDirection={sortDirection}>
+                          {t("bh.colSubject")}
+                        </Table.SortableColumnHeader>
+                      )}
+                    </TableColumn>
+                    <TableColumn id="type" allowsSorting>
+                      {({ sortDirection }) => (
+                        <Table.SortableColumnHeader sortDirection={sortDirection}>
+                          {t("bh.colType")}
+                        </Table.SortableColumnHeader>
+                      )}
+                    </TableColumn>
+                    <TableColumn id="method" allowsSorting>
+                      {({ sortDirection }) => (
+                        <Table.SortableColumnHeader sortDirection={sortDirection}>
+                          {t("bh.colMethod")}
+                        </Table.SortableColumnHeader>
+                      )}
+                    </TableColumn>
+                    <TableColumn id="status" allowsSorting>
+                      {({ sortDirection }) => (
+                        <Table.SortableColumnHeader sortDirection={sortDirection}>
+                          {t("bh.colStatus")}
+                        </Table.SortableColumnHeader>
+                      )}
+                    </TableColumn>
+                    <TableColumn id="actions">{t("bh.colActions")}</TableColumn>
                   </TableHeader>
                   <TableBody items={pageItems}>
                   {(b) => (

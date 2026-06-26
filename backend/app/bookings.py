@@ -502,7 +502,21 @@ async def list_my_bookings(request: Request):
 
     from .supabase_client import get_supabase
 
-    rows = (
+    # Optional sort by column. The client sends a UI column key; map it to the
+    # underlying DB column. Anything unknown falls back to created_at DESC.
+    sort_map = {
+        "date": "date",
+        "room": "room_name",
+        "time": "start_time",
+        "subject": "subject",
+        "type": "booking_type",
+        "method": "method",
+        "status": "status",
+    }
+    sort_col = sort_map.get(request.query_params.get("sort", ""), "created_at")
+    desc = request.query_params.get("order", "desc").lower() != "asc"
+
+    query = (
         get_supabase()
         .table("user_activity")
         .select(
@@ -510,12 +524,13 @@ async def list_my_bookings(request: Request):
             "booking_type, method, subject, attendees, body, status, web_link, created_at"
         )
         .eq("user_id", user_profile_id)
-        .order("created_at", desc=True)
-        .limit(200)
-        .execute()
-        .data
-        or []
+        .order(sort_col, desc=desc)
     )
+    # Tie-break on created_at so rows with equal sort values stay in a stable order.
+    if sort_col != "created_at":
+        query = query.order("created_at", desc=True)
+
+    rows = query.limit(200).execute().data or []
     return {"bookings": rows}
 
 
