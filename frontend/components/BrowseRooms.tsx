@@ -14,6 +14,8 @@ import {
 } from "@heroui/react";
 import {
   Calendar as CalendarIcon,
+  ArrowLeft,
+  ArrowRightFromLine,
   ChevronLeft,
   ChevronRight,
   ArrowsRotateRight,
@@ -405,6 +407,16 @@ export function BrowseRooms({
     loadMyBookings();
   }, []);
 
+  // ISO dates (YYYY-MM-DD) on which the current user has an active booking, used
+  // to render a dot indicator on the corresponding calendar cells.
+  const bookedDates = useMemo(() => {
+    const set = new Set<string>();
+    for (const b of myBookings) {
+      if (b.status !== "canceled" && b.status !== "failed") set.add(b.date);
+    }
+    return set;
+  }, [myBookings]);
+
   function findMyBooking(
     roomEmail: string,
     date: string,
@@ -572,6 +584,11 @@ export function BrowseRooms({
           isDisabled={dayIndex === 0}
           onPress={() => setDayIndex(() => 0)}
         >
+          {dayIndex === 0 ? (
+            <ArrowRightFromLine width={16} height={16} />
+          ) : (
+            <ArrowLeft width={16} height={16} />
+          )}
           {tr("browse.today")}
         </Button>
 
@@ -607,7 +624,10 @@ export function BrowseRooms({
                 <span className="whitespace-nowrap">{formatDmy(data.days[dayIndex])}</span>
               </DatePicker.Trigger>
               <DatePicker.Popover triggerRef={dateTriggerRef} className="!max-w-none w-fit">
-                <Calendar>
+                <Calendar
+                  minValue={parseDate(data.days[0])}
+                  maxValue={parseDate(data.days[maxDayIndex])}
+                >
                   <Calendar.Header>
                     <Calendar.NavButton slot="previous" />
                     <Calendar.Heading />
@@ -618,7 +638,18 @@ export function BrowseRooms({
                       {(day) => <Calendar.HeaderCell>{day}</Calendar.HeaderCell>}
                     </Calendar.GridHeader>
                     <Calendar.GridBody>
-                      {(date) => <Calendar.Cell date={date} />}
+                      {(date) => (
+                        <Calendar.Cell date={date}>
+                          {({ formattedDate }) => (
+                            <>
+                              {formattedDate}
+                              {bookedDates.has(date.toString()) && (
+                                <Calendar.CellIndicator className="!bg-green-500" />
+                              )}
+                            </>
+                          )}
+                        </Calendar.Cell>
+                      )}
                     </Calendar.GridBody>
                   </Calendar.Grid>
                 </Calendar>
