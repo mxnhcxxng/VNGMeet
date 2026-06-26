@@ -11,12 +11,18 @@ export function EditBookingModal({
   isOpen,
   booking,
   thumbnail,
+  readOnly = false,
+  bookedBy,
   onClose,
   onSaved,
 }: {
   isOpen: boolean;
   booking: Booking | null;
   thumbnail?: string; // meeting_room_metadata.thumbnail_link (when known)
+  // Read-only mode: a meeting the user is only invited to. All fields are locked,
+  // empty ones show N/A, the title shows who booked it, and only Close is offered.
+  readOnly?: boolean;
+  bookedBy?: string; // organizer email, shown in the read-only title
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -87,6 +93,7 @@ export function EditBookingModal({
   };
 
   const req = <span className="text-danger">*</span>;
+  const na = t("common.na");
 
   return (
     <div
@@ -115,19 +122,27 @@ export function EditBookingModal({
         {/* Room name + email */}
         <div className="px-6 pb-1 pt-6">
           <h2 className="text-base font-semibold text-default-900">
-            {t("booking.editTitleSuffix", { room: roomName })}
+            {readOnly
+              ? t("booking.bookedByTitle", {
+                  room: roomName,
+                  by: bookedBy
+                    ? bookedBy.split("@")[0]
+                    : t("common.unknown"),
+                })
+              : t("booking.editTitleSuffix", { room: roomName })}
           </h2>
           <p className="text-sm text-default-500">{booking.room_email}</p>
         </div>
 
         <div className="grid gap-4 px-6 pt-4">
-          <TextField fullWidth isRequired>
+          <TextField fullWidth isRequired={!readOnly} isDisabled={readOnly}>
             <Label>{t("booking.meetingTitle")}</Label>
             <Input
               variant="secondary"
               placeholder={t("booking.meetingTitlePlaceholder")}
-              value={subject}
+              value={readOnly ? subject || na : subject}
               onChange={(event) => setSubject(event.target.value)}
+              readOnly={readOnly}
             />
           </TextField>
 
@@ -148,23 +163,25 @@ export function EditBookingModal({
             </TextField>
           </div>
 
-          <TextField fullWidth>
+          <TextField fullWidth isDisabled={readOnly}>
             <Label>{t("booking.attendees")}</Label>
             <Input
               variant="secondary"
               placeholder={t("booking.attendeesPlaceholder")}
-              value={attendees}
+              value={readOnly ? attendees || na : attendees}
               onChange={(event) => setAttendees(event.target.value)}
+              readOnly={readOnly}
             />
           </TextField>
 
-          <TextField fullWidth>
+          <TextField fullWidth isDisabled={readOnly}>
             <Label>{t("booking.description")}</Label>
             <TextArea
               variant="secondary"
               placeholder={t("booking.descriptionPlaceholder")}
-              value={notes}
+              value={readOnly ? notes || na : notes}
               onChange={(event) => setNotes(event.target.value)}
+              readOnly={readOnly}
             />
           </TextField>
 
@@ -172,17 +189,29 @@ export function EditBookingModal({
         </div>
 
         <div className="flex items-center justify-center gap-2 px-6 pb-6 pt-8">
-          <Button
-            variant="tertiary"
-            className="flex-1 rounded-full"
-            onPress={onClose}
-            isDisabled={loading}
-          >
-            {t("common.cancel")}
-          </Button>
-          <Button className="flex-1 rounded-full" onPress={submit} isPending={loading}>
-            {t("common.saveShort")}
-          </Button>
+          {readOnly ? (
+            <Button
+              variant="tertiary"
+              className="flex-1 rounded-full"
+              onPress={onClose}
+            >
+              {t("common.close")}
+            </Button>
+          ) : (
+            <>
+              <Button
+                variant="tertiary"
+                className="flex-1 rounded-full"
+                onPress={onClose}
+                isDisabled={loading}
+              >
+                {t("common.cancel")}
+              </Button>
+              <Button className="flex-1 rounded-full" onPress={submit} isPending={loading}>
+                {t("common.saveShort")}
+              </Button>
+            </>
+          )}
         </div>
       </div>
     </div>

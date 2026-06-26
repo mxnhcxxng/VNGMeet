@@ -91,7 +91,22 @@ export interface ScheduleRoom extends Room {
   // Instant days: 0 free, 1 busy, 2 your booking.
   // Scheduled days (room_availability slots still seeded at -1, i.e. beyond the
   // live Graph window): 3 free/schedule-bookable, 4 scheduled by other, 5 your scheduled.
-  grid: Array<Array<0 | 1 | 2 | 3 | 4 | 5>>;
+  // 0/1/2 instant band, 3/4/5 schedule band, 6 = instant pending, 7 = schedule
+  // pending, 8 = meeting I'm invited to (instant), 9 = invited meeting (schedule).
+  grid: Array<Array<0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9>>;
+  // The current user's meetings in this room (organizer OR invited), with explicit
+  // per-event start/end ("HH:MM") so adjacent bookings stay distinct. Powers the
+  // read-only "Booked by …" view, block boundaries, and date-picker dots.
+  meetings?: Array<{
+    date: string;
+    start: string;
+    end: string;
+    role: "owner" | "attendee";
+    bookedBy: string | null; // organizer email
+    subject: string;
+    attendees: string[];
+    body: string;
+  }>;
 }
 
 export interface ScheduleResponse {
@@ -248,9 +263,9 @@ export const api = {
   // Cached availability served from Supabase. The backend refreshes it on demand
   // with the current user's delegated Graph token when rows are older than 5 min.
   // Same shape as schedule() — preferred for the browse grid.
-  availability: (days: number, emails?: string) =>
+  availability: (days: number, emails?: string, force?: boolean) =>
     req<ScheduleResponse>(
-      `/api/availability?days=${days}${emails ? `&emails=${encodeURIComponent(emails)}` : ""}`
+      `/api/availability?days=${days}${emails ? `&emails=${encodeURIComponent(emails)}` : ""}${force ? "&sync=force" : ""}`
     ),
   // Live Graph query (kept as a fallback; needs a valid Graph token).
   schedule: (days: number, emails?: string) =>

@@ -496,9 +496,19 @@ async def list_my_bookings(request: Request):
     auth token via `_booking_auth_context` — the client never supplies it — so a
     user can only ever read their own rows and cannot peek at someone else's data.
     """
-    _token, _auth_user_id, user_profile_id, _email = await _booking_auth_context(request)
+    token, _auth_user_id, user_profile_id, _email = await _booking_auth_context(request)
     if not user_profile_id or not settings.supabase_enabled:
         return {"bookings": []}
+
+    # Self-heal before reading: pull the user's calendar so bookings they deleted
+    # directly in Outlook flip to "canceled" here too, even if they never opened the
+    # browse grid. Throttled (shared with the grid) so it's at most one Graph call
+    # per minute; best-effort so a Graph hiccup never blocks the history list.
+    if token and availability.should_sync_calendar(user_profile_id):
+        try:
+            await availability.sync_my_calendar(token, user_profile_id, _email)
+        except Exception as e:  # noqa: BLE001 - history must render regardless
+            log.warning("sync_my_calendar on booking history skipped: %s", e)
 
     from .supabase_client import get_supabase
 
@@ -603,10 +613,13 @@ async def create_booking(request: Request, payload: BookingRequest):
         _log_user_booking_activity(user_profile_id, payload, "failed", str(e), auth_user_id)
         raise
 
+    # Start as "pending" (yellow): the event exists, but the room mailbox processes
+    # the invite asynchronously. The calendar sync promotes this to "ok" once the
+    # room accepts, or to "failed" (room_declined) if it declines.
     _log_user_booking_activity(
         user_profile_id,
         payload,
-        "ok",
+        "pending",
         auth_user_id=auth_user_id,
         graph_event_id=ev.get("id"),
         web_link=ev.get("webLink"),
@@ -809,13 +822,14 @@ async def delete_booking(request: Request, booking_id: str):
 
     row = _fetch_own_booking(user_profile_id, booking_id)
     is_scheduled = _booking_type_for_db(row.get("booking_type") or "") == "scheduled"
-    was_ok = row.get("status") == "ok"
+    is_active = row.get("status") in ("ok", "pending")
     event_id = (row.get("graph_event_id") or "").strip()
 
-    # Actually on the calendar → cancel the real event first. This covers instant
-    # bookings AND scheduled bookings that have since been placed (status "ok" +
-    # graph_event_id), so canceling never leaves a phantom event behind.
-    if was_ok and event_id:
+    # Actually on the calendar → cancel the real event first. A real event exists
+    # whenever graph_event_id is set and the booking is still active — this covers
+    # instant bookings (which now start "pending" until the room responds) AND
+    # scheduled bookings already placed, so canceling never leaves a phantom event.
+    if is_active and event_id:
         try:
             await graph.delete_event(token, event_id)
         except httpx.HTTPStatusError as e:

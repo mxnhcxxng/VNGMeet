@@ -33,6 +33,9 @@ html.dark body {
   --event-mine-bg: #edfcf2;
   --event-mine-border: #aaf0c4;
   --event-mine-bg-hover: #d3f8df;
+  --event-pending-bg: #fffaeb;
+  --event-pending-border: #fedf89;
+  --event-pending-bg-hover: #fef0c7;
 }
 html.dark {
   --event-booked-bg: #120503;
@@ -40,6 +43,9 @@ html.dark {
   --event-mine-bg: #021209;
   --event-mine-border: #17823f;
   --event-mine-bg-hover: #042b16;
+  --event-pending-bg: #1c1403;
+  --event-pending-border: #93570a;
+  --event-pending-bg-hover: #2e2206;
 }
 
 /* Brand color comes solely from --accent (set below). The `primary` button

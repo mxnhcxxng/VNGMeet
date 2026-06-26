@@ -193,7 +193,7 @@ def _read_availability_cache(
         return {}
     rows = (
         sb.table("room_availability")
-        .select("room_id, date, slots, slot_owner_ids, updated_at")
+        .select("room_id, date, slots, slot_owner_ids, slot_attendee_ids, meetings, updated_at")
         .in_("room_id", room_ids)
         .gte("date", day_list[0])
         .lte("date", day_list[-1])
@@ -315,6 +315,67 @@ def _profile_email_by_id(sb, profile_ids: set[str]) -> dict[str, str]:
         return {}
 
 
+def _profile_id_by_email(sb, email: str) -> str | None:
+    """user_profiles.id for a single lowercased email, or None."""
+    if not email:
+        return None
+    try:
+        rows = (
+            sb.table("user_profiles")
+            .select("id")
+            .eq("email", email)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+        return str(rows[0]["id"]) if rows and rows[0].get("id") else None
+    except Exception as e:  # noqa: BLE001 - best-effort identity lookup
+        log.warning("could not read user profile id for %s: %s", email, e)
+        return None
+
+
+def _my_meetings_for_room(
+    cache: dict,
+    room_id: str,
+    day_list: list[str],
+    me_email: str,
+) -> list[dict]:
+    """The current user's meetings in this room (organizer OR attendee), read from
+    the cached `meetings` jsonb (explicit per-event start/end, so adjacent bookings
+    stay distinct). Powers the read-only "Booked by …" view, block boundaries, and
+    the date-picker dots. Each item: {date, start, end, role, bookedBy, subject,
+    attendees, body}.
+    """
+    if not me_email:
+        return []
+    me = me_email.strip().lower()
+    out: list[dict] = []
+    for day in day_list:
+        row = cache.get((room_id, day))
+        if not row:
+            continue
+        for m in row.get("meetings") or []:
+            owner = (m.get("owner") or "").strip().lower()
+            attendees = [a.strip().lower() for a in (m.get("attendees") or [])]
+            is_owner = owner == me
+            if not is_owner and me not in attendees:
+                continue
+            out.append(
+                {
+                    "date": day,
+                    "start": m.get("start"),
+                    "end": m.get("end"),
+                    "role": "owner" if is_owner else "attendee",
+                    "bookedBy": m.get("owner"),
+                    "subject": m.get("subject") or "",
+                    "attendees": m.get("attendees") or [],
+                    "body": m.get("body") or "",
+                }
+            )
+    return out
+
+
 @router.get("/api/availability")
 async def availability_grid(
     request: Request,
@@ -366,6 +427,24 @@ async def availability_grid(
 
     room_ids = [r["id"] for r in rooms_list]
     cache = await _ensure_availability_cache_fresh(request, sb, room_ids, day_list)
+
+    # Attribute the signed-in user's real events (organized or invited, incl. ones
+    # made directly in Outlook) into the shared cache before building the grid.
+    current_user_profile_id = _profile_id_by_email(sb, current_user_email)
+    # The post-booking refresh sends sync=force to bypass the throttle so a freshly
+    # created "pending" booking gets its room response (ok/failed) right away.
+    force_sync = request.query_params.get("sync") == "force"
+    if availability.should_sync_calendar(current_user_profile_id, force=force_sync):
+        try:
+            token, _ = await auth.resolve_token(request)
+            summary = await availability.sync_my_calendar(
+                token, current_user_profile_id, current_user_email
+            )
+            log.info("calendar synced on grid load: %s", summary)
+            cache = _read_availability_cache(sb, room_ids, day_list)
+        except Exception as e:  # noqa: BLE001 - calendar sync must not block the grid
+            log.warning("calendar sync on grid load skipped: %s", e)
+
     owner_profile_ids = {
         str(owner_id)
         for row in cache.values()
@@ -373,6 +452,37 @@ async def availability_grid(
         if owner_id
     }
     owner_email_by_profile_id = _profile_email_by_id(sb, owner_profile_ids)
+
+    # Slots backed by one of the user's still-pending bookings (instant awaiting the
+    # room's response, or a scheduled booking not yet placed). These render yellow on
+    # the grid instead of the green "confirmed mine" so the user sees it's not locked
+    # in yet. Keyed by (room_id, date, 15-min slot index).
+    pending_slots: set[tuple[str, str, int]] = set()
+    if current_user_profile_id:
+        try:
+            email_to_id = {r["email"].strip().lower(): r["id"] for r in rooms_list}
+            prows = (
+                sb.table("user_activity")
+                .select("room_email, date, start_time, end_time")
+                .eq("user_id", current_user_profile_id)
+                .eq("status", "pending")
+                .gte("date", day_list[0])
+                .lte("date", day_list[-1])
+                .execute()
+                .data
+                or []
+            )
+            for pr in prows:
+                rid = email_to_id.get((pr.get("room_email") or "").strip().lower())
+                s = _availability_slot_index(pr.get("start_time"))
+                e = _availability_slot_index(pr.get("end_time"))
+                if not rid or s is None or e is None:
+                    continue
+                pdate = str(pr.get("date"))
+                for idx in range(s, min(e, availability.SLOTS_PER_DAY)):
+                    pending_slots.add((rid, pdate, idx))
+        except Exception as e:  # noqa: BLE001 - pending overlay is best-effort
+            log.warning("could not read pending bookings for grid overlay: %s", e)
 
     # Precompute, for each display time label, the underlying 15-min slot indices.
     base_idx = [int(t[:2]) * 4 + int(t[3:5]) // (60 // 4) for t in times]
@@ -385,6 +495,7 @@ async def availability_grid(
             row = cache.get((r["id"], day))
             slots = row.get("slots") if row else []
             slot_owner_ids = row.get("slot_owner_ids") if row else []
+            slot_attendee_ids = row.get("slot_attendee_ids") if row else []
             # Any day containing -1 is not treated as a normal instant day. The
             # final cache day intentionally keeps Graph-free slots at -1 while
             # Graph-busy slots are 1, so bookings there remain scheduled but
@@ -408,14 +519,32 @@ async def availability_grid(
                     if owner_profile_id
                     else None
                 )
-                is_your_booking = bool(owner_email and owner_email == current_user_email)
+                is_owner = bool(owner_email and owner_email == current_user_email)
+                # A slot is also "yours" if you were invited to its event (attendee).
+                is_attendee = bool(
+                    current_user_profile_id
+                    and any(
+                        start + k < len(slot_attendee_ids)
+                        and current_user_profile_id in (slot_attendee_ids[start + k] or [])
+                        for k in range(sub_per_slot)
+                    )
+                )
+                # Owner (I booked it) outranks attendee (I'm only invited).
+                # My own booking still pending (room not confirmed / not placed):
+                # 6 instant / 7 schedule. Invited-only meeting: 8 instant / 9 schedule.
+                is_pending = is_owner and any(
+                    (r["id"], day, start + k) in pending_slots
+                    for k in range(sub_per_slot)
+                )
                 if schedule_day:
                     busy = any(
                         start + k < len(slots) and slots[start + k] == 1
                         for k in range(sub_per_slot)
                     )
-                    if is_your_booking:
-                        final_value = 5
+                    if is_owner:
+                        final_value = 7 if is_pending else 5
+                    elif is_attendee:
+                        final_value = 9
                     elif owner_profile_id:
                         final_value = 4
                     elif busy:
@@ -427,9 +556,22 @@ async def availability_grid(
                         start + k < len(slots) and slots[start + k] != 0
                         for k in range(sub_per_slot)
                     )
-                    final_value = 2 if is_your_booking else (1 if owner_profile_id or busy else 0)
+                    if is_owner:
+                        final_value = 6 if is_pending else 2
+                    elif is_attendee:
+                        final_value = 8
+                    else:
+                        final_value = 1 if owner_profile_id or busy else 0
                 api_grid[ti][di] = final_value
-        out_rooms.append({**r, "grid": api_grid})
+        out_rooms.append(
+            {
+                **r,
+                "grid": api_grid,
+                "meetings": _my_meetings_for_room(
+                    cache, r["id"], day_list, current_user_email
+                ),
+            }
+        )
 
     return {
         "timezone": settings.timezone,

@@ -186,6 +186,48 @@ async def get_schedule(
     return result
 
 
+async def get_calendar_view(
+    access_token: str,
+    start_iso: str,
+    end_iso: str,
+    timezone: str,
+) -> list[dict]:
+    """Return the signed-in user's events in [start, end) via /me/calendarView.
+
+    Unlike getSchedule (free/busy only), calendarView returns full events the user
+    organizes OR is invited to, including organizer and the attendee list (the room
+    appears as a type="resource" attendee). calendarView also expands recurring
+    series within the window. Used to attribute each busy room slot to its real
+    owner/attendees, even for bookings made directly in Outlook.
+    """
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Accept": "application/json",
+        "Prefer": f'outlook.timezone="{timezone}"',
+    }
+    params: dict | None = {
+        "startDateTime": start_iso,
+        "endDateTime": end_iso,
+        "$select": "id,subject,bodyPreview,start,end,location,attendees,organizer,isCancelled,showAs",
+        "$top": "100",
+        "$orderby": "start/dateTime",
+    }
+    url = f"{GRAPH_BASE}/me/calendarView"
+    events: list[dict] = []
+    async with httpx.AsyncClient(timeout=60) as client:
+        while url:
+            resp = await client.get(url, headers=headers, params=params)
+            resp.raise_for_status()
+            data = resp.json()
+            for ev in data.get("value", []):
+                if ev.get("isCancelled"):
+                    continue
+                events.append(ev)
+            url = data.get("@odata.nextLink")
+            params = None  # nextLink already carries the query string
+    return events
+
+
 def build_event_body(
     subject: str,
     start_iso: str,

@@ -939,15 +939,17 @@ export default function Home() {
     return () => sub.subscription.unsubscribe();
   }, [refreshMe]);
 
-  const loadSchedule = useCallback(async () => {
+  const loadSchedule = useCallback(async (opts?: { force?: boolean }) => {
     setRefreshing(true);
     setError(null);
     try {
       // Read from the cached availability table (refreshed by a background job, and
       // of querying Graph live. Fall back to a live Graph query when the cache
       // isn't available (e.g. manual-token dev mode without Supabase → 503).
+      // force=true bypasses the calendar-sync throttle so the post-booking refresh
+      // picks up a pending booking's room response immediately.
       try {
-        setData(await api.availability(RANGE_DAYS));
+        setData(await api.availability(RANGE_DAYS, undefined, opts?.force));
       } catch (e: any) {
         if (e.message === "UNAUTHENTICATED") throw e;
         setData(await api.schedule(RANGE_DAYS));

@@ -80,6 +80,15 @@ const EVENT_MINE = {
   time: "#099250",
   dot: "#16b364",
 };
+// Pending (amber): my booking that the room hasn't confirmed yet, or a scheduled
+// booking not yet placed. Distinct from the green confirmed-mine.
+const EVENT_PENDING = {
+  bg: "var(--event-pending-bg)",
+  border: "var(--event-pending-border)",
+  title: "#b54708",
+  time: "#dc6803",
+  dot: "#f79009",
+};
 
 // Fixed office tabs — `value` is the real filter value (matches room.office /
 // meeting_room_metadata), `label` is the display name.
@@ -187,7 +196,7 @@ export function BrowseRooms({
   dayIndex: number;
   setDayIndex: (fn: (n: number) => number) => void;
   refreshing: boolean;
-  onRefresh: () => void;
+  onRefresh: (opts?: { force?: boolean }) => void;
   userOffice?: string;
   userBuilding?: string;
   userFloor?: string;
@@ -395,6 +404,9 @@ export function BrowseRooms({
   const [myBookings, setMyBookings] = useState<Booking[]>([]);
   const [editingBooking, setEditingBooking] = useState<Booking | null>(null);
   const [editingThumbnail, setEditingThumbnail] = useState<string | undefined>(undefined);
+  // Read-only view for meetings I'm only invited to (not the organizer).
+  const [editingReadOnly, setEditingReadOnly] = useState(false);
+  const [editingBookedBy, setEditingBookedBy] = useState<string | undefined>(undefined);
 
   const loadMyBookings = () => {
     api
@@ -414,8 +426,29 @@ export function BrowseRooms({
     for (const b of myBookings) {
       if (b.status !== "canceled" && b.status !== "failed") set.add(b.date);
     }
+    // Also dot days where I'm invited to / organize a meeting (from the grid's
+    // per-room meetings), not just rows I booked via the app.
+    for (const room of data.rooms) {
+      for (const m of room.meetings ?? []) set.add(m.date);
+    }
     return set;
-  }, [myBookings]);
+  }, [myBookings, data.rooms]);
+
+  // Per-room set of my meeting START times on the selected day. Used to break the
+  // grid block-merge so two back-to-back bookings (1-2, 2-3) render as two blocks,
+  // not one 1-3 block.
+  const meetingStartsByRoom = useMemo(() => {
+    const day = data.days[dayIndex];
+    const map = new Map<string, Set<string>>();
+    for (const room of data.rooms) {
+      const starts = new Set<string>();
+      for (const m of room.meetings ?? []) {
+        if (m.date === day) starts.add(m.start);
+      }
+      map.set(room.email, starts);
+    }
+    return map;
+  }, [data.rooms, data.days, dayIndex]);
 
   function findMyBooking(
     roomEmail: string,
@@ -444,8 +477,40 @@ export function BrowseRooms({
     const booking = findMyBooking(room.email, data.days[dayIndex], time, schedule);
     if (booking) {
       setEditingThumbnail(room.thumbnail_link);
+      setEditingReadOnly(false);
+      setEditingBookedBy(undefined);
       setEditingBooking(booking);
     }
+  }
+
+  // A meeting I'm only invited to: no editable booking row of my own, so build a
+  // read-only synthetic from the grid's `meetings` payload and show who booked it.
+  function openAttendeeMeeting(room: ScheduleRoom, time: string) {
+    const date = data.days[dayIndex];
+    const meeting = (room.meetings ?? []).find(
+      (m) => m.date === date && time >= m.start && time < m.end,
+    );
+    if (!meeting) return;
+    const synthetic: Booking = {
+      id: "",
+      room_email: room.email,
+      room_name: room.name,
+      date,
+      start_time: meeting.start,
+      end_time: meeting.end,
+      booking_type: "instant",
+      method: "manual",
+      subject: meeting.subject,
+      attendees: meeting.attendees,
+      body: meeting.body,
+      status: "ok",
+      web_link: "",
+      created_at: "",
+    };
+    setEditingThumbnail(room.thumbnail_link);
+    setEditingBookedBy(meeting.bookedBy ?? undefined);
+    setEditingReadOnly(true);
+    setEditingBooking(synthetic);
   }
 
   // --- Drag-to-select start/end across a single room column ----------------
@@ -716,7 +781,7 @@ export function BrowseRooms({
           variant="tertiary"
           aria-label={tr("browse.refresh")}
           className="rounded-full"
-          onPress={onRefresh}
+          onPress={() => onRefresh()}
           isDisabled={refreshing}
         >
           {refreshing ? <Spinner size="sm" /> : <ArrowsRotateRight width={16} height={16} />}
@@ -856,17 +921,41 @@ export function BrowseRooms({
                     const status = bi === undefined ? 0 : r.grid[bi]?.[dayIndex] ?? 0;
                     // Schedule days (status 3/4/5) sit beyond the live Graph
                     // window — bookings there are "schedule" bookings.
-                    const schedule = status >= 3;
+                    // Status codes: 0/1/2 instant band, 3/4/5 schedule band,
+                    // 6/7 = my booking pending, 8/9 = meeting I'm only invited to.
+                    const pending = status === 6 || status === 7;
+                    const attendeeMeeting = status === 8 || status === 9;
+                    const schedule =
+                      status === 3 ||
+                      status === 4 ||
+                      status === 5 ||
+                      status === 7 ||
+                      status === 9;
                     const free = status === 0 || status === 3;
-                    const myBooking = status === 2 || status === 5;
+                    // "myBooking" here = the green/amber "mine" umbrella: my own
+                    // booking (confirmed or pending) OR a meeting I'm invited to.
+                    // All are clickable and merge into a block.
+                    const myBooking =
+                      status === 2 || status === 5 || pending || attendeeMeeting;
+                    // My meeting starts on this day for this room — block boundaries
+                    // so adjacent distinct bookings don't merge into one block.
+                    const meetingStarts = meetingStartsByRoom.get(r.email);
+                    const isBlockStart = !!meetingStarts && meetingStarts.has(t);
+                    const nextIsBlockStart =
+                      bi !== undefined &&
+                      bi < times.length - 1 &&
+                      !!meetingStarts &&
+                      meetingStarts.has(times[bi + 1]);
                     const prevBusy =
                       bi !== undefined &&
                       bi > 0 &&
-                      (r.grid[bi - 1]?.[dayIndex] ?? 0) === status;
+                      (r.grid[bi - 1]?.[dayIndex] ?? 0) === status &&
+                      !isBlockStart;
                     const nextBusy =
                       bi !== undefined &&
                       bi < times.length - 1 &&
-                      (r.grid[bi + 1]?.[dayIndex] ?? 0) === status;
+                      (r.grid[bi + 1]?.[dayIndex] ?? 0) === status &&
+                      !nextIsBlockStart;
 
                     if (free) {
                       const dragLo = drag ? Math.min(drag.anchorIndex, drag.headIndex) : 0;
@@ -931,14 +1020,24 @@ export function BrowseRooms({
 
                     // Busy block — styled as the design's event card, merged across
                     // consecutive slots of the same status.
-                    const palette = myBooking ? EVENT_MINE : EVENT_BOOKED;
+                    const palette = pending
+                      ? EVENT_PENDING
+                      : myBooking
+                        ? EVENT_MINE
+                        : EVENT_BOOKED;
                     // Stable key for the whole booking run (room + day + the run's
                     // first slot). Every cell of the run resolves to the same key,
                     // so hovering any of them lights the entire block.
                     let bookingKey: string | null = null;
                     if (myBooking && bi !== undefined) {
                       let start = bi;
-                      while (start > 0 && (r.grid[start - 1]?.[dayIndex] ?? 0) === status) {
+                      // Walk back over same-status cells, but stop at a meeting
+                      // boundary so two adjacent bookings get distinct hover keys.
+                      while (
+                        start > 0 &&
+                        (r.grid[start - 1]?.[dayIndex] ?? 0) === status &&
+                        !meetingStarts?.has(times[start])
+                      ) {
                         start -= 1;
                       }
                       bookingKey = `${r.email}:${dayIndex}:${start}`;
@@ -958,12 +1057,18 @@ export function BrowseRooms({
                           ? {
                               role: "button",
                               tabIndex: 0,
-                              title: tr("browse.editBooking"),
-                              onClick: () => openEditForSlot(r, t, schedule),
+                              title: attendeeMeeting
+                                ? tr("browse.viewMeeting")
+                                : tr("browse.editBooking"),
+                              onClick: () =>
+                                attendeeMeeting
+                                  ? openAttendeeMeeting(r, t)
+                                  : openEditForSlot(r, t, schedule),
                               onKeyDown: (event: KeyboardEvent) => {
                                 if (event.key === "Enter" || event.key === " ") {
                                   event.preventDefault();
-                                  openEditForSlot(r, t, schedule);
+                                  if (attendeeMeeting) openAttendeeMeeting(r, t);
+                                  else openEditForSlot(r, t, schedule);
                                 }
                               },
                             }
@@ -980,7 +1085,11 @@ export function BrowseRooms({
                           <div
                             className={`h-full overflow-hidden px-2 transition-colors ${myBooking ? "my-booking-fill" : ""}`}
                             style={{
-                              backgroundColor: blockHovered ? "var(--event-mine-bg-hover)" : palette.bg,
+                              backgroundColor: blockHovered
+                                ? pending
+                                  ? "var(--event-pending-bg-hover)"
+                                  : "var(--event-mine-bg-hover)"
+                                : palette.bg,
                               borderLeft: `1px solid ${palette.border}`,
                               borderRight: `1px solid ${palette.border}`,
                               borderTop: prevBusy ? "none" : `1px solid ${palette.border}`,
@@ -999,18 +1108,26 @@ export function BrowseRooms({
                                     className="flex-1 truncate text-xs font-semibold"
                                     style={{ color: palette.title }}
                                   >
-                                    {myBooking
-                                      ? schedule
-                                        ? tr("browse.yourSchedule")
-                                        : tr("browse.myBooking")
-                                      : schedule
-                                        ? tr("browse.scheduled")
-                                        : tr("browse.booked")}
+                                    {pending
+                                      ? tr("browse.pendingBooking")
+                                      : attendeeMeeting
+                                        ? tr("browse.myMeeting")
+                                        : myBooking
+                                          ? schedule
+                                            ? tr("browse.yourSchedule")
+                                            : tr("browse.myBooking")
+                                          : schedule
+                                            ? tr("browse.scheduled")
+                                            : tr("browse.booked")}
                                   </p>
                                   {myBooking && (
                                     <span
                                       className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full"
-                                      style={{ backgroundColor: EVENT_MINE.dot }}
+                                      style={{
+                                        backgroundColor: pending
+                                          ? EVENT_PENDING.dot
+                                          : EVENT_MINE.dot,
+                                      }}
                                     />
                                   )}
                                 </div>
@@ -1071,6 +1188,14 @@ export function BrowseRooms({
           clearBookingHistoryCache();
           onRefresh();
           loadMyBookings();
+          // Instant bookings start "pending" until the room mailbox responds.
+          // Re-sync ~30s later (forced past the throttle) so the status flips to
+          // ok/failed and the grid/history reflect the room's decision.
+          window.setTimeout(() => {
+            clearBookingHistoryCache();
+            onRefresh({ force: true });
+            loadMyBookings();
+          }, 30000);
         }}
       />
 
@@ -1078,7 +1203,13 @@ export function BrowseRooms({
         isOpen={editingBooking !== null}
         booking={editingBooking}
         thumbnail={editingThumbnail}
-        onClose={() => setEditingBooking(null)}
+        readOnly={editingReadOnly}
+        bookedBy={editingBookedBy}
+        onClose={() => {
+          setEditingBooking(null);
+          setEditingReadOnly(false);
+          setEditingBookedBy(undefined);
+        }}
         onSaved={() => {
           clearBookingHistoryCache();
           onRefresh();

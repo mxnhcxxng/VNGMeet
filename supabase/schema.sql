@@ -256,7 +256,7 @@ create table if not exists user_activity (
   created_at timestamptz not null default now(),
   constraint user_activity_booking_type_check check (booking_type in ('instant', 'scheduled')),
   constraint user_activity_method_check check (method in ('manual', 'chatbot')),
-  constraint user_activity_status_check check (status in ('ok', 'failed', 'pending'))
+  constraint user_activity_status_check check (status in ('ok', 'failed', 'pending', 'canceled'))
 );
 alter table user_activity add column if not exists auth_user_id uuid references auth.users on delete set null;
 alter table user_activity add column if not exists graph_access_token text;
@@ -281,7 +281,7 @@ alter table user_activity
 alter table user_activity
   drop constraint if exists user_activity_status_check;
 alter table user_activity
-  add constraint user_activity_status_check check (status in ('ok', 'failed', 'pending'));
+  add constraint user_activity_status_check check (status in ('ok', 'failed', 'pending', 'canceled'));
 create index if not exists idx_user_activity_user_created_at
   on user_activity (user_id, created_at desc);
 create index if not exists idx_user_activity_scheduled_pending
@@ -323,22 +323,41 @@ comment on column meeting_room_metadata.direction is 'Hướng dẫn đi đến 
 -- slots: mảng 96 slot 15 phút/ngày, index = hour*4 + minute/15 (0=00:00 .. 95=23:45).
 -- Giá trị: 0 = free, 1 = busy.
 -- slot_owner_ids: mảng 96 user_profiles.id nullable, dùng để map busy slot nào là của user hiện tại.
+-- slot_attendee_ids: mảng jsonb 96 phần tử song song slots/slot_owner_ids. Mỗi
+-- phần tử là list user_profiles.id của những người được MỜI vào event ở slot đó
+-- (null nếu không có / slot free). Một event có 1 owner (organizer) nhưng nhiều
+-- attendee, nên cần list thay vì 1 uuid/slot như slot_owner_ids.
 create table if not exists room_availability (
   room_id        uuid not null references meeting_room_metadata(id) on delete cascade,
   date           date not null,
   slots          smallint[] not null,
   slot_owner_ids uuid[] not null default array_fill(null::uuid, ARRAY[96]),
+  slot_attendee_ids jsonb not null default to_jsonb(array_fill(null::text, ARRAY[96])),
+  -- meetings: list các event (từ calendarView của user) trong phòng/ngày, mỗi phần tử
+  -- {id, start "HH:MM", end "HH:MM", owner (email), attendees (emails), subject, body}.
+  -- Giữ start/end rõ ràng nên 2 booking liền nhau (1-2, 2-3) KHÔNG bị gộp; cũng là
+  -- nguồn cho subject/attendee/body ở modal read-only và chấm ngày có meeting.
+  meetings      jsonb not null default '[]'::jsonb,
   updated_at     timestamptz not null default now(),
   primary key (room_id, date),
   constraint room_availability_slots_len check (array_length(slots, 1) = 96),
-  constraint room_availability_slot_owner_ids_len check (array_length(slot_owner_ids, 1) = 96)
+  constraint room_availability_slot_owner_ids_len check (array_length(slot_owner_ids, 1) = 96),
+  constraint room_availability_slot_attendee_ids_len check (jsonb_array_length(slot_attendee_ids) = 96)
 );
 alter table room_availability
   add column if not exists slot_owner_ids uuid[] not null default array_fill(null::uuid, ARRAY[96]);
 alter table room_availability
+  add column if not exists slot_attendee_ids jsonb not null default to_jsonb(array_fill(null::text, ARRAY[96]));
+alter table room_availability
+  add column if not exists meetings jsonb not null default '[]'::jsonb;
+alter table room_availability
   drop constraint if exists room_availability_slot_owner_ids_len;
 alter table room_availability
   add constraint room_availability_slot_owner_ids_len check (array_length(slot_owner_ids, 1) = 96);
+alter table room_availability
+  drop constraint if exists room_availability_slot_attendee_ids_len;
+alter table room_availability
+  add constraint room_availability_slot_attendee_ids_len check (jsonb_array_length(slot_attendee_ids) = 96);
 create index if not exists idx_room_availability_date on room_availability(date);
 alter table room_availability enable row level security;
 -- Chỉ user đã đăng nhập đọc được; ghi chỉ qua service_role (backend job).

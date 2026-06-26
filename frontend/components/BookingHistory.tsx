@@ -231,7 +231,27 @@ export function BookingHistory() {
   }, []);
 
   useEffect(() => {
-    if (cachedBookings === null) load();
+    if (cachedBookings === null) {
+      load();
+      return;
+    }
+    // Stale-while-revalidate: render the cached rows instantly, then refetch in
+    // the background (no spinner) so statuses changed server-side — e.g. a booking
+    // deleted in Outlook and auto-canceled by the calendar sync — show up on every
+    // visit to this tab without needing a manual refresh.
+    const s = sortRef.current;
+    api
+      .myBookings({
+        sort: s.column,
+        order: s.direction === "ascending" ? "asc" : "desc",
+      })
+      .then((res) => {
+        cachedBookings = res.bookings;
+        setBookings(res.bookings);
+      })
+      .catch(() => {
+        /* keep showing cached rows; manual refresh surfaces errors */
+      });
   }, [load]);
 
   // Load room thumbnails once so the edit card can render the room photo.
