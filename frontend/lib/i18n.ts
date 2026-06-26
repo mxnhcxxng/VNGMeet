@@ -260,7 +260,7 @@ const en = {
 
   // --- Room Scout ---------------------------------------------------------
   "scout.subtitle":
-    "We'll check for available rooms every 30 minutes and notify you by email when a matching room is found.",
+    "We'll check for available rooms every 30 minutes and notify you by email when a matching room is found. Room Scout will automatically end at midnight today.",
   "scout.guideSubtitle":
     "We'll check for available rooms every 30 minutes and send you an Outlook email when a matching room becomes available.",
   "scout.greeting": "Hi, {name}",
@@ -312,7 +312,7 @@ const en = {
   "scout.capacity": "Capacity",
   "scout.selectCapacity": "Select Capacity",
   "scout.dateRangeNote":
-    "Choose a date from today through {date} (14 days ahead). The scout ends at midnight today.",
+    "Choose a date from today through {date} (14 days ahead).",
   "scout.endsAtMidnightNote": "This scout ends at midnight on the day it was started.",
   "scout.afterHoursNote":
     "Room scouting can't be started after 18:00. Try again tomorrow",
@@ -654,7 +654,7 @@ const vi: Partial<Record<TranslationKey, string>> = {
 
   // --- Room Scout ---------------------------------------------------------
   "scout.subtitle":
-    "Chúng tôi sẽ kiểm tra phòng trống mỗi 30 phút và gửi email cho bạn khi tìm thấy phòng phù hợp.",
+    "Chúng tôi sẽ kiểm tra phòng trống mỗi 30 phút và gửi email cho bạn khi tìm thấy phòng phù hợp. Room Scout sẽ tự động kết thúc lúc 00:00 hôm nay.",
   "scout.guideSubtitle":
     "Chúng tôi sẽ kiểm tra phòng trống mỗi 30 phút và gửi email Outlook cho bạn khi có phòng phù hợp.",
   "scout.greeting": "Xin chào, {name}",
@@ -706,7 +706,7 @@ const vi: Partial<Record<TranslationKey, string>> = {
   "scout.capacity": "Sức chứa",
   "scout.selectCapacity": "Chọn sức chứa",
   "scout.dateRangeNote":
-    "Chọn ngày từ hôm nay đến hết {date} (14 ngày tới). Job sẽ kết thúc lúc 00:00 hôm nay.",
+    "Chọn ngày từ hôm nay đến hết {date} (14 ngày tới).",
   "scout.endsAtMidnightNote": "Job sẽ kết thúc lúc 00:00 của ngày bắt đầu Scout.",
   "scout.afterHoursNote":
     "Không thể bắt đầu Săn Phòng sau 18:00. Vui lòng thử lại vào ngày mai.",

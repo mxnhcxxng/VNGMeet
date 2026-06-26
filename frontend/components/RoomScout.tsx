@@ -11,6 +11,7 @@ import {
   Checkbox,
   Chip,
   DateField,
+  Description,
   Label,
   ListBox,
   ListBoxItem,
@@ -548,6 +549,9 @@ function ScoutForm({
                 {(segment) => <DateField.Segment segment={segment} />}
               </DateField.Input>
             </DateField.Group>
+            <Description>
+              {t("scout.dateRangeNote", { date: formatDmy(maxScoutDate) })}
+            </Description>
           </DateField>
         </I18nProvider>
 
@@ -581,10 +585,10 @@ function ScoutForm({
           isSelected={ignoreLunch}
           onChange={setIgnoreLunch}
         >
-          <Checkbox.Control>
-            <Checkbox.Indicator />
-          </Checkbox.Control>
           <Checkbox.Content>
+            <Checkbox.Control>
+              <Checkbox.Indicator />
+            </Checkbox.Control>
             <span className="text-sm font-medium text-default-700">
               {t("scout.ignoreLunch")}
             </span>
@@ -657,15 +661,6 @@ function ScoutForm({
             </ListBox>
           </Select.Popover>
         </Select>
-
-        {!afterHours && (
-          <div className="flex items-start gap-1.5 text-sm leading-5 text-default-500">
-            <CircleInfo className="mt-0.5 size-4 shrink-0 text-[#F05A22]" />
-            <span>
-              {t("scout.dateRangeNote", { date: formatDmy(maxScoutDate) })}
-            </span>
-          </div>
-        )}
 
         {afterHours && (
           <div className="flex items-center gap-2 rounded-xl bg-[#fee7de] p-3 text-sm leading-6 text-[#535862] dark:bg-[#3B1202] dark:text-[#fee7de]">

@@ -444,10 +444,10 @@ function BookingConfirmationCard({
           onChange={setSkipConfirmation}
           isDisabled={disabled}
         >
-          <Checkbox.Control>
-            <Checkbox.Indicator />
-          </Checkbox.Control>
           <Checkbox.Content>
+            <Checkbox.Control>
+              <Checkbox.Indicator />
+            </Checkbox.Control>
             <span className="text-sm font-medium text-default-500">
               {t("chatp.bookWithoutConfirm")}
             </span>
