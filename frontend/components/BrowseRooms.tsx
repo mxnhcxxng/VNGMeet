@@ -324,6 +324,15 @@ export function BrowseRooms({
   const rooms = useMemo(() => {
     const q = query.trim().toLowerCase();
     const favorites = new Set(preferredRooms.map((room) => room.trim().toLowerCase()));
+    // Rooms where the user has an event (meeting) on the selected day. On those
+    // days they jump to the front; on any other day this set is empty and the
+    // default ordering below is left untouched.
+    const myMeetingDay = data.days[dayIndex];
+    const myMeetingEmails = new Set(
+      data.rooms
+        .filter((r) => (r.meetings ?? []).some((m) => m.date === myMeetingDay))
+        .map((r) => r.email.toLowerCase())
+    );
     return data.rooms
       .filter(
         (r) =>
@@ -332,6 +341,11 @@ export function BrowseRooms({
       )
       .map((room, index) => ({ room, index }))
       .sort((a, b) => {
+        const myMeetingDiff =
+          Number(!myMeetingEmails.has(a.room.email.toLowerCase())) -
+          Number(!myMeetingEmails.has(b.room.email.toLowerCase()));
+        if (myMeetingDiff) return myMeetingDiff;
+
         const availabilityDiff =
           availabilityRank(a.room, dayIndex, currentRange) -
           availabilityRank(b.room, dayIndex, currentRange);
@@ -357,6 +371,7 @@ export function BrowseRooms({
       .map(({ room }) => room);
   }, [
     currentRange,
+    data.days,
     data.rooms,
     dayIndex,
     office,
