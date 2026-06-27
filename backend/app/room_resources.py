@@ -15,6 +15,13 @@ from .profiles import _request_identity
 
 router = APIRouter()
 _AVAILABILITY_REFRESH_LOCK = None
+ROOM_LAYOUT_COUNTS_BY_OFFICE = {
+    # Hardcoded for the browse loading grid. Update these when room metadata
+    # changes so the skeleton column count stays stable before availability loads.
+    "campus": 32,
+    "sala": 4,
+    "tnr": 10,
+}
 
 def _room_metadata() -> dict[str, dict]:
     """email (lowercased) -> row from `meeting_room_metadata`.
@@ -83,6 +90,12 @@ async def rooms(request: Request):
         return _enrich_rooms(await graph.list_rooms(token))
     except httpx.HTTPStatusError as e:
         raise HTTPException(e.response.status_code, e.response.text)
+
+
+@router.get("/api/room-layout")
+async def room_layout(request: Request):
+    _require_auth(request)
+    return {"roomCountsByOffice": ROOM_LAYOUT_COUNTS_BY_OFFICE}
 
 
 def _time_labels() -> list[str]:

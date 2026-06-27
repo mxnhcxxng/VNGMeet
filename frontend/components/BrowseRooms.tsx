@@ -26,7 +26,7 @@ import {
 import { I18nProvider } from "react-aria-components";
 import { parseDate, parseTime } from "@internationalized/date";
 import { api, type Booking, type ScheduleResponse, type ScheduleRoom } from "@/lib/api";
-import { useT } from "@/app/providers";
+import { useLanguage } from "@/app/providers";
 import type { TranslationKey } from "@/lib/i18n";
 import { BookingModal, type BookingSlot } from "./BookingModal";
 import { EditBookingModal } from "./EditBookingModal";
@@ -34,6 +34,7 @@ import { clearBookingHistoryCache } from "./BookingHistory";
 
 const SLOT_H = 48; // px per slot row (half hour → 96px per hour)
 const TIME_COL = 72; // px width of the left time-label column
+const ROOM_HEADER_H = 56; // keep loading and loaded room headers identical
 const DEFAULT_DAY_START = "09:00";
 const DEFAULT_DAY_END = "18:00";
 const SCHEDULE_MAX_DURATION_MINUTES = 3 * 60;
@@ -65,6 +66,32 @@ function formatLocalIsoDate(date: Date) {
 function formatDmy(iso: string) {
   const [y, m, d] = iso.split("-").map(Number);
   return `${d}/${m}/${y}`;
+}
+
+const VI_WEEKDAYS = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"] as const;
+
+function capitalizeFirst(value: string) {
+  return value ? value.charAt(0).toUpperCase() + value.slice(1) : value;
+}
+
+function formatWeekdayLabel(iso: string, locale: string) {
+  const date = new Date(`${iso}T00:00:00`);
+  if (locale === "vi-VN") return VI_WEEKDAYS[date.getDay()];
+  return capitalizeFirst(
+    new Intl.DateTimeFormat(locale, { weekday: "short" }).format(date)
+  );
+}
+
+function formatCalendarHeaderDay(day: string, locale: string) {
+  if (locale !== "vi-VN") return capitalizeFirst(day);
+  const normalized = day.trim().toLowerCase();
+  if (normalized.includes("cn") || normalized.includes("chủ")) return "CN";
+  const digit = normalized.match(/[2-7]/)?.[0];
+  return digit ? `T${digit}` : day.toUpperCase();
+}
+
+function formatDatePickerLabel(iso: string, locale: string) {
+  return `${formatWeekdayLabel(iso, locale)}, ${formatDmy(iso)}`;
 }
 
 // Event palettes lifted from the design's utility colour ramps.
@@ -191,6 +218,8 @@ export function BrowseRooms({
   userFloor,
   userDomain,
   preferredRooms = [],
+  loadingRooms = false,
+  roomCountsByOffice,
 }: {
   data: ScheduleResponse;
   dayIndex: number;
@@ -202,8 +231,11 @@ export function BrowseRooms({
   userFloor?: string;
   userDomain?: string;
   preferredRooms?: string[];
+  loadingRooms?: boolean;
+  roomCountsByOffice?: Record<string, number> | null;
 }) {
-  const tr = useT();
+  const { t: tr, language } = useLanguage();
+  const datePickerLocale = language === "vi" ? "vi-VN" : "en-US";
   const [isOpen, setIsOpen] = useState(false);
   const onOpen = () => setIsOpen(true);
   const onClose = () => setIsOpen(false);
@@ -337,7 +369,17 @@ export function BrowseRooms({
     () => new Set(preferredRooms.map((room) => room.trim().toLowerCase())),
     [preferredRooms]
   );
-  const cols = `${TIME_COL}px repeat(${rooms.length}, minmax(155px, 1fr))`;
+  const loadingRoomCount = useMemo(() => {
+    if (!loadingRooms) return 0;
+    const officeKey = (office || "campus").trim().toLowerCase();
+    const knownCount = roomCountsByOffice?.[officeKey];
+    return typeof knownCount === "number" ? Math.max(1, Math.min(knownCount, 24)) : 0;
+  }, [loadingRooms, office, roomCountsByOffice]);
+  const columnCount = loadingRooms ? loadingRoomCount : rooms.length;
+  const cols =
+    columnCount > 0
+      ? `${TIME_COL}px repeat(${columnCount}, minmax(155px, 1fr))`
+      : `${TIME_COL}px minmax(775px, 1fr)`;
 
   function statusFor(room: ScheduleRoom, time: string) {
     const businessIndex = businessIndexByTime.get(time);
@@ -658,7 +700,7 @@ export function BrowseRooms({
         </Button>
 
         {/* Day navigation + date picker, grouped into a single pill. */}
-        <I18nProvider locale="en-US">
+        <I18nProvider locale={datePickerLocale}>
           <div className="inline-flex h-9 items-center overflow-hidden rounded-full bg-[var(--default)] text-[var(--foreground)]">
             <button
               type="button"
@@ -683,10 +725,12 @@ export function BrowseRooms({
             >
               <DatePicker.Trigger
                 ref={dateTriggerRef}
-                className="flex h-9 items-center gap-2 px-4 text-sm font-medium outline-none transition-colors hover:bg-[var(--default-hover)]"
+                className="relative flex h-9 w-36 items-center justify-center px-0 text-[13px] font-medium outline-none transition-colors hover:bg-[var(--default-hover)]"
               >
-                <CalendarIcon width={16} height={16} />
-                <span className="whitespace-nowrap">{formatDmy(data.days[dayIndex])}</span>
+                <CalendarIcon width={16} height={16} className="absolute left-2.5 shrink-0" />
+                <span className="block w-36 shrink-0 whitespace-nowrap pl-7 pr-1 text-center">
+                  {formatDatePickerLabel(data.days[dayIndex], datePickerLocale)}
+                </span>
               </DatePicker.Trigger>
               <DatePicker.Popover triggerRef={dateTriggerRef} className="!max-w-none w-fit">
                 <Calendar
@@ -694,13 +738,19 @@ export function BrowseRooms({
                   maxValue={parseDate(data.days[maxDayIndex])}
                 >
                   <Calendar.Header>
-                    <Calendar.NavButton slot="previous" />
-                    <Calendar.Heading />
-                    <Calendar.NavButton slot="next" />
+                    <Calendar.Heading className="text-left first-letter:uppercase" />
+                    <div className="flex items-center gap-1">
+                      <Calendar.NavButton slot="previous" />
+                      <Calendar.NavButton slot="next" />
+                    </div>
                   </Calendar.Header>
                   <Calendar.Grid>
                     <Calendar.GridHeader>
-                      {(day) => <Calendar.HeaderCell>{day}</Calendar.HeaderCell>}
+                      {(day) => (
+                        <Calendar.HeaderCell>
+                          {formatCalendarHeaderDay(day, datePickerLocale)}
+                        </Calendar.HeaderCell>
+                      )}
                     </Calendar.GridHeader>
                     <Calendar.GridBody>
                       {(date) => (
@@ -807,7 +857,7 @@ export function BrowseRooms({
 
       {/* Calendar */}
       <div ref={scrollRef} className="flex-1 overflow-auto">
-        {rooms.length === 0 ? (
+        {!loadingRooms && rooms.length === 0 ? (
           <div className="flex h-full items-center justify-center p-6">
             <Card className="w-full max-w-md border border-[color:var(--separator)] bg-white dark:bg-[#13161b] text-center shadow-sm">
               <Card.Content className="items-center gap-4 p-8">
@@ -835,41 +885,63 @@ export function BrowseRooms({
             {/* Room header */}
             <div
               className="sticky top-0 z-20 grid border-b border-[color:var(--separator)] bg-white dark:bg-[#0c0e12] shadow-sm"
-              style={{ gridTemplateColumns: cols }}
+              style={{ gridTemplateColumns: cols, height: ROOM_HEADER_H }}
             >
-              <div className="sticky left-0 z-30 border-r border-[color:var(--separator)] bg-white dark:bg-[#0c0e12]" />
-              {rooms.map((r) => {
-                const isFavorite = favoriteEmails.has(r.email.toLowerCase());
-                const size = capacitySize(r);
-                const cap = size ? CAPACITY_LABEL[size] : null;
-                return (
-                  <div
-                    key={r.email}
-                    className="flex flex-col items-center justify-center gap-1 border-r border-[color:var(--separator)] p-2"
-                  >
-                    <div className="flex w-full items-center justify-center gap-1">
-                      {isFavorite && (
-                        <HeartFill className="shrink-0 text-[#f97316]" width={14} height={14} />
-                      )}
-                      <p
-                        className="truncate text-xs font-semibold text-default-700"
-                        title={r.name}
-                      >
-                        {r.name}
-                      </p>
+              <div
+                className="sticky left-0 z-30 border-r border-[color:var(--separator)] bg-white dark:bg-[#0c0e12]"
+                style={{ height: ROOM_HEADER_H }}
+              />
+              {loadingRooms ? (
+                columnCount > 0 ? (
+                  Array.from({ length: columnCount }).map((_, index) => (
+                    <div
+                      key={index}
+                      className="flex flex-col items-center justify-center gap-1 border-r border-[color:var(--separator)] p-2"
+                      style={{ height: ROOM_HEADER_H }}
+                      aria-hidden
+                    >
+                      <div className="h-3 w-24 animate-pulse rounded-full bg-default" />
+                      <div className="h-2.5 w-14 animate-pulse rounded-full bg-default" />
                     </div>
-                    {cap && (
-                      <div className="flex items-center gap-0.5 text-[10px] text-default-500">
-                        <span>
-                          {tr(cap.labelKey)} ({cap.range}
-                        </span>
-                        <PersonFill className="shrink-0" width={10} height={10} />
-                        <span>)</span>
+                  ))
+                ) : (
+                  <div style={{ height: ROOM_HEADER_H }} />
+                )
+              ) : (
+                rooms.map((r) => {
+                  const isFavorite = favoriteEmails.has(r.email.toLowerCase());
+                  const size = capacitySize(r);
+                  const cap = size ? CAPACITY_LABEL[size] : null;
+                  return (
+                    <div
+                      key={r.email}
+                      className="flex flex-col items-center justify-center gap-1 border-r border-[color:var(--separator)] p-2"
+                      style={{ height: ROOM_HEADER_H }}
+                    >
+                      <div className="flex w-full items-center justify-center gap-1">
+                        {isFavorite && (
+                          <HeartFill className="shrink-0 text-[#f97316]" width={14} height={14} />
+                        )}
+                        <p
+                          className="truncate text-xs font-semibold text-default-700"
+                          title={r.name}
+                        >
+                          {r.name}
+                        </p>
                       </div>
-                    )}
-                  </div>
-                );
-              })}
+                      {cap && (
+                        <div className="flex items-center gap-0.5 text-[10px] text-default-500">
+                          <span>
+                            {tr(cap.labelKey)} ({cap.range}
+                          </span>
+                          <PersonFill className="shrink-0" width={10} height={10} />
+                          <span>)</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
             </div>
 
             {/* Rows */}
@@ -897,7 +969,33 @@ export function BrowseRooms({
                       )}
                     </div>
 
-                  {rooms.map((r) => {
+                  {loadingRooms ? (
+                    columnCount > 0 ? (
+                      Array.from({ length: columnCount }).map((_, index) => (
+                        <div
+                          key={index}
+                          aria-disabled
+                          className={`border-r border-t border-[color:var(--separator)] ${
+                            outsideWindow
+                              ? "bg-[var(--background-secondary)] dark:bg-[#14171e]"
+                              : "bg-white dark:bg-[#0c0e12]"
+                          }`}
+                          style={{ height: SLOT_H }}
+                        />
+                      ))
+                    ) : (
+                      <div
+                        aria-disabled
+                        className={`border-t border-[color:var(--separator)] ${
+                          outsideWindow
+                            ? "bg-[var(--background-secondary)] dark:bg-[#14171e]"
+                            : "bg-white dark:bg-[#0c0e12]"
+                        }`}
+                        style={{ height: SLOT_H }}
+                      />
+                    )
+                  ) : (
+                    rooms.map((r) => {
                     // Outside the selected window → disabled, not bookable.
                     if (outsideWindow) {
                       return (
@@ -1137,7 +1235,8 @@ export function BrowseRooms({
                         </div>
                       </div>
                     );
-                  })}
+                    })
+                  )}
                 </div>
               );
             })}

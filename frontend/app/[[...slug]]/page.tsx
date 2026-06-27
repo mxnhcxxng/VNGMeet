@@ -59,6 +59,40 @@ import { usePathname } from "next/navigation";
 // Keep the browse range aligned with backend availability_days.
 const RANGE_DAYS = 16;
 const BROWSE_REFRESH_INTERVAL_MS = 2 * 60 * 1000;
+const ROOM_LAYOUT_COUNTS_BY_OFFICE = {
+  campus: 32,
+  sala: 4,
+  tnr: 10,
+};
+
+function formatLocalIsoDate(date: Date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function buildBrowsePlaceholderData(): ScheduleResponse {
+  const today = new Date();
+  const days = Array.from({ length: RANGE_DAYS }, (_, index) => {
+    const date = new Date(today);
+    date.setDate(today.getDate() + index);
+    return formatLocalIsoDate(date);
+  });
+  const times = Array.from({ length: 18 }, (_, index) => {
+    const minutes = 9 * 60 + index * 30;
+    return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(
+      minutes % 60,
+    ).padStart(2, "0")}`;
+  });
+  return {
+    timezone: "Asia/Ho_Chi_Minh",
+    slotMinutes: 30,
+    days,
+    times,
+    rooms: [],
+  };
+}
 
 // URL <-> view mapping. The whole app lives on a single client page, so instead
 // of separate route files we mirror the active `view` into the path (and a
@@ -960,7 +994,9 @@ export default function Home() {
           ? t("session.expiredToast")
           : e.message,
       );
-      if (e.message === "UNAUTHENTICATED") setMe({ authenticated: false });
+      if (e.message === "UNAUTHENTICATED") {
+        setMe({ authenticated: false });
+      }
     } finally {
       setRefreshing(false);
     }
@@ -1058,6 +1094,7 @@ export default function Home() {
     clearChatMessagesCache();
     setSessionExpiredOpen(false);
     setMe({ authenticated: false });
+    setData(null);
     setChatThreads([]);
     setActiveThreadId(null);
   };
@@ -1102,6 +1139,41 @@ export default function Home() {
   };
 
   if (loading) {
+    if (initialRoute.view === "browse") {
+      return (
+        <TokenExpiryProvider fallbackExpiresAt={null}>
+          <div className="flex h-screen gap-2 overflow-hidden bg-[#f0f0f1] p-2 dark:bg-[#13161b]">
+            <aside className="flex w-[280px] shrink-0 flex-col rounded-2xl bg-white p-4 shadow-sm dark:bg-[#0c0e12]">
+              <div className="mb-8 flex items-center gap-3">
+                <div className="h-9 w-9 animate-pulse rounded-full bg-default" />
+                <div className="h-5 w-28 animate-pulse rounded-full bg-default" />
+              </div>
+              <div className="space-y-2">
+                {Array.from({ length: 5 }).map((_, index) => (
+                  <div
+                    key={index}
+                    className="h-10 animate-pulse rounded-full bg-default"
+                  />
+                ))}
+              </div>
+              <div className="mt-auto h-12 animate-pulse rounded-full bg-default" />
+            </aside>
+            <main className="min-w-0 flex-1 overflow-hidden rounded-2xl bg-white shadow-sm dark:bg-[#0c0e12]">
+              <BrowseRooms
+                data={buildBrowsePlaceholderData()}
+                dayIndex={dayIndex}
+                setDayIndex={(fn) => setDayIndex((n) => fn(n))}
+                refreshing={false}
+                onRefresh={() => {}}
+                loadingRooms
+                roomCountsByOffice={ROOM_LAYOUT_COUNTS_BY_OFFICE}
+              />
+            </main>
+          </div>
+        </TokenExpiryProvider>
+      );
+    }
+
     return (
       <div className="flex h-screen flex-col items-center justify-center gap-3">
         <Spinner />
@@ -1257,13 +1329,27 @@ export default function Home() {
                   "")
               }
             />
-          ) : refreshing && !data ? (
-            <div className="flex h-full flex-col items-center justify-center gap-3">
-              <Spinner />
-              <span className="text-sm text-default-500">
-                {t("browse.scanning")}
-              </span>
-            </div>
+          ) : !data ? (
+            <BrowseRooms
+              data={buildBrowsePlaceholderData()}
+              dayIndex={dayIndex}
+              setDayIndex={(fn) => setDayIndex((n) => fn(n))}
+              refreshing={refreshing}
+              onRefresh={loadSchedule}
+              userOffice={me.profile?.office}
+              userBuilding={me.profile?.building}
+              userFloor={me.profile?.floor}
+              userDomain={
+                me.profile?.email_username ||
+                ([me.profile?.email, me.email, me.username]
+                  .find((value) => value?.includes("@"))
+                  ?.split("@", 1)[0] ??
+                  "")
+              }
+              preferredRooms={me.profile?.preferred_rooms ?? []}
+              loadingRooms
+              roomCountsByOffice={ROOM_LAYOUT_COUNTS_BY_OFFICE}
+            />
           ) : !data?.rooms.length ? (
             <div className="flex h-full items-center justify-center text-default-500">
               {t("browse.noMeetingRooms")}
