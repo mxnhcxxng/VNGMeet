@@ -528,9 +528,11 @@ export function SettingsScreen({
                 isSelected={bookWithoutConfirmation}
                 onChange={setBookWithoutConfirmation}
               >
-                <Switch.Control>
-                  <Switch.Thumb />
-                </Switch.Control>
+                <Switch.Content>
+                  <Switch.Control>
+                    <Switch.Thumb />
+                  </Switch.Control>
+                </Switch.Content>
               </Switch>
               <span className="text-sm font-medium text-[#18181b] dark:text-[#f7f7f7]">
                 {bookWithoutConfirmation

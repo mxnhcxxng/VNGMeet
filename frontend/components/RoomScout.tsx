@@ -4,14 +4,15 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import {
   Button,
+  Calendar,
   Checkbox,
   Chip,
-  DateField,
-  Description,
+  DatePicker,
   Label,
   ListBox,
   ListBoxItem,
@@ -24,6 +25,7 @@ import {
 import { parseDate } from "@internationalized/date";
 import { I18nProvider } from "react-aria-components";
 import {
+  Calendar as CalendarIcon,
   Check,
   ChevronLeft,
   ChevronRight,
@@ -434,6 +436,9 @@ function ScoutForm({
   const [saving, setSaving] = useState(false);
   // Re-evaluate the after-hours cutoff each minute so the form locks at 18:00.
   const [nowMs, setNowMs] = useState(() => Date.now());
+  // The custom DatePicker trigger has no DateInput for react-aria to anchor the
+  // popover against, so wire the trigger ref (matches BrowseRooms' date picker).
+  const dateTriggerRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     setOffice(userOffice || "");
@@ -533,26 +538,48 @@ function ScoutForm({
         />
 
         <I18nProvider locale="en-GB">
-          <DateField
-            fullWidth
-            aria-label={t("scout.date")}
-            value={parseDate(scoutDate)}
-            minValue={parseDate(today)}
-            maxValue={parseDate(maxScoutDate)}
-            onChange={(value) => {
-              if (value) setScoutDate(value.toString());
-            }}
-          >
+          <div className="flex flex-col gap-1.5">
             <Label>{t("scout.date")}</Label>
-            <DateField.Group variant="secondary">
-              <DateField.Input>
-                {(segment) => <DateField.Segment segment={segment} />}
-              </DateField.Input>
-            </DateField.Group>
-            <Description>
-              {t("scout.dateRangeNote", { date: formatDmy(maxScoutDate) })}
-            </Description>
-          </DateField>
+            <DatePicker
+              aria-label={t("scout.date")}
+              value={parseDate(scoutDate)}
+              minValue={parseDate(today)}
+              maxValue={parseDate(maxScoutDate)}
+              onChange={(value) => {
+                if (value) setScoutDate(value.toString());
+              }}
+            >
+              <DatePicker.Trigger
+                ref={dateTriggerRef}
+                className="flex min-h-9 w-full items-center gap-2 rounded-field bg-[var(--default)] px-3 py-2 text-sm font-medium text-[var(--foreground)] outline-none transition-colors hover:bg-[var(--default-hover)]"
+              >
+                <CalendarIcon width={16} height={16} className="shrink-0 text-default-500" />
+                <span className="flex-1 text-left">{formatDmy(scoutDate)}</span>
+              </DatePicker.Trigger>
+              <DatePicker.Popover triggerRef={dateTriggerRef} placement="bottom start" className="!max-w-none !min-w-fit w-fit">
+                <Calendar
+                  minValue={parseDate(today)}
+                  maxValue={parseDate(maxScoutDate)}
+                >
+                  <Calendar.Header>
+                    <Calendar.Heading className="text-left first-letter:uppercase" />
+                    <div className="flex items-center gap-1">
+                      <Calendar.NavButton slot="previous" />
+                      <Calendar.NavButton slot="next" />
+                    </div>
+                  </Calendar.Header>
+                  <Calendar.Grid>
+                    <Calendar.GridHeader>
+                      {(day) => <Calendar.HeaderCell>{day}</Calendar.HeaderCell>}
+                    </Calendar.GridHeader>
+                    <Calendar.GridBody>
+                      {(date) => <Calendar.Cell date={date} />}
+                    </Calendar.GridBody>
+                  </Calendar.Grid>
+                </Calendar>
+              </DatePicker.Popover>
+            </DatePicker>
+          </div>
         </I18nProvider>
 
         <div>
