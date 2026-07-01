@@ -36,6 +36,24 @@ PREP_LEAD_SECONDS = 30       # prep runs this long BEFORE FIRE_TIME
 FIRE_LEAD_SECONDS = 3        # fire job is scheduled this long BEFORE FIRE_TIME, then busy-waits
 CATCHUP_DELAY_SECONDS = 120  # catch-up runs this long AFTER FIRE_TIME
 
+# Send the POST this many milliseconds BEFORE FIRE_TIME so our meeting-request
+# LANDS in the room mailbox right as the slot opens. The room is grabbed by the
+# order requests arrive in ITS mailbox, not by when our POST returns — and the
+# request only reaches the room AFTER the whole send pipeline:
+#
+#   invite lands in room mailbox ≈ send + transit(~75ms) + event-create(~397ms) + transport
+#
+#   send_at = FIRE_TIME - SEND_LEAD_MS/1000
+#
+# So the lead should cover that whole pipeline (~450-500ms), not just network
+# transit. Measured evidence (one sample): the room's RBA evaluates asynchronously
+# ~8s later and checks the booking-window policy at THAT time, so landing the
+# invite a little early appears safe. This is UNVERIFIED at real midnight under
+# contention — sweep leads (0/150/300/450/600) at the 14-day edge and watch the
+# room's accepted/declined + status.time to find the real safe ceiling before
+# trusting a large value. 0 disables early sending (fire exactly at FIRE_TIME).
+SEND_LEAD_MS = 400
+
 _DEFAULT_HMS = (0, 0, 0)
 
 

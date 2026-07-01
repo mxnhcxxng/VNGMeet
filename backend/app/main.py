@@ -71,9 +71,10 @@ async def lifespan(app: FastAPI):
             misfire_grace_time=600,
         )
         log.warning(
-            "Scheduled-booking jobs registered (fire_time=%s): prep=%02d:%02d:%02d, "
-            "fire=%02d:%02d:%02d, catchup=%02d:%02d:%02d",
+            "Scheduled-booking jobs registered (fire_time=%s, send_lead=%dms): "
+            "prep=%02d:%02d:%02d, fire=%02d:%02d:%02d, catchup=%02d:%02d:%02d",
             booking_schedule.FIRE_TIME,
+            booking_schedule.SEND_LEAD_MS,
             prep_h, prep_m, prep_s,
             fire_h, fire_m, fire_s,
             cu_h, cu_m, cu_s,

@@ -1078,21 +1078,31 @@ async def fire_scheduled_bookings() -> dict:
     client = _GRAPH_WARM_CLIENT
     prepared_for = _PREPARED_FOR_DATE
 
-    # Busy-wait to the exact fire instant. The fire job is scheduled a few seconds
-    # early; coarse-sleep to ~30ms before, then 1ms steps for precision.
+    # Busy-wait to the send moment. We deliberately send SEND_LEAD_MS *before* the
+    # slot opens so the request lands in the room mailbox right as it becomes
+    # bookable (the network transit is paid on the way there). The fire job is
+    # scheduled a few seconds early; coarse-sleep to ~30ms before the send moment,
+    # then 1ms steps for precision.
     now = datetime.now(tz)
-    fire_at = booking_schedule.next_fire_instant(now)
-    wait = (fire_at - now).total_seconds()
-    target = fire_at if 0 < wait <= 120 else None  # None => already at/past fire time: fire now
+    fire_at = booking_schedule.next_fire_instant(now)  # slot-open instant (e.g. 00:00:00)
+    lead = timedelta(milliseconds=max(0, booking_schedule.SEND_LEAD_MS))
+    send_at = fire_at - lead
+    wait = (send_at - now).total_seconds()
+    target = send_at if 0 < wait <= 120 else None  # None => already at/past send time: fire now
     if target is not None:
         coarse = (target - datetime.now(tz)).total_seconds() - 0.03
         if coarse > 0:
             await asyncio.sleep(coarse)
         while datetime.now(tz) < target:
             await asyncio.sleep(0.001)
-    fire_instant = target or datetime.now(tz)
+    # Offsets are measured against the slot-open instant, so an early send shows as
+    # a NEGATIVE offset (e.g. "-59.4ms" = the POST left 59ms before the slot opened).
+    fire_instant = fire_at
+    send_moment = target or datetime.now(tz)
 
-    today_iso = datetime.now(tz).date().isoformat()
+    # Match the staged batch to the calendar day the SLOT opens on — not
+    # datetime.now(), which is still the previous day when we send early.
+    today_iso = fire_at.date().isoformat()
     if not prepared or client is None or prepared_for != today_iso:
         log.warning(
             "fire_scheduled_bookings: no staged batch for %s (prepared_for=%s) "
@@ -1113,7 +1123,7 @@ async def fire_scheduled_bookings() -> dict:
             ev = await graph.post_event(client, item["token"], item["body"], settings.timezone)
             dur_ms = (time.perf_counter() - p0) * 1000
             log.warning(
-                "scheduled booking %s POST sent +%.1fms, ok in %.0fms (room=%s)",
+                "scheduled booking %s POST sent %+.1fms (rel slot-open), ok in %.0fms (room=%s)",
                 item["activity_id"],
                 offset_ms,
                 dur_ms,
@@ -1123,7 +1133,7 @@ async def fire_scheduled_bookings() -> dict:
         except Exception as e:  # noqa: BLE001 - keep firing the rest of the batch
             dur_ms = (time.perf_counter() - p0) * 1000
             log.warning(
-                "scheduled booking %s POST sent +%.1fms, FAILED in %.0fms: %s",
+                "scheduled booking %s POST sent %+.1fms (rel slot-open), FAILED in %.0fms: %s",
                 item["activity_id"],
                 offset_ms,
                 dur_ms,
@@ -1132,8 +1142,11 @@ async def fire_scheduled_bookings() -> dict:
             return {"item": item, "ok": False, "error": str(e), "offset_ms": offset_ms, "dur_ms": dur_ms}
 
     log.warning(
-        "fire_scheduled_bookings: firing %s booking(s) at %s",
+        "fire_scheduled_bookings: firing %s booking(s), send_lead=%dms, "
+        "send_at=%s (slot opens %s)",
         len(prepared),
+        booking_schedule.SEND_LEAD_MS,
+        send_moment.isoformat(),
         fire_instant.isoformat(),
     )
     batch0 = time.perf_counter()
@@ -1147,7 +1160,7 @@ async def fire_scheduled_bookings() -> dict:
     offsets = [r["offset_ms"] for r in results if "offset_ms" in r]
     log.warning(
         "fire_scheduled_bookings finished: processed=%s failed=%s "
-        "(first POST +%.1fms, last POST +%.1fms, batch=%.0fms)",
+        "(first POST %+.1fms, last POST %+.1fms, batch=%.0fms)",
         processed,
         failed,
         min(offsets) if offsets else 0.0,
