@@ -52,7 +52,7 @@ CATCHUP_DELAY_SECONDS = 120  # catch-up runs this long AFTER FIRE_TIME
 # contention — sweep leads (0/150/300/450/600) at the 14-day edge and watch the
 # room's accepted/declined + status.time to find the real safe ceiling before
 # trusting a large value. 0 disables early sending (fire exactly at FIRE_TIME).
-SEND_LEAD_MS = 400
+SEND_LEAD_MS = 100
 
 _DEFAULT_HMS = (0, 0, 0)
 

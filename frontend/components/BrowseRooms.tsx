@@ -1303,13 +1303,16 @@ export function BrowseRooms({
           onRefresh();
           loadMyBookings();
           // Instant bookings start "pending" until the room mailbox responds.
-          // Re-sync ~30s later (forced past the throttle) so the status flips to
-          // ok/failed and the grid/history reflect the room's decision.
-          window.setTimeout(() => {
-            clearBookingHistoryCache();
-            onRefresh({ force: true });
-            loadMyBookings();
-          }, 30000);
+          // The room accepts/declines asynchronously (usually seconds, sometimes
+          // longer), so re-sync a few times (forced past the throttle) to catch
+          // its decision and flip the status to success/failed on the grid/history.
+          for (const delay of [15000, 45000, 90000]) {
+            window.setTimeout(() => {
+              clearBookingHistoryCache();
+              onRefresh({ force: true });
+              loadMyBookings();
+            }, delay);
+          }
         }}
       />
 

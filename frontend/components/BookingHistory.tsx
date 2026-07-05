@@ -29,14 +29,16 @@ const STATUS_COLOR: Record<
   Booking["status"],
   "success" | "warning" | "danger" | "default"
 > = {
-  ok: "success",
+  success: "success",
+  ok: "warning",
   pending: "warning",
   failed: "danger",
   canceled: "default",
 };
 
 const STATUS_LABEL_KEY: Record<Booking["status"], TranslationKey> = {
-  ok: "bh.statusSuccess",
+  success: "bh.statusSuccess",
+  ok: "bh.statusAwaiting",
   pending: "bh.statusPending",
   failed: "bh.statusFailed",
   canceled: "bh.statusCanceled",
@@ -161,7 +163,8 @@ export function BookingHistory() {
   ];
   const STATUS_OPTS = [
     { value: "all", label: t("bh.all") },
-    { value: "ok", label: t("bh.statusSuccess") },
+    { value: "success", label: t("bh.statusSuccess") },
+    { value: "ok", label: t("bh.statusAwaiting") },
     { value: "pending", label: t("bh.statusPending") },
     { value: "failed", label: t("bh.statusFailed") },
     { value: "canceled", label: t("bh.statusCanceled") },

@@ -729,8 +729,8 @@ async def sync_my_calendar(
         ).execute()
 
     # 3) Reconcile booking-history rows against the live calendar, by start slot:
-    #      - room accepted      -> promote pending to ok (ok stays ok)
-    #      - room still awaiting -> keep pending / keep ok (never downgrade ok)
+    #      - room accepted      -> promote pending/ok to success (success stays success)
+    #      - room still awaiting -> keep pending / keep ok (never downgrade)
     #      - room declined       -> failed (room_declined)
     #      - event gone          -> canceled (grace-gated; see below)
     #    Only rows with a real graph_event_id are touched, so scheduled bookings that
@@ -744,7 +744,7 @@ async def sync_my_calendar(
                 sb.table("user_activity")
                 .select("id, room_email, date, start_time, status, graph_event_id, created_at, processed_at")
                 .eq("user_id", me)
-                .in_("status", ["ok", "pending"])
+                .in_("status", ["ok", "pending", "success"])
                 .gte("date", window_dates[0])
                 .lte("date", window_dates[-1])
                 .execute()
@@ -757,7 +757,7 @@ async def sync_my_calendar(
             # grace gates ONLY the "canceled" transition (the destructive one); accept
             # / decline outcomes are sticky and may apply immediately.
             cutoff = datetime.now(tz) - timedelta(minutes=5)
-            ok_ids: list[str] = []
+            success_ids: list[str] = []
             cancel_ids: list[str] = []
             declined_ids: list[str] = []
             for r in rows:
@@ -770,10 +770,10 @@ async def sync_my_calendar(
                 key = (room_id, str(r.get("date")), start_idx)
                 cur = r.get("status")
                 if key in mine_owner_now:
-                    # Alive (accepted or awaiting). Promote pending->ok on accept;
-                    # never downgrade a confirmed ok back to pending.
-                    if cur == "pending" and key in mine_accepted_now:
-                        ok_ids.append(r["id"])
+                    # Alive (accepted or awaiting). Promote pending/ok->success on
+                    # accept; never downgrade a confirmed success.
+                    if key in mine_accepted_now and cur in ("pending", "ok"):
+                        success_ids.append(r["id"])
                 elif key in mine_declined_now:
                     declined_ids.append(r["id"])
                 else:
@@ -789,11 +789,11 @@ async def sync_my_calendar(
                     if stamps and max(stamps) > cutoff:
                         continue  # too fresh to trust as deleted (propagation lag)
                     cancel_ids.append(r["id"])
-            if ok_ids:
-                sb.table("user_activity").update({"status": "ok"}).in_(
-                    "id", ok_ids
+            if success_ids:
+                sb.table("user_activity").update({"status": "success"}).in_(
+                    "id", success_ids
                 ).execute()
-                promoted = len(ok_ids)
+                promoted = len(success_ids)
             if cancel_ids:
                 sb.table("user_activity").update({"status": "canceled"}).in_(
                     "id", cancel_ids

@@ -158,7 +158,7 @@ export interface Booking {
   subject?: string | null;
   attendees?: string[] | null;
   body?: string | null;
-  status: "ok" | "failed" | "pending" | "canceled";
+  status: "ok" | "failed" | "pending" | "canceled" | "success";
   web_link?: string | null;
   created_at: string;
 }

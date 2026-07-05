@@ -822,7 +822,7 @@ async def delete_booking(request: Request, booking_id: str):
 
     row = _fetch_own_booking(user_profile_id, booking_id)
     is_scheduled = _booking_type_for_db(row.get("booking_type") or "") == "scheduled"
-    is_active = row.get("status") in ("ok", "pending")
+    is_active = row.get("status") in ("ok", "pending", "success")
     event_id = (row.get("graph_event_id") or "").strip()
 
     # Actually on the calendar → cancel the real event first. A real event exists
@@ -846,7 +846,7 @@ async def delete_booking(request: Request, booking_id: str):
         raise HTTPException(500, f"Could not cancel booking: {e}")
 
     # Release the slots this booking occupied in the availability cache.
-    if row.get("status") in ("ok", "pending"):
+    if row.get("status") in ("ok", "pending", "success"):
         _release_room_availability_owner(
             user_profile_id,
             row["room_email"],

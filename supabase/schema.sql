@@ -256,7 +256,7 @@ create table if not exists user_activity (
   created_at timestamptz not null default now(),
   constraint user_activity_booking_type_check check (booking_type in ('instant', 'scheduled')),
   constraint user_activity_method_check check (method in ('manual', 'chatbot')),
-  constraint user_activity_status_check check (status in ('ok', 'failed', 'pending', 'canceled'))
+  constraint user_activity_status_check check (status in ('ok', 'failed', 'pending', 'canceled', 'success'))
 );
 alter table user_activity add column if not exists auth_user_id uuid references auth.users on delete set null;
 alter table user_activity add column if not exists graph_access_token text;
@@ -281,7 +281,7 @@ alter table user_activity
 alter table user_activity
   drop constraint if exists user_activity_status_check;
 alter table user_activity
-  add constraint user_activity_status_check check (status in ('ok', 'failed', 'pending', 'canceled'));
+  add constraint user_activity_status_check check (status in ('ok', 'failed', 'pending', 'canceled', 'success'));
 create index if not exists idx_user_activity_user_created_at
   on user_activity (user_id, created_at desc);
 create index if not exists idx_user_activity_scheduled_pending
