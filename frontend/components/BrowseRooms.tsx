@@ -94,6 +94,20 @@ function formatDatePickerLabel(iso: string, locale: string) {
   return `${formatWeekdayLabel(iso, locale)}, ${formatDmy(iso)}`;
 }
 
+// True for Saturday/Sunday. `iso` is a "YYYY-MM-DD" calendar date.
+function isWeekendIso(iso: string) {
+  const day = new Date(`${iso}T00:00:00`).getDay();
+  return day === 0 || day === 6;
+}
+
+// Matches the normalized weekday header labels for the weekend columns
+// ("CN"/"T7" in vi, "Sat"/"Sun" in en).
+function isWeekendHeaderLabel(label: string) {
+  return ["sat", "sun", "cn", "t7"].includes(
+    label.trim().toLowerCase().slice(0, 3),
+  );
+}
+
 // Event palettes lifted from the design's utility colour ramps.
 const EVENT_BOOKED = {
   bg: "var(--event-booked-bg)",
@@ -749,6 +763,7 @@ export function BrowseRooms({
               </DatePicker.Trigger>
               <DatePicker.Popover triggerRef={dateTriggerRef} className="!max-w-none w-fit">
                 <Calendar
+                  firstDayOfWeek="mon"
                   minValue={parseDate(data.days[0])}
                   maxValue={parseDate(data.days[maxDayIndex])}
                 >
@@ -761,18 +776,31 @@ export function BrowseRooms({
                   </Calendar.Header>
                   <Calendar.Grid>
                     <Calendar.GridHeader>
-                      {(day) => (
-                        <Calendar.HeaderCell>
-                          {formatCalendarHeaderDay(day, datePickerLocale)}
-                        </Calendar.HeaderCell>
-                      )}
+                      {(day) => {
+                        const label = formatCalendarHeaderDay(day, datePickerLocale);
+                        return (
+                          <Calendar.HeaderCell
+                            className={isWeekendHeaderLabel(label) ? "text-danger" : undefined}
+                          >
+                            {label}
+                          </Calendar.HeaderCell>
+                        );
+                      }}
                     </Calendar.GridHeader>
                     <Calendar.GridBody>
                       {(date) => (
                         <Calendar.Cell date={date}>
-                          {({ formattedDate }) => (
+                          {({ formattedDate, isSelected, isDisabled }) => (
                             <>
-                              {formattedDate}
+                              <span
+                                className={
+                                  isWeekendIso(date.toString()) && !isSelected && !isDisabled
+                                    ? "text-danger"
+                                    : undefined
+                                }
+                              >
+                                {formattedDate}
+                              </span>
                               {bookedDates.has(date.toString()) && (
                                 <Calendar.CellIndicator className="!bg-green-500" />
                               )}

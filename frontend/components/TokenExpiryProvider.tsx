@@ -43,9 +43,13 @@ export function useTokenExpiry(): TokenExpiryValue {
 
 export function TokenExpiryProvider({
   fallbackExpiresAt,
+  onExpired,
   children,
 }: {
   fallbackExpiresAt?: number | null;
+  // Called once the token actually lapses (badge countdown hits zero). The app
+  // uses this to show the "session expired" prompt and sign the user out.
+  onExpired?: () => void;
   children: React.ReactNode;
 }) {
   // Live Supabase session expiry (auto-refreshed) takes precedence over the
@@ -73,6 +77,30 @@ export function TokenExpiryProvider({
   }, []);
 
   const expiresAt = sessionExpiresAt ?? fallbackExpiresAt ?? null;
+
+  // Fire `onExpired` the moment the token reaches its expiry. Supabase
+  // auto-refresh pushes `expiresAt` forward before it lapses (re-running this
+  // effect and clearing the timer), so this only triggers when the session can
+  // no longer be refreshed. The +1s grace + re-check guards against a race with
+  // an in-flight refresh. Kept in a ref so a changing callback identity doesn't
+  // reset the timer.
+  const onExpiredRef = useRef(onExpired);
+  onExpiredRef.current = onExpired;
+  useEffect(() => {
+    if (expiresAt === null) return;
+    const fire = () => {
+      // Skip if a refresh moved the deadline into the future in the meantime.
+      if (expiresAt - Math.floor(Date.now() / 1000) > 0) return;
+      onExpiredRef.current?.();
+    };
+    const msUntil = expiresAt * 1000 - Date.now() + 1000;
+    if (msUntil <= 0) {
+      fire();
+      return;
+    }
+    const timer = setTimeout(fire, msUntil);
+    return () => clearTimeout(timer);
+  }, [expiresAt]);
 
   const getRemainingSeconds = useCallback(() => {
     if (expiresAt === null) return null;

@@ -322,14 +322,6 @@ export function Sidebar({
         </button>
         <button
           type="button"
-          onClick={() => onChange("bookingHistory")}
-          className={`${ROW} ${view === "bookingHistory" ? "bg-[var(--default)]" : "hover:bg-[#f5f5f5] dark:hover:bg-[#22262f]"}`}
-        >
-          <ClockArrowRotateLeft width={16} height={16} />
-          {t("sidebar.bookingHistory")}
-        </button>
-        <button
-          type="button"
           onClick={() => onChange("roomScout")}
           className={`${ROW} ${view === "roomScout" ? "bg-[var(--default)]" : "hover:bg-[#f5f5f5] dark:hover:bg-[#22262f]"}`}
         >
@@ -341,6 +333,14 @@ export function Sidebar({
               <span className="relative inline-flex size-2 rounded-full bg-[#f05a22]" />
             </span>
           )}
+        </button>
+        <button
+          type="button"
+          onClick={() => onChange("bookingHistory")}
+          className={`${ROW} ${view === "bookingHistory" ? "bg-[var(--default)]" : "hover:bg-[#f5f5f5] dark:hover:bg-[#22262f]"}`}
+        >
+          <ClockArrowRotateLeft width={16} height={16} />
+          {t("sidebar.bookingHistory")}
         </button>
       </div>
 

@@ -108,6 +108,20 @@ function formatDmy(value: string) {
   return year && month && day ? `${day}/${month}/${year}` : value;
 }
 
+// True for Saturday/Sunday. `iso` is a "YYYY-MM-DD" calendar date.
+function isWeekendIso(iso: string) {
+  const day = new Date(`${iso}T00:00:00`).getDay();
+  return day === 0 || day === 6;
+}
+
+// Weekday header labels are short names; treat Sat/Sun (any of our locales) as
+// weekend so they can be tinted like the day cells.
+function isWeekendHeaderLabel(label: string) {
+  return ["sat", "sun", "cn", "t7"].includes(
+    label.trim().toLowerCase().slice(0, 3),
+  );
+}
+
 // Default start = the nearest selectable slot at or after the current time.
 // Falls back to the first slot when the current time is past business hours.
 function defaultStartTime() {
@@ -558,6 +572,7 @@ function ScoutForm({
               </DatePicker.Trigger>
               <DatePicker.Popover triggerRef={dateTriggerRef} placement="bottom start" className="!max-w-none !min-w-fit w-fit">
                 <Calendar
+                  firstDayOfWeek="mon"
                   minValue={parseDate(today)}
                   maxValue={parseDate(maxScoutDate)}
                 >
@@ -570,10 +585,30 @@ function ScoutForm({
                   </Calendar.Header>
                   <Calendar.Grid>
                     <Calendar.GridHeader>
-                      {(day) => <Calendar.HeaderCell>{day}</Calendar.HeaderCell>}
+                      {(day) => (
+                        <Calendar.HeaderCell
+                          className={isWeekendHeaderLabel(day) ? "text-danger" : undefined}
+                        >
+                          {day}
+                        </Calendar.HeaderCell>
+                      )}
                     </Calendar.GridHeader>
                     <Calendar.GridBody>
-                      {(date) => <Calendar.Cell date={date} />}
+                      {(date) => (
+                        <Calendar.Cell date={date}>
+                          {({ formattedDate, isSelected, isDisabled }) => (
+                            <span
+                              className={
+                                isWeekendIso(date.toString()) && !isSelected && !isDisabled
+                                  ? "text-danger"
+                                  : undefined
+                              }
+                            >
+                              {formattedDate}
+                            </span>
+                          )}
+                        </Calendar.Cell>
+                      )}
                     </Calendar.GridBody>
                   </Calendar.Grid>
                 </Calendar>

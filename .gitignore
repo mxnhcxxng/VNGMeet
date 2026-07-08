@@ -2,6 +2,7 @@
 .env
 .env1
 .env2
+.env_copy
 .greennode.json
 
 # Python

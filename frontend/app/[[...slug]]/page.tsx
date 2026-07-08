@@ -1253,7 +1253,10 @@ export default function Home() {
   }
 
   return (
-    <TokenExpiryProvider fallbackExpiresAt={me.tokenExpiresAt}>
+    <TokenExpiryProvider
+      fallbackExpiresAt={me.tokenExpiresAt}
+      onExpired={showSessionExpiredModal}
+    >
     <div className="flex h-screen gap-2 overflow-hidden bg-[#f0f0f1] p-2 dark:bg-[#13161b]">
       <Sidebar
         view={view}
