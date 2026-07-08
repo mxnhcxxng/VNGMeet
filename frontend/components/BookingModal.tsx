@@ -41,7 +41,12 @@ export function BookingModal({
   endOptions: string[]; // selectable end times (after startTime)
   initialEndTime?: string | null; // end time pre-selected from a drag selection
   userDomain?: string; // email username, used to auto-fill the meeting title
-  onBooked: () => void;
+  onBooked: (info?: {
+    roomEmail: string;
+    date: string;
+    startTime: string;
+    endTime: string;
+  }) => void;
 }) {
   const t = useT();
   const { ensureTokenTime } = useTokenExpiry();
@@ -150,7 +155,12 @@ export function BookingModal({
       toast.success(t("booking.created"), {
         description: t("booking.createdDesc"),
       });
-      onBooked();
+      onBooked({
+        roomEmail: slot.roomEmail,
+        date: slot.date,
+        startTime: slot.startTime,
+        endTime,
+      });
       clearDraft();
       onClose();
     } catch (e: any) {

@@ -50,10 +50,20 @@ function timeToMinutes(time: string) {
   return h * 60 + m;
 }
 
+function minutesToTime(minutes: number) {
+  return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(
+    minutes % 60,
+  ).padStart(2, "0")}`;
+}
+
 function timeValueToLabel(value: { hour: number; minute: number } | null) {
   if (!value) return null;
   return `${String(value.hour).padStart(2, "0")}:${String(value.minute).padStart(2, "0")}`;
 }
+
+// Fallback frozen-order store used only if the parent doesn't supply one. The
+// parent (page.tsx) normally owns the store so it can clear it on tab change.
+const frozenRoomOrder = new Map<string, string[]>();
 
 function formatLocalIsoDate(date: Date) {
   const y = date.getFullYear();
@@ -234,6 +244,7 @@ export function BrowseRooms({
   preferredRooms = [],
   loadingRooms = false,
   roomCountsByOffice,
+  orderStore,
 }: {
   data: ScheduleResponse;
   dayIndex: number;
@@ -247,6 +258,10 @@ export function BrowseRooms({
   preferredRooms?: string[];
   loadingRooms?: boolean;
   roomCountsByOffice?: Record<string, number> | null;
+  // Frozen column order, owned by the parent so it survives a mid-refresh
+  // remount but is cleared when the user leaves the browse tab (so returning
+  // re-sorts). Falls back to a module map if not supplied.
+  orderStore?: Map<string, string[]>;
 }) {
   const { t: tr, language } = useLanguage();
   const datePickerLocale = language === "vi" ? "vi-VN" : "en-US";
@@ -335,6 +350,14 @@ export function BrowseRooms({
     return start === undefined ? null : { start, end: start + 1 };
   }, [businessIndexByTime, nowMinutes, selectedDay, slotMinutes, todayIso]);
 
+  // Optimistic "pending" cells shown instantly after a booking succeeds, before
+  // the availability re-fetch lands. Each entry paints the booked slots pending
+  // on the grid; it's ignored once real data shows the cell as taken and self-
+  // expires so a failed booking can't leave a phantom block forever.
+  const [optimisticPending, setOptimisticPending] = useState<
+    { roomEmail: string; date: string; indices: number[]; expires: number }[]
+  >([]);
+
   const rooms = useMemo(() => {
     const q = query.trim().toLowerCase();
     const favorites = new Set(preferredRooms.map((room) => room.trim().toLowerCase()));
@@ -347,12 +370,10 @@ export function BrowseRooms({
         .filter((r) => (r.meetings ?? []).some((m) => m.date === myMeetingDay))
         .map((r) => r.email.toLowerCase())
     );
-    return data.rooms
-      .filter(
-        (r) =>
-          (!office || r.office === office) &&
-          (!q || r.name.toLowerCase().includes(q))
-      )
+    // Ordering ignores the search query so the query only filters an already
+    // fixed order (clearing the search restores the same columns in place).
+    const fullSorted = data.rooms
+      .filter((r) => !office || r.office === office)
       .map((room, index) => ({ room, index }))
       .sort((a, b) => {
         const myMeetingDiff =
@@ -383,12 +404,87 @@ export function BrowseRooms({
         return a.room.name.localeCompare(b.room.name, "vi") || a.index - b.index;
       })
       .map(({ room }) => room);
+
+    // Pin the order for this office+day. First layout freezes it; later renders
+    // reuse the frozen order (any genuinely new rooms are appended in their
+    // freshly-sorted position). Rooms hidden by the current search stay in the
+    // frozen order so they reappear in place when the search clears.
+    const orderKey = `${office} ${dayIndex}`;
+    // Skip while showing loading placeholders so fake rooms never seed the order.
+    const store = orderStore ?? frozenRoomOrder;
+    const frozen = loadingRooms ? undefined : store.get(orderKey);
+    let canonical: ScheduleRoom[];
+    if (loadingRooms) {
+      canonical = fullSorted;
+    } else if (frozen) {
+      const byEmail = new Map(fullSorted.map((r) => [r.email, r]));
+      canonical = [];
+      const seen = new Set<string>();
+      for (const email of frozen) {
+        const room = byEmail.get(email);
+        if (room) {
+          canonical.push(room);
+          seen.add(email);
+        }
+      }
+      const appended: string[] = [];
+      for (const room of fullSorted) {
+        if (!seen.has(room.email)) {
+          canonical.push(room);
+          appended.push(room.email);
+        }
+      }
+      if (appended.length > 0) {
+        store.set(orderKey, [...frozen, ...appended]);
+      }
+    } else {
+      canonical = fullSorted;
+      store.set(
+        orderKey,
+        fullSorted.map((r) => r.email),
+      );
+    }
+
+    // Apply the search filter on top of the fixed order.
+    const sorted = q
+      ? canonical.filter((r) => r.name.toLowerCase().includes(q))
+      : canonical;
+
+    // Overlay optimistic pending slots onto free cells so a just-made booking
+    // shows immediately. Real data (once refreshed) marks the cell as taken, at
+    // which point the overlay is a no-op and the authoritative status wins.
+    const active = optimisticPending.filter((o) => o.expires > Date.now());
+    if (active.length === 0) return sorted;
+    return sorted.map((room) => {
+      const mine = active.filter((o) => o.roomEmail === room.email);
+      if (mine.length === 0) return room;
+      let grid = room.grid;
+      let cloned = false;
+      for (const o of mine) {
+        const di = data.days.indexOf(o.date);
+        if (di < 0) continue;
+        for (const bi of o.indices) {
+          const cur = grid[bi]?.[di];
+          if (cur === 0 || cur === 3) {
+            if (!cloned) {
+              grid = room.grid.map((row) => row.slice());
+              cloned = true;
+            }
+            // 3 = schedule-band free → 7 (pending schedule); else 6 (pending instant).
+            grid[bi][di] = cur === 3 ? 7 : 6;
+          }
+        }
+      }
+      return cloned ? { ...room, grid } : room;
+    });
   }, [
     currentRange,
     data.days,
     data.rooms,
     dayIndex,
+    loadingRooms,
     office,
+    optimisticPending,
     preferredRooms,
     query,
     userBuilding,
@@ -1326,7 +1422,31 @@ export function BrowseRooms({
         endOptions={endOptions}
         initialEndTime={initialEndTime}
         userDomain={userDomain}
-        onBooked={() => {
+        onBooked={(info) => {
+          // Paint the just-booked slots pending right away, before the refresh
+          // round-trip, so the block shows instantly while the room responds.
+          if (info) {
+            const indices: number[] = [];
+            for (
+              let m = timeToMinutes(info.startTime);
+              m < timeToMinutes(info.endTime);
+              m += slotMinutes
+            ) {
+              const bi = businessIndexByTime.get(minutesToTime(m));
+              if (bi !== undefined) indices.push(bi);
+            }
+            if (indices.length > 0) {
+              setOptimisticPending((prev) => [
+                ...prev.filter((o) => o.expires > Date.now()),
+                {
+                  roomEmail: info.roomEmail,
+                  date: info.date,
+                  indices,
+                  expires: Date.now() + 120000,
+                },
+              ]);
+            }
+          }
           clearBookingHistoryCache();
           onRefresh();
           loadMyBookings();

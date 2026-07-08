@@ -837,6 +837,14 @@ export default function Home() {
   const [leaveSaving, setLeaveSaving] = useState(false);
   const settingsDiscardRef = useRef<(() => void) | null>(null);
   const settingsSaveRef = useRef<(() => Promise<boolean>) | null>(null);
+  // Frozen browse column order. Owned here so it survives a mid-refresh remount
+  // of BrowseRooms (e.g. the grid briefly emptying during a forced post-booking
+  // refresh) yet is cleared whenever the user leaves the browse tab, so coming
+  // back re-sorts. It only stays put while the user remains on browse.
+  const browseOrderRef = useRef<Map<string, string[]>>(new Map());
+  useEffect(() => {
+    if (view !== "browse") browseOrderRef.current.clear();
+  }, [view]);
 
   // Run a navigation, but if there are unsaved Settings changes, stash it and
   // surface the confirm modal instead.
@@ -1352,6 +1360,7 @@ export default function Home() {
               preferredRooms={me.profile?.preferred_rooms ?? []}
               loadingRooms
               roomCountsByOffice={ROOM_LAYOUT_COUNTS_BY_OFFICE}
+              orderStore={browseOrderRef.current}
             />
           ) : !data?.rooms.length ? (
             <div className="flex h-full items-center justify-center text-default-500">
@@ -1375,6 +1384,7 @@ export default function Home() {
                   "")
               }
               preferredRooms={me.profile?.preferred_rooms ?? []}
+              orderStore={browseOrderRef.current}
             />
           )}
         </div>
