@@ -50,6 +50,10 @@ const PAGE_SIZE_OPTS = [
   { value: "50", label: "50" },
 ];
 
+// Background poll cadence. Matches the backend calendar-sync throttle (~1/min),
+// so polling faster wouldn't surface fresher room responses anyway.
+const REFRESH_INTERVAL_MS = 60 * 1000;
+
 // Module-level cache so switching tabs doesn't refetch every time. Survives
 // remounts within a session; cleared on full reload. Call clearBookingHistoryCache()
 // on logout to drop another user's data.
@@ -256,6 +260,22 @@ export function BookingHistory() {
     }
   }, []);
 
+  // Silent background refetch — updates the rows in place without the skeleton or
+  // the dimmed-loading state, so it never interrupts what the user is doing.
+  const silentRefresh = useCallback(async () => {
+    const s = sortRef.current;
+    try {
+      const res = await api.myBookings({
+        sort: s.column,
+        order: s.direction === "ascending" ? "asc" : "desc",
+      });
+      cachedBookings = res.bookings;
+      setBookings(res.bookings);
+    } catch {
+      /* keep showing current rows; manual refresh surfaces errors */
+    }
+  }, []);
+
   useEffect(() => {
     if (cachedBookings === null) {
       load();
@@ -265,20 +285,24 @@ export function BookingHistory() {
     // the background (no spinner) so statuses changed server-side — e.g. a booking
     // deleted in Outlook and auto-canceled by the calendar sync — show up on every
     // visit to this tab without needing a manual refresh.
-    const s = sortRef.current;
-    api
-      .myBookings({
-        sort: s.column,
-        order: s.direction === "ascending" ? "asc" : "desc",
-      })
-      .then((res) => {
-        cachedBookings = res.bookings;
-        setBookings(res.bookings);
-      })
-      .catch(() => {
-        /* keep showing cached rows; manual refresh surfaces errors */
-      });
-  }, [load]);
+    silentRefresh();
+  }, [load, silentRefresh]);
+
+  // Keep the list fresh while the tab stays open: async room responses (pending
+  // -> success/failed, declined -> canceled) land without a manual refresh. Poll
+  // on an interval and whenever the tab regains visibility, but only while
+  // visible so a backgrounded tab doesn't hammer the API.
+  useEffect(() => {
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") silentRefresh();
+    };
+    const interval = window.setInterval(refreshWhenVisible, REFRESH_INTERVAL_MS);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, [silentRefresh]);
 
   // Load room thumbnails once so the edit card can render the room photo.
   useEffect(() => {
