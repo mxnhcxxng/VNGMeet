@@ -17,7 +17,6 @@ import {
   ListBox,
   ListBoxItem,
   Select,
-  Spinner,
   Tag,
   TagGroup,
   toast,
@@ -147,6 +146,17 @@ function pickRandom<T>(list: T[]): T | undefined {
   return list[Math.floor(Math.random() * list.length)];
 }
 
+// Module-level cache so switching tabs doesn't reload the scout screen every
+// time. Survives remounts within a session; cleared on full reload. Call
+// clearRoomScoutCache() on logout to drop another user's data.
+let cachedScouts: RoomScoutRow[] | null = null;
+let cachedCanSendMail = true;
+
+export function clearRoomScoutCache() {
+  cachedScouts = null;
+  cachedCanSendMail = true;
+}
+
 export function RoomScout({
   userName,
   userOffice,
@@ -161,13 +171,17 @@ export function RoomScout({
   onActiveChange?: (active: boolean) => void;
 }) {
   const t = useT();
-  const [scouts, setScouts] = useState<RoomScoutRow[]>([]);
-  const [canSendMail, setCanSendMail] = useState(true);
-  const [loading, setLoading] = useState(true);
+  const [scouts, setScouts] = useState<RoomScoutRow[]>(cachedScouts ?? []);
+  const [canSendMail, setCanSendMail] = useState(cachedCanSendMail);
+  // Only show the skeleton on the very first load; once cached, a tab switch
+  // renders the cached view instantly and revalidates silently in the background.
+  const [loading, setLoading] = useState(cachedScouts === null);
 
   const load = useCallback(async () => {
     try {
       const res = await api.roomScouts();
+      cachedScouts = res.scouts;
+      cachedCanSendMail = res.can_send_mail;
       setScouts(res.scouts);
       setCanSendMail(res.can_send_mail);
       onActiveChange?.(res.scouts.some((s) => s.status === "active"));
@@ -180,6 +194,10 @@ export function RoomScout({
     }
   }, [onActiveChange]);
 
+  // Stale-while-revalidate: render cached rows instantly (no skeleton) on a tab
+  // switch, then refetch in the background so an expired/cancelled scout still
+  // reconciles without a visible reload. The first ever load has no cache, so
+  // `loading` starts true and the skeleton shows until this resolves.
   useEffect(() => {
     load();
   }, [load]);
@@ -198,9 +216,7 @@ export function RoomScout({
       <div className="flex min-h-full w-full flex-col items-center justify-center px-6 py-10">
         <div className={`w-full ${showGuide ? "max-w-[640px]" : "max-w-[480px]"}`}>
           {loading ? (
-            <div className="flex justify-center py-10">
-              <Spinner />
-            </div>
+            <ScoutFormSkeleton />
           ) : activeScout ? (
             <ScoutingCard
               scout={activeScout}
@@ -423,6 +439,47 @@ function ScoutPermissionGuide({ userName }: { userName?: string }) {
             onPress={() => setStepIndex((i) => Math.min(total - 1, i + 1))}
           />
         </div>
+      </div>
+    </div>
+  );
+}
+
+// Loading placeholder for the scout screen. Mirrors ScoutForm's shape (the
+// default state once loading settles) so the layout doesn't jump when the real
+// form, scouting card, or permission guide takes over.
+function ScoutFormSkeleton() {
+  const Field = ({ labelWidth }: { labelWidth: string }) => (
+    <div className="flex flex-col gap-1.5">
+      <div className={`h-3 ${labelWidth} animate-pulse rounded-full bg-default`} />
+      <div className="h-9 w-full animate-pulse rounded-field bg-default" />
+    </div>
+  );
+  return (
+    <div aria-hidden>
+      <div className="mb-1 flex items-center gap-1.5">
+        <div className="size-[34px] animate-pulse rounded-full bg-default" />
+        <div className="size-7 animate-pulse rounded-full bg-default" />
+      </div>
+      <div className="mt-3 h-7 w-64 max-w-full animate-pulse rounded-full bg-default" />
+      <div className="mt-2 h-4 w-80 max-w-full animate-pulse rounded-full bg-default" />
+
+      <div className="mt-6 grid gap-4">
+        <Field labelWidth="w-16" />
+        <Field labelWidth="w-12" />
+        <div>
+          <div className="mb-1.5 h-3 w-28 animate-pulse rounded-full bg-default" />
+          <div className="grid grid-cols-2 gap-4">
+            <div className="h-9 w-full animate-pulse rounded-field bg-default" />
+            <div className="h-9 w-full animate-pulse rounded-field bg-default" />
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="size-4 animate-pulse rounded bg-default" />
+          <div className="h-3 w-44 animate-pulse rounded-full bg-default" />
+        </div>
+        <Field labelWidth="w-20" />
+        <Field labelWidth="w-24" />
+        <div className="mt-2 h-10 w-full animate-pulse rounded-full bg-default" />
       </div>
     </div>
   );

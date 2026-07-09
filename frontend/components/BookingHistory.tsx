@@ -9,7 +9,6 @@ import {
   ListBoxItem,
   Pagination,
   Select,
-  Spinner,
   Table,
   TableBody,
   TableCell,
@@ -400,10 +399,19 @@ export function BookingHistory() {
     safePage,
   ]);
 
-  // Show the big centered spinner only on the very first load. Subsequent
-  // refetches (sort / refresh) keep the existing rows on screen and just dim
-  // them, so the table doesn't flash an empty state on every sort.
+  // Show the skeleton table only on the very first load. Subsequent refetches
+  // (sort / refresh) keep the existing rows on screen and just dim them, so the
+  // table doesn't flash an empty state on every sort.
   const initialLoading = loading && bookings.length === 0;
+  // Placeholder rows for the loading skeleton — mirrors the page size (capped)
+  // so the table fills roughly the same height it will once data arrives.
+  const skeletonRows = useMemo(
+    () =>
+      Array.from({ length: Math.min(pageSize, 10) }, (_, i) => ({
+        id: `skeleton-${i}`,
+      })),
+    [pageSize]
+  );
 
   return (
     <div className="flex h-full flex-col gap-4 p-4">
@@ -453,9 +461,56 @@ export function BookingHistory() {
       )}
 
       {initialLoading ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-3">
-          <Spinner />
-          <span className="text-sm text-default-500">{t("bh.loading")}</span>
+        <div className="min-h-0 flex-1 overflow-auto" aria-hidden>
+          <Table variant="secondary">
+            <TableContent aria-label={t("bh.tableLabel")}>
+              <TableHeader>
+                <TableColumn id="date" isRowHeader>
+                  {t("bh.colDate")}
+                </TableColumn>
+                <TableColumn id="room">{t("bh.colRoom")}</TableColumn>
+                <TableColumn id="time">{t("bh.colTime")}</TableColumn>
+                <TableColumn id="subject">{t("bh.colSubject")}</TableColumn>
+                <TableColumn id="type">{t("bh.colType")}</TableColumn>
+                <TableColumn id="method">{t("bh.colMethod")}</TableColumn>
+                <TableColumn id="status">{t("bh.colStatus")}</TableColumn>
+                <TableColumn id="actions">{t("bh.colActions")}</TableColumn>
+              </TableHeader>
+              <TableBody items={skeletonRows}>
+                {(row) => (
+                  <TableRow id={row.id}>
+                    <TableCell>
+                      <div className="h-3 w-20 animate-pulse rounded-full bg-default" />
+                    </TableCell>
+                    <TableCell>
+                      <div className="h-3 w-28 animate-pulse rounded-full bg-default" />
+                    </TableCell>
+                    <TableCell>
+                      <div className="h-3 w-24 animate-pulse rounded-full bg-default" />
+                    </TableCell>
+                    <TableCell>
+                      <div className="h-3 w-40 animate-pulse rounded-full bg-default" />
+                    </TableCell>
+                    <TableCell>
+                      <div className="h-3 w-16 animate-pulse rounded-full bg-default" />
+                    </TableCell>
+                    <TableCell>
+                      <div className="h-3 w-16 animate-pulse rounded-full bg-default" />
+                    </TableCell>
+                    <TableCell>
+                      <div className="h-5 w-16 animate-pulse rounded-full bg-default" />
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-1">
+                        <div className="size-8 animate-pulse rounded-full bg-default" />
+                        <div className="size-8 animate-pulse rounded-full bg-default" />
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </TableContent>
+          </Table>
         </div>
       ) : (
         <>

@@ -53,7 +53,7 @@ import {
   BookingHistory,
   clearBookingHistoryCache,
 } from "@/components/BookingHistory";
-import { RoomScout } from "@/components/RoomScout";
+import { RoomScout, clearRoomScoutCache } from "@/components/RoomScout";
 import { usePathname } from "next/navigation";
 
 // Keep the browse range aligned with backend availability_days.
@@ -822,6 +822,9 @@ export default function Home() {
   const [data, setData] = useState<ScheduleResponse | null>(null);
   const [dayIndex, setDayIndex] = useState(0);
   const [chatThreads, setChatThreads] = useState<ChatThread[]>([]);
+  // Drives the sidebar's Recents skeleton: true until the first thread fetch
+  // settles, so we show placeholders instead of the "no chats" empty state.
+  const [chatThreadsLoading, setChatThreadsLoading] = useState(true);
   const [scoutingActive, setScoutingActive] = useState(false);
   const [profileOptions, setProfileOptions] = useState<UserProfileOptions | null>(null);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(
@@ -921,6 +924,7 @@ export default function Home() {
     }
     if (supabase) await api.signOut();
     clearBookingHistoryCache();
+    clearRoomScoutCache();
     clearChatMessagesCache();
     setSessionExpiredOpen(false);
     setMe({ authenticated: false });
@@ -1034,11 +1038,14 @@ export default function Home() {
   }, [canEnterBooking, loadSchedule, view]);
 
   const loadChatThreads = useCallback(async () => {
+    setChatThreadsLoading(true);
     try {
       const res = await api.chatThreads();
       setChatThreads(res.threads);
     } catch {
       setChatThreads([]);
+    } finally {
+      setChatThreadsLoading(false);
     }
   }, []);
 
@@ -1099,6 +1106,7 @@ export default function Home() {
     }
     if (supabase) await api.signOut();
     clearBookingHistoryCache();
+    clearRoomScoutCache();
     clearChatMessagesCache();
     setSessionExpiredOpen(false);
     setMe({ authenticated: false });
@@ -1273,6 +1281,7 @@ export default function Home() {
         onLogout={handleLogout}
         scoutingActive={scoutingActive}
         chatThreads={chatThreads}
+        chatThreadsLoading={chatThreadsLoading}
         activeThreadId={activeThreadId}
         onNewChat={() =>
           guardNav(() => {

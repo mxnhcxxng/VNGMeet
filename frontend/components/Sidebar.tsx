@@ -266,6 +266,7 @@ export function Sidebar({
   onLogout,
   scoutingActive,
   chatThreads,
+  chatThreadsLoading,
   activeThreadId,
   onNewChat,
   onSelectThread,
@@ -279,6 +280,7 @@ export function Sidebar({
   onLogout: () => void;
   scoutingActive?: boolean;
   chatThreads?: ChatThread[];
+  chatThreadsLoading?: boolean;
   activeThreadId?: string | null;
   onNewChat?: () => void;
   onSelectThread?: (threadId: string) => void;
@@ -348,26 +350,41 @@ export function Sidebar({
       <div className="mt-3 flex min-h-0 flex-1 flex-col px-4">
         <div className="px-3 pb-1 pt-3 text-xs font-medium text-[#71717a] dark:text-[#94979c]">{t("sidebar.recents")}</div>
         <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          {(chatThreads ?? []).map((thread) => {
-            const active = view === "chat" && activeThreadId === thread.id;
-            return (
-              <ChatThreadRow
-                key={thread.id}
-                thread={thread}
-                active={active}
-                onClick={() => onSelectThread?.(thread.id)}
-                onPrefetch={
-                  onPrefetchThread
-                    ? () => onPrefetchThread(thread.id)
-                    : undefined
-                }
-                onRename={onRenameThread}
-                onDelete={onDeleteThread}
-              />
-            );
-          })}
-          {!(chatThreads ?? []).length && (
-            <div className="px-4 py-2 text-sm text-[#a4a7ae] dark:text-[#94979c]">{t("sidebar.noChats")}</div>
+          {chatThreadsLoading && !(chatThreads ?? []).length ? (
+            // Skeleton pills while the first thread fetch is in flight — same
+            // h-10 rounded-full shape as ChatThreadRow so it doesn't jump on load.
+            Array.from({ length: 6 }).map((_, index) => (
+              <div key={index} className="px-1 py-0.5" aria-hidden>
+                <div
+                  className="h-9 animate-pulse rounded-full bg-default"
+                  style={{ width: `${85 - index * 8}%` }}
+                />
+              </div>
+            ))
+          ) : (
+            <>
+              {(chatThreads ?? []).map((thread) => {
+                const active = view === "chat" && activeThreadId === thread.id;
+                return (
+                  <ChatThreadRow
+                    key={thread.id}
+                    thread={thread}
+                    active={active}
+                    onClick={() => onSelectThread?.(thread.id)}
+                    onPrefetch={
+                      onPrefetchThread
+                        ? () => onPrefetchThread(thread.id)
+                        : undefined
+                    }
+                    onRename={onRenameThread}
+                    onDelete={onDeleteThread}
+                  />
+                );
+              })}
+              {!(chatThreads ?? []).length && (
+                <div className="px-4 py-2 text-sm text-[#a4a7ae] dark:text-[#94979c]">{t("sidebar.noChats")}</div>
+              )}
+            </>
           )}
         </div>
       </div>
