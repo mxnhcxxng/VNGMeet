@@ -760,6 +760,7 @@ async def sync_my_calendar(
             success_ids: list[str] = []
             cancel_ids: list[str] = []
             declined_ids: list[str] = []
+            declined_event_ids: list[str] = []
             for r in rows:
                 if not r.get("graph_event_id"):
                     continue  # scheduled booking not yet fired -> no real event
@@ -776,6 +777,7 @@ async def sync_my_calendar(
                         success_ids.append(r["id"])
                 elif key in mine_declined_now:
                     declined_ids.append(r["id"])
+                    declined_event_ids.append(r["graph_event_id"])
                 else:
                     # Event no longer on the calendar -> canceled, unless too fresh.
                     stamps = [
@@ -800,6 +802,19 @@ async def sync_my_calendar(
                 ).execute()
                 canceled = len(cancel_ids)
             if declined_ids:
+                # The room rejected the invite, leaving an orphaned event (now with no
+                # room) sitting on the organizer's Outlook calendar. Cancel it for real
+                # via Graph so the user isn't left with dead meetings to clean up, then
+                # mark the row failed. Best-effort per event — a Graph hiccup must not
+                # block the status flip, and delete_event already treats 404 as success.
+                for ev_id in declined_event_ids:
+                    try:
+                        await graph.delete_event(token, ev_id)
+                    except Exception as e:  # noqa: BLE001 - status flip must still apply
+                        log.warning(
+                            "sync_my_calendar: could not delete declined event %s: %s",
+                            ev_id, e,
+                        )
                 sb.table("user_activity").update(
                     {"status": "failed", "error_message": "room_declined"}
                 ).in_("id", declined_ids).execute()
