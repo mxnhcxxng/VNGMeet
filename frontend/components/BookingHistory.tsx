@@ -24,6 +24,7 @@ import { api, type Booking } from "@/lib/api";
 import { useT } from "@/app/providers";
 import type { TFunction, TranslationKey } from "@/lib/i18n";
 import { EditBookingModal } from "./EditBookingModal";
+import { patchUrlParams, readUrlParams } from "@/lib/urlState";
 
 const STATUS_COLOR: Record<
   Booking["status"],
@@ -183,21 +184,44 @@ export function BookingHistory() {
   const [loading, setLoading] = useState(cachedBookings === null);
   const [error, setError] = useState<string | null>(null);
 
+  // Seed the filters / sort / pagination from the URL query once, so a shared
+  // link or a refresh reproduces the same view. Reading window here is safe:
+  // this screen only ever mounts on the client (it's gated behind auth), so it
+  // is never part of the server-rendered HTML.
+  const [initialParams] = useState(() => readUrlParams());
+
   // Filters (mock — client-side for now, move to BE later).
-  const [timeRange, setTimeRange] = useState("all");
-  const [status, setStatus] = useState("all");
-  const [bookingType, setBookingType] = useState("all");
-  const [method, setMethod] = useState("all");
+  const [timeRange, setTimeRange] = useState(
+    () => initialParams.get("range") ?? "all",
+  );
+  const [status, setStatus] = useState(() => initialParams.get("status") ?? "all");
+  const [bookingType, setBookingType] = useState(
+    () => initialParams.get("type") ?? "all",
+  );
+  const [method, setMethod] = useState(() => initialParams.get("method") ?? "all");
 
   // Sorting is applied server-side (the API re-orders the rows). The ref lets
   // the stable `load` callback read the latest descriptor without re-creating.
-  const [sortDescriptor, setSortDescriptor] = useState<SortState>(cachedSort);
+  const [sortDescriptor, setSortDescriptor] = useState<SortState>(() => {
+    const column = initialParams.get("sort");
+    if (!column) return cachedSort;
+    return {
+      column,
+      direction: initialParams.get("order") === "asc" ? "ascending" : "descending",
+    };
+  });
   const sortRef = useRef(sortDescriptor);
   sortRef.current = sortDescriptor;
 
   // Pagination.
-  const [pageSize, setPageSize] = useState(10);
-  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(() => {
+    const n = Number(initialParams.get("size"));
+    return PAGE_SIZE_OPTS.some((o) => Number(o.value) === n) ? n : 10;
+  });
+  const [page, setPage] = useState(() => {
+    const n = Number(initialParams.get("page"));
+    return Number.isInteger(n) && n >= 1 ? n : 1;
+  });
 
   // Room thumbnails (email → thumbnail_link) so the edit card can show the photo.
   const [roomThumbs, setRoomThumbs] = useState<Record<string, string>>({});
@@ -323,8 +347,14 @@ export function BookingHistory() {
     [bookings, status, bookingType, method, timeRange]
   );
 
-  // Reset to first page whenever the result set or page size changes.
+  // Reset to first page whenever the result set or page size changes — but skip
+  // the very first run so a page hydrated from the URL isn't clobbered on mount.
+  const filtersMountedRef = useRef(false);
   useEffect(() => {
+    if (!filtersMountedRef.current) {
+      filtersMountedRef.current = true;
+      return;
+    }
     setPage(1);
   }, [status, bookingType, method, timeRange, pageSize]);
 
@@ -335,6 +365,40 @@ export function BookingHistory() {
   const pageItems = filtered.slice(startIdx, startIdx + pageSize);
   const rangeStart = total === 0 ? 0 : startIdx + 1;
   const rangeEnd = Math.min(startIdx + pageSize, total);
+
+  // Mirror the current filters / sort / pagination back into the URL. Defaults
+  // are written as null so they drop out and the URL stays clean. safePage (not
+  // the raw page) keeps the URL in step with what's actually shown.
+  useEffect(() => {
+    patchUrlParams({
+      status: status === "all" ? null : status,
+      type: bookingType === "all" ? null : bookingType,
+      method: method === "all" ? null : method,
+      range: timeRange === "all" ? null : timeRange,
+      sort:
+        sortDescriptor.column === DEFAULT_SORT.column &&
+        sortDescriptor.direction === DEFAULT_SORT.direction
+          ? null
+          : sortDescriptor.column,
+      order:
+        sortDescriptor.column === DEFAULT_SORT.column &&
+        sortDescriptor.direction === DEFAULT_SORT.direction
+          ? null
+          : sortDescriptor.direction === "ascending"
+            ? "asc"
+            : "desc",
+      size: pageSize === 10 ? null : String(pageSize),
+      page: safePage <= 1 ? null : String(safePage),
+    });
+  }, [
+    status,
+    bookingType,
+    method,
+    timeRange,
+    sortDescriptor,
+    pageSize,
+    safePage,
+  ]);
 
   // Show the big centered spinner only on the very first load. Subsequent
   // refetches (sort / refresh) keep the existing rows on screen and just dim

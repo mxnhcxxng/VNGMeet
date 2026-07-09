@@ -31,6 +31,7 @@ import type { TranslationKey } from "@/lib/i18n";
 import { BookingModal, type BookingSlot } from "./BookingModal";
 import { EditBookingModal } from "./EditBookingModal";
 import { clearBookingHistoryCache } from "./BookingHistory";
+import { patchUrlParams, readUrlParams } from "@/lib/urlState";
 
 const SLOT_H = 48; // px per slot row (half hour → 96px per hour)
 const TIME_COL = 72; // px width of the left time-label column
@@ -288,6 +289,36 @@ export function BrowseRooms({
   useEffect(() => {
     setOffice(defaultOffice);
   }, [defaultOffice]);
+
+  // Reflect the browse date / office / search into the URL so a link is
+  // shareable and a refresh lands on the same view. We only start syncing once
+  // real rooms are on screen (`!loadingRooms`) — the loading skeleton renders
+  // this same component with placeholder data and must not touch the URL.
+  const urlHydratedRef = useRef(false);
+  useEffect(() => {
+    if (urlHydratedRef.current) return;
+    if (loadingRooms || data.days.length === 0) return;
+    const params = readUrlParams();
+    const q = params.get("q");
+    if (q) setQuery(q);
+    const off = params.get("office");
+    if (off) setOffice(off);
+    const date = params.get("date");
+    if (date) {
+      const idx = data.days.indexOf(date);
+      if (idx >= 0) setDayIndex(() => idx);
+    }
+    urlHydratedRef.current = true;
+  }, [loadingRooms, data.days, setDayIndex]);
+
+  useEffect(() => {
+    if (!urlHydratedRef.current) return;
+    patchUrlParams({
+      date: data.days[dayIndex] ?? null,
+      office: office || null,
+      q: query || null,
+    });
+  }, [data.days, dayIndex, office, query]);
 
   useEffect(() => {
     const interval = window.setInterval(() => setNow(new Date()), 30_000);
