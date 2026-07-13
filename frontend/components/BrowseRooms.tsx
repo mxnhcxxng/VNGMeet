@@ -40,6 +40,19 @@ const DEFAULT_DAY_START = "09:00";
 const DEFAULT_DAY_END = "18:00";
 const SCHEDULE_MAX_DURATION_MINUTES = 3 * 60;
 
+// Descriptive labels for the building code shown on the booking modal's venue
+// chip. Falls back to the raw building value for unmapped codes.
+const VENUE_LABEL: Record<string, string> = {
+  V1: "V1 (VNGGames, Zalo, GreenNode)",
+  V2: "V2 (ZaloPay)",
+};
+
+function venueLabel(building?: string) {
+  if (!building) return undefined;
+  const key = building.trim();
+  return VENUE_LABEL[key] ?? building;
+}
+
 function addLabel(time: string, slotMinutes: number) {
   const [h, m] = time.split(":").map(Number);
   const end = h * 60 + m + slotMinutes;
@@ -589,6 +602,9 @@ export function BrowseRooms({
       startTime: t,
       thumbnail: room.thumbnail_link,
       schedule,
+      capacitySize: room.capacity_size,
+      floor: room.floor,
+      location: venueLabel(room.building),
     });
     setEndOptions(endOptionsFor(room, t, schedule));
     setInitialEndTime(desiredEnd ?? null);

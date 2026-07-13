@@ -1,8 +1,15 @@
 "use client";
 
-import { useEffect, useRef, useState, type MouseEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type MouseEvent,
+  type ReactNode,
+} from "react";
 import {
   Button,
+  Chip,
   Input,
   Label,
   ListBox,
@@ -12,8 +19,8 @@ import {
   TextField,
   toast,
 } from "@heroui/react";
-import { CircleInfo, Clock } from "@gravity-ui/icons";
-import { api } from "@/lib/api";
+import { CircleInfo, Clock, Persons } from "@gravity-ui/icons";
+import { api, type CapacitySize } from "@/lib/api";
 import { useT } from "@/app/providers";
 import { useTokenExpiry } from "./TokenExpiryProvider";
 
@@ -24,7 +31,18 @@ export interface BookingSlot {
   startTime: string; // "09:00"
   thumbnail?: string; // meeting_room_metadata.thumbnail_link
   schedule?: boolean; // day is beyond the live window → a schedule booking, not instant
+  capacitySize?: CapacitySize; // small | medium | large → capacity chip
+  floor?: string; // floor label → "Floor {n}" chip
+  location?: string; // building / zone group → location chip
 }
+
+// Capacity chip shows a headcount range next to a people icon (e.g. "5-12"),
+// mapped from the room's capacity_size band.
+const CAPACITY_RANGE: Record<CapacitySize, string> = {
+  small: "≤4",
+  medium: "5-12",
+  large: "13+",
+};
 
 export function BookingModal({
   isOpen,
@@ -73,7 +91,7 @@ export function BookingModal({
     const preferred =
       initialEndTime && endOptions.includes(initialEndTime)
         ? initialEndTime
-        : endOptions[0] ?? "";
+        : (endOptions[0] ?? "");
     setEndTime(preferred);
     setError(null);
   }, [endOptions, initialEndTime, isOpen, slot]);
@@ -85,9 +103,7 @@ export function BookingModal({
     if (userDomain) {
       setSubject(
         t(
-          slot.schedule
-            ? "booking.subjectScheduled"
-            : "booking.subjectInstant",
+          slot.schedule ? "booking.subjectScheduled" : "booking.subjectInstant",
           { domain: userDomain },
         ),
       );
@@ -185,125 +201,200 @@ export function BookingModal({
 
   const req = <span className="text-danger">*</span>;
 
+  // Room metadata chips shown over the thumbnail. The capacity chip is the
+  // primary variant (people icon + headcount range); floor/venue are secondary.
+  // Each renders only when its datum is present, so a room missing e.g. a floor
+  // just drops that chip.
+  const chips = [
+    slot.capacitySize
+      ? {
+          label: CAPACITY_RANGE[slot.capacitySize],
+          variant: "primary" as const,
+          icon: <Persons width={14} height={14} />,
+        }
+      : null,
+    slot.floor
+      ? {
+          label: t("booking.floor", { floor: slot.floor }),
+          variant: "secondary" as const,
+          icon: null,
+        }
+      : null,
+    slot.location
+      ? { label: slot.location, variant: "secondary" as const, icon: null }
+      : null,
+  ].filter(Boolean) as {
+    label: string;
+    variant: "primary" | "secondary";
+    icon: ReactNode;
+  }[];
+
+  const title = slot.schedule
+    ? t("booking.scheduledBadge")
+    : t("booking.instantTitle");
+  const subtitle = slot.schedule
+    ? t("booking.scheduleInfo1")
+    : t("booking.instantSubtitle");
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
       onMouseDown={closeFromBackdrop}
     >
-      <div className="flex w-full max-w-[800px] flex-col overflow-hidden rounded-2xl bg-white dark:bg-[#0c0e12] shadow-2xl">
-        {/* Room thumbnail (meeting_room_metadata.thumbnail_link) */}
-        <div className="px-6 pt-6">
-          <div className="relative h-[120px] w-full overflow-hidden rounded-lg bg-default-100">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={slot.thumbnail || "/default-room-thumbnail.png"}
-              alt={slot.roomName}
-              className="h-full w-full object-cover"
-            />
-            {slot.schedule && (
-              <div className="absolute bottom-2 left-2 inline-flex items-center gap-1 rounded-md bg-[var(--accent)] px-2 py-1 text-sm font-medium leading-5 text-[var(--accent-foreground)] shadow-sm">
-                <Clock width={16} height={16} />
-                <span>{t("booking.scheduledBadge")}</span>
+      <div className="flex w-full max-w-[1072px] gap-6 rounded-2xl bg-white p-6 shadow-2xl dark:bg-[#0c0e12]">
+        {/* Banner — 400px wide. The thumbnail (meeting_room_metadata.thumbnail_link)
+            with room name, email and metadata chips overlaid over a dark gradient
+            for legibility. Stretches to the form's height. */}
+        <div className="relative w-[400px] min-h-[420px] shrink-0 overflow-hidden rounded-lg bg-default-100 shadow-lg">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={slot.thumbnail || "/default-room-thumbnail.png"}
+            alt={slot.roomName}
+            className="h-full w-full object-cover"
+          />
+          <div className="absolute inset-0 bg-gradient-to-b from-transparent from-50% to-black/90" />
+          <div className="absolute inset-x-0 bottom-0 flex flex-col gap-2 p-6">
+            <div className="text-white">
+              <p className="text-2xl font-bold leading-8">{slot.roomName}</p>
+              <p className="text-sm font-medium leading-5">{slot.roomEmail}</p>
+            </div>
+            {chips.length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {chips.map((chip) => (
+                  <Chip
+                    key={chip.label}
+                    size="md"
+                    color="accent"
+                    variant={chip.variant}
+                    className="backdrop-blur-sm"
+                  >
+                    <span className="inline-flex items-center gap-1">
+                      {chip.icon}
+                      {chip.label}
+                    </span>
+                  </Chip>
+                ))}
               </div>
             )}
           </div>
         </div>
 
-        {/* Room name + email */}
-        <div className="px-6 pb-5 pt-6">
-          <h2 className="text-base font-semibold text-default-900">{slot.roomName}</h2>
-          <p className="text-sm text-default-500">{slot.roomEmail}</p>
-        </div>
-
-        {/* Form */}
-        <div className="grid gap-4 px-6">
-          <TextField fullWidth isRequired>
-            <Label>{t("booking.meetingTitle")}</Label>
-            <Input
-              variant="secondary"
-              placeholder={t("booking.meetingTitlePlaceholder")}
-              value={subject}
-              onChange={(event) => setSubject(event.target.value)}
-            />
-          </TextField>
-
-          <div className="grid grid-cols-2 gap-4">
-            <TextField fullWidth isDisabled>
-              <Label>{t("booking.startTime")} {req}</Label>
-              <Input variant="secondary" value={slot.startTime} readOnly />
-            </TextField>
-
-            <Select
-              variant="secondary"
-              selectedKey={endTime || null}
-              onSelectionChange={(key) => setEndTime((key as string) ?? "")}
-            >
-              <Label>{t("booking.endTime")} {req}</Label>
-              <Select.Trigger>
-                <Select.Value />
-                <Select.Indicator />
-              </Select.Trigger>
-              <Select.Popover>
-                <ListBox>
-                  {endOptions.map((opt) => (
-                    <ListBoxItem key={opt} id={opt}>
-                      {opt}
-                    </ListBoxItem>
-                  ))}
-                </ListBox>
-              </Select.Popover>
-            </Select>
+        {/* Form — 600px wide */}
+        <div className="flex w-[600px] shrink-0 flex-col gap-5">
+          {/* Title + subtitle */}
+          <div className="flex flex-col gap-0.5">
+            <div className="flex items-center gap-2">
+              {slot.schedule && (
+                <Clock
+                  width={20}
+                  height={20}
+                  className="shrink-0 text-[var(--accent)]"
+                />
+              )}
+              <h2 className="text-2xl font-bold leading-8 text-default-900">
+                {title}
+              </h2>
+            </div>
+            <p className="text-sm leading-5 text-default-500">{subtitle}</p>
           </div>
 
-          <TextField fullWidth>
-            <Label>{t("booking.attendees")}</Label>
-            <Input
-              variant="secondary"
-              placeholder={t("booking.attendeesPlaceholder")}
-              value={attendees}
-              onChange={(event) => setAttendees(event.target.value)}
-            />
-          </TextField>
+          {/* Form */}
+          <div className="grid gap-4">
+            <TextField fullWidth isRequired>
+              <Label>{t("booking.meetingTitle")}</Label>
+              <Input
+                variant="secondary"
+                placeholder={t("booking.meetingTitlePlaceholder")}
+                value={subject}
+                onChange={(event) => setSubject(event.target.value)}
+              />
+            </TextField>
 
-          <TextField fullWidth>
-            <Label>{t("booking.description")}</Label>
-            <TextArea
-              variant="secondary"
-              placeholder={t("booking.descriptionPlaceholder")}
-              value={notes}
-              onChange={(event) => setNotes(event.target.value)}
-            />
-          </TextField>
+            <div className="grid grid-cols-2 gap-4">
+              <TextField fullWidth isDisabled>
+                <Label>
+                  {t("booking.startTime")} {req}
+                </Label>
+                <Input variant="secondary" value={slot.startTime} readOnly />
+              </TextField>
 
-          {slot.schedule && (
-            <div className="grid gap-3 pt-1">
-              <div className="flex items-start gap-2 text-sm leading-5 text-default-600">
-                <CircleInfo width={16} height={16} className="mt-0.5 shrink-0 text-[var(--accent)]" />
-                <p>{t("booking.scheduleInfo1")}</p>
-              </div>
-              <div className="flex items-start gap-2 text-sm leading-5 text-default-600">
-                <CircleInfo width={16} height={16} className="mt-0.5 shrink-0 text-[var(--accent)]" />
+              <Select
+                variant="secondary"
+                selectedKey={endTime || null}
+                onSelectionChange={(key) => setEndTime((key as string) ?? "")}
+              >
+                <Label>
+                  {t("booking.endTime")} {req}
+                </Label>
+                <Select.Trigger>
+                  <Select.Value />
+                  <Select.Indicator />
+                </Select.Trigger>
+                <Select.Popover>
+                  <ListBox>
+                    {endOptions.map((opt) => (
+                      <ListBoxItem key={opt} id={opt}>
+                        {opt}
+                      </ListBoxItem>
+                    ))}
+                  </ListBox>
+                </Select.Popover>
+              </Select>
+            </div>
+
+            <TextField fullWidth>
+              <Label>{t("booking.attendees")}</Label>
+              <Input
+                variant="secondary"
+                placeholder={t("booking.attendeesPlaceholder")}
+                value={attendees}
+                onChange={(event) => setAttendees(event.target.value)}
+              />
+            </TextField>
+
+            <TextField fullWidth>
+              <Label>{t("booking.description")}</Label>
+              <TextArea
+                variant="secondary"
+                rows={3}
+                placeholder={t("booking.descriptionPlaceholder")}
+                value={notes}
+                onChange={(event) => setNotes(event.target.value)}
+              />
+            </TextField>
+
+            {slot.schedule && (
+              <div className="flex items-start gap-2 pt-1 text-sm leading-5 text-default-600">
+                <CircleInfo
+                  width={16}
+                  height={16}
+                  className="mt-0.5 shrink-0 text-[var(--accent)]"
+                />
                 <p>{t("booking.scheduleInfo2")}</p>
               </div>
-            </div>
-          )}
+            )}
 
-          {error && <p className="text-sm text-danger">{error}</p>}
-        </div>
+            {error && <p className="text-sm text-danger">{error}</p>}
+          </div>
 
-        {/* Buttons */}
-        <div className="flex items-center justify-center gap-2 px-6 pb-6 pt-8">
-          <Button
-            variant="tertiary"
-            className="flex-1 rounded-full"
-            onPress={onClose}
-            isDisabled={loading}
-          >
-            {t("common.cancel")}
-          </Button>
-          <Button className="flex-1 rounded-full" onPress={submit} isPending={loading}>
-            {t("booking.book")}
-          </Button>
+          {/* Buttons */}
+          <div className="mt-auto flex items-center justify-center gap-2 pt-2">
+            <Button
+              variant="tertiary"
+              className="flex-1 rounded-full"
+              onPress={onClose}
+              isDisabled={loading}
+            >
+              {t("common.cancel")}
+            </Button>
+            <Button
+              className="flex-1 rounded-full"
+              onPress={submit}
+              isPending={loading}
+            >
+              {t("booking.book")}
+            </Button>
+          </div>
         </div>
       </div>
     </div>

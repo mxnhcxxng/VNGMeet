@@ -190,6 +190,10 @@ const en = {
   "booking.updateFailed": "Update failed",
   "booking.updateFailedDesc": "Could not update the booking. Please try again.",
   "booking.scheduledBadge": "Scheduled Booking",
+  "booking.instantTitle": "Instant booking",
+  "booking.instantSubtitle":
+    "This room is available. We'll book it once you've filled in all the required information.",
+  "booking.floor": "Floor {floor}",
   "booking.editTitleSuffix": "{room} - Edit booking",
   "booking.bookedByTitle": "{room} - Booked by {by}",
   "booking.meetingTitle": "Meeting Title",
@@ -591,6 +595,10 @@ const vi: Partial<Record<TranslationKey, string>> = {
   "booking.updateFailed": "Cập nhật thất bại",
   "booking.updateFailedDesc": "Không thể cập nhật đặt phòng. Vui lòng thử lại.",
   "booking.scheduledBadge": "Hẹn giờ đặt",
+  "booking.instantTitle": "Đặt phòng ngay",
+  "booking.instantSubtitle":
+    "Phòng này đang trống. Chúng tôi sẽ đặt phòng ngay khi bạn điền đầy đủ thông tin.",
+  "booking.floor": "Tầng {floor}",
   "booking.editTitleSuffix": "{room} - Chỉnh sửa đặt phòng",
   "booking.bookedByTitle": "{room} - Đặt bởi {by}",
   "booking.meetingTitle": "Tiêu đề cuộc họp",
