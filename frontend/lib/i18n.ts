@@ -190,6 +190,7 @@ const en = {
   "booking.updateFailed": "Update failed",
   "booking.updateFailedDesc": "Could not update the booking. Please try again.",
   "booking.scheduledBadge": "Scheduled Booking",
+  "booking.scheduledTitle": "Scheduled Booking",
   "booking.instantTitle": "Instant booking",
   "booking.instantSubtitle":
     "This room is available. We'll book it once you've filled in all the required information.",
@@ -206,9 +207,9 @@ const en = {
   "booking.description": "Description",
   "booking.descriptionPlaceholder": "Meeting description",
   "booking.scheduleInfo1":
-    "The schedule is not open for booking yet. We'll automatically book this room for you as soon as booking becomes available.",
+    "The system will automatically book the room at 12:00 AM. However, due to high demand and limited room availability, the booking result cannot be guaranteed.",
   "booking.scheduleInfo2":
-    "To ensure fairness for everyone, each user can have only one active scheduled booking at a time.",
+    "To ensure fairness, each user can have only one scheduled booking pending at a time, with a maximum booking duration of 3 hours.",
   "booking.book": "Book",
 
   // --- Booking history ----------------------------------------------------
@@ -595,6 +596,7 @@ const vi: Partial<Record<TranslationKey, string>> = {
   "booking.updateFailed": "Cập nhật thất bại",
   "booking.updateFailedDesc": "Không thể cập nhật đặt phòng. Vui lòng thử lại.",
   "booking.scheduledBadge": "Hẹn giờ đặt",
+  "booking.scheduledTitle": "Hẹn giờ đặt phòng",
   "booking.instantTitle": "Đặt phòng ngay",
   "booking.instantSubtitle":
     "Phòng này đang trống. Chúng tôi sẽ đặt phòng ngay khi bạn điền đầy đủ thông tin.",
@@ -611,9 +613,9 @@ const vi: Partial<Record<TranslationKey, string>> = {
   "booking.description": "Mô tả",
   "booking.descriptionPlaceholder": "Mô tả cuộc họp",
   "booking.scheduleInfo1":
-    "Lịch chưa mở để đặt. Chúng tôi sẽ tự động đặt phòng này cho bạn ngay khi có thể đặt.",
+    "Hệ thống sẽ tự động đặt vào lúc 12:00 đêm. Tuy nhiên, do nhu cầu sử dụng cao và số lượng phòng có hạn nên kết quả đặt phòng sẽ không được đảm bảo.",
   "booking.scheduleInfo2":
-    "Để đảm bảo công bằng cho mọi người, mỗi người chỉ được có một lượt Hẹn giờ đặt đang hoạt động.",
+    "Để đảm bảo tính công bằng, mỗi người chỉ được có 1 lịch hẹn giờ đặt phòng đang chờ xử lý tại một thời điểm, với thời lượng đặt tối đa 3 tiếng.",
   "booking.book": "Đặt phòng",
 
   // --- Booking history ----------------------------------------------------

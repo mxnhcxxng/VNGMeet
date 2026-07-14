@@ -230,7 +230,7 @@ export function BookingModal({
   }[];
 
   const title = slot.schedule
-    ? t("booking.scheduledBadge")
+    ? t("booking.scheduledTitle")
     : t("booking.instantTitle");
   const subtitle = slot.schedule
     ? t("booking.scheduleInfo1")
@@ -356,7 +356,7 @@ export function BookingModal({
               <Label>{t("booking.description")}</Label>
               <TextArea
                 variant="secondary"
-                rows={3}
+                rows={7}
                 placeholder={t("booking.descriptionPlaceholder")}
                 value={notes}
                 onChange={(event) => setNotes(event.target.value)}
