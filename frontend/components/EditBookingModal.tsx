@@ -1,7 +1,14 @@
 "use client";
 
 import { useEffect, useState, type MouseEvent } from "react";
-import { Button, Input, Label, TextArea, TextField, toast } from "@heroui/react";
+import {
+  Button,
+  Input,
+  Label,
+  TextArea,
+  TextField,
+  toast,
+} from "@heroui/react";
 import { Clock } from "@gravity-ui/icons";
 import { api, type Booking } from "@/lib/api";
 import { attendeesToInput } from "@/lib/attendees";
@@ -95,123 +102,149 @@ export function EditBookingModal({
   const req = <span className="text-danger">*</span>;
   const na = t("common.na");
 
+  const title = readOnly
+    ? t("booking.bookedBy", {
+        by: bookedBy ? bookedBy.split("@")[0] : t("common.unknown"),
+      })
+    : t("booking.editTitle");
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
       onMouseDown={closeFromBackdrop}
     >
-      <div className="flex w-full max-w-[560px] flex-col overflow-hidden rounded-2xl bg-white dark:bg-[#0c0e12] shadow-2xl">
-        {/* Room thumbnail (meeting_room_metadata.thumbnail_link) */}
-        <div className="px-6 pt-6">
-          <div className="relative h-[120px] w-full overflow-hidden rounded-lg bg-default-100">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={thumbnail || "/default-room-thumbnail.png"}
-              alt={roomName}
-              className="h-full w-full object-cover"
-            />
+      <div className="flex w-full max-w-[1072px] gap-6 rounded-2xl bg-white p-6 shadow-2xl dark:bg-[#0c0e12]">
+        {/* Banner — 400px wide. Thumbnail (meeting_room_metadata.thumbnail_link)
+            with room name + email overlaid over a dark gradient for legibility.
+            Stretches to the form's height. */}
+        <div className="relative w-[400px] min-h-[420px] shrink-0 overflow-hidden rounded-lg bg-default-100 shadow-lg">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={thumbnail || "/default-room-thumbnail.png"}
+            alt={roomName}
+            className="h-full w-full object-cover"
+          />
+          <div className="absolute inset-0 bg-gradient-to-b from-transparent from-50% to-black/90" />
+          <div className="absolute inset-x-0 bottom-0 flex flex-col gap-1 p-6 text-white">
+            <p className="text-2xl font-bold leading-8">{roomName}</p>
+            <p className="text-sm font-medium leading-5">
+              {booking.room_email}
+            </p>
+          </div>
+        </div>
+
+        {/* Form — 600px wide */}
+        <div className="flex w-[600px] shrink-0 flex-col gap-5">
+          {/* Title */}
+          <div className="flex items-center gap-2">
             {isScheduled && (
-              <div className="absolute bottom-2 left-2 inline-flex items-center gap-1 rounded-md bg-[var(--accent)] px-2 py-1 text-sm font-medium leading-5 text-[var(--accent-foreground)] shadow-sm">
-                <Clock width={16} height={16} />
-                <span>{t("booking.scheduledBadge")}</span>
-              </div>
+              <Clock
+                width={20}
+                height={20}
+                className="shrink-0 text-[var(--accent)]"
+              />
             )}
-          </div>
-        </div>
-
-        {/* Room name + email */}
-        <div className="px-6 pb-1 pt-6">
-          <h2 className="text-base font-semibold text-default-900">
-            {readOnly
-              ? t("booking.bookedByTitle", {
-                  room: roomName,
-                  by: bookedBy
-                    ? bookedBy.split("@")[0]
-                    : t("common.unknown"),
-                })
-              : t("booking.editTitleSuffix", { room: roomName })}
-          </h2>
-          <p className="text-sm text-default-500">{booking.room_email}</p>
-        </div>
-
-        <div className="grid gap-4 px-6 pt-4">
-          <TextField fullWidth isRequired={!readOnly} isDisabled={readOnly}>
-            <Label>{t("booking.meetingTitle")}</Label>
-            <Input
-              variant="secondary"
-              placeholder={t("booking.meetingTitlePlaceholder")}
-              value={readOnly ? subject || na : subject}
-              onChange={(event) => setSubject(event.target.value)}
-              readOnly={readOnly}
-            />
-          </TextField>
-
-          {/* Date & time are fixed once booked — shown read-only for context. */}
-          <TextField fullWidth isDisabled>
-            <Label>{t("booking.date")} {req}</Label>
-            <Input variant="secondary" value={booking.date} readOnly />
-          </TextField>
-
-          <div className="grid grid-cols-2 gap-4">
-            <TextField fullWidth isDisabled>
-              <Label>{t("booking.startTime")} {req}</Label>
-              <Input variant="secondary" value={booking.start_time} readOnly />
-            </TextField>
-            <TextField fullWidth isDisabled>
-              <Label>{t("booking.endTime")} {req}</Label>
-              <Input variant="secondary" value={booking.end_time} readOnly />
-            </TextField>
+            <h2 className="text-2xl font-bold leading-8 text-default-900">
+              {title}
+            </h2>
           </div>
 
-          <TextField fullWidth isDisabled={readOnly}>
-            <Label>{t("booking.attendees")}</Label>
-            <Input
-              variant="secondary"
-              placeholder={t("booking.attendeesPlaceholder")}
-              value={readOnly ? attendees || na : attendees}
-              onChange={(event) => setAttendees(event.target.value)}
-              readOnly={readOnly}
-            />
-          </TextField>
+          {/* Form */}
+          <div className="grid gap-4">
+            <TextField fullWidth isRequired={!readOnly} isDisabled={readOnly}>
+              <Label>{t("booking.meetingTitle")}</Label>
+              <Input
+                variant="secondary"
+                placeholder={t("booking.meetingTitlePlaceholder")}
+                value={readOnly ? subject || na : subject}
+                onChange={(event) => setSubject(event.target.value)}
+                readOnly={readOnly}
+              />
+            </TextField>
 
-          <TextField fullWidth isDisabled={readOnly}>
-            <Label>{t("booking.description")}</Label>
-            <TextArea
-              variant="secondary"
-              placeholder={t("booking.descriptionPlaceholder")}
-              value={readOnly ? notes || na : notes}
-              onChange={(event) => setNotes(event.target.value)}
-              readOnly={readOnly}
-            />
-          </TextField>
+            {/* Date & time are fixed once booked — shown read-only for context. */}
+            <TextField fullWidth isDisabled>
+              <Label>
+                {t("booking.date")} {req}
+              </Label>
+              <Input variant="secondary" value={booking.date} readOnly />
+            </TextField>
 
-          {error && <p className="text-sm text-danger">{error}</p>}
-        </div>
+            <div className="grid grid-cols-2 gap-4">
+              <TextField fullWidth isDisabled>
+                <Label>
+                  {t("booking.startTime")} {req}
+                </Label>
+                <Input
+                  variant="secondary"
+                  value={booking.start_time}
+                  readOnly
+                />
+              </TextField>
+              <TextField fullWidth isDisabled>
+                <Label>
+                  {t("booking.endTime")} {req}
+                </Label>
+                <Input variant="secondary" value={booking.end_time} readOnly />
+              </TextField>
+            </div>
 
-        <div className="flex items-center justify-center gap-2 px-6 pb-6 pt-8">
-          {readOnly ? (
-            <Button
-              variant="tertiary"
-              className="flex-1 rounded-full"
-              onPress={onClose}
-            >
-              {t("common.close")}
-            </Button>
-          ) : (
-            <>
+            <TextField fullWidth isDisabled={readOnly}>
+              <Label>{t("booking.attendees")}</Label>
+              <Input
+                variant="secondary"
+                placeholder={t("booking.attendeesPlaceholder")}
+                value={readOnly ? attendees || na : attendees}
+                onChange={(event) => setAttendees(event.target.value)}
+                readOnly={readOnly}
+              />
+            </TextField>
+
+            <TextField fullWidth isDisabled={readOnly}>
+              <Label>{t("booking.description")}</Label>
+              <TextArea
+                variant="secondary"
+                rows={7}
+                placeholder={t("booking.descriptionPlaceholder")}
+                value={readOnly ? notes || na : notes}
+                onChange={(event) => setNotes(event.target.value)}
+                readOnly={readOnly}
+              />
+            </TextField>
+
+            {error && <p className="text-sm text-danger">{error}</p>}
+          </div>
+
+          {/* Buttons */}
+          <div className="mt-auto flex items-center justify-center gap-2 pt-2">
+            {readOnly ? (
               <Button
                 variant="tertiary"
                 className="flex-1 rounded-full"
                 onPress={onClose}
-                isDisabled={loading}
               >
-                {t("common.cancel")}
+                {t("common.close")}
               </Button>
-              <Button className="flex-1 rounded-full" onPress={submit} isPending={loading}>
-                {t("common.saveShort")}
-              </Button>
-            </>
-          )}
+            ) : (
+              <>
+                <Button
+                  variant="tertiary"
+                  className="flex-1 rounded-full"
+                  onPress={onClose}
+                  isDisabled={loading}
+                >
+                  {t("common.cancel")}
+                </Button>
+                <Button
+                  className="flex-1 rounded-full"
+                  onPress={submit}
+                  isPending={loading}
+                >
+                  {t("common.saveShort")}
+                </Button>
+              </>
+            )}
+          </div>
         </div>
       </div>
     </div>

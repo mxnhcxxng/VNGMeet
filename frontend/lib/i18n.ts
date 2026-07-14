@@ -195,8 +195,8 @@ const en = {
   "booking.instantSubtitle":
     "This room is available. We'll book it once you've filled in all the required information.",
   "booking.floor": "Floor {floor}",
-  "booking.editTitleSuffix": "{room} - Edit booking",
-  "booking.bookedByTitle": "{room} - Booked by {by}",
+  "booking.editTitle": "Edit booking",
+  "booking.bookedBy": "Booked by {by}",
   "booking.meetingTitle": "Meeting Title",
   "booking.meetingTitlePlaceholder": "Meeting title",
   "booking.date": "Date",
@@ -601,8 +601,8 @@ const vi: Partial<Record<TranslationKey, string>> = {
   "booking.instantSubtitle":
     "Phòng này đang trống. Chúng tôi sẽ đặt phòng ngay khi bạn điền đầy đủ thông tin.",
   "booking.floor": "Tầng {floor}",
-  "booking.editTitleSuffix": "{room} - Chỉnh sửa đặt phòng",
-  "booking.bookedByTitle": "{room} - Đặt bởi {by}",
+  "booking.editTitle": "Chỉnh sửa đặt phòng",
+  "booking.bookedBy": "Đặt bởi {by}",
   "booking.meetingTitle": "Tiêu đề cuộc họp",
   "booking.meetingTitlePlaceholder": "Tiêu đề cuộc họp",
   "booking.date": "Ngày",
