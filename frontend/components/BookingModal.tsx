@@ -21,6 +21,7 @@ import {
 } from "@heroui/react";
 import { CircleInfo, Clock, Persons } from "@gravity-ui/icons";
 import { api, type CapacitySize } from "@/lib/api";
+import { roomFlag } from "@/lib/roomFlags";
 import { useT } from "@/app/providers";
 import { useTokenExpiry } from "./TokenExpiryProvider";
 
@@ -255,7 +256,12 @@ export function BookingModal({
           <div className="absolute inset-0 bg-gradient-to-b from-transparent from-50% to-black/90" />
           <div className="absolute inset-x-0 bottom-0 flex flex-col gap-2 p-6">
             <div className="text-white">
-              <p className="text-2xl font-bold leading-8">{slot.roomName}</p>
+              <p className="text-2xl font-bold leading-8">
+                {roomFlag(slot.roomName) && (
+                  <span className="mr-2">{roomFlag(slot.roomName)}</span>
+                )}
+                {slot.roomName}
+              </p>
               <p className="text-sm font-medium leading-5">{slot.roomEmail}</p>
             </div>
             {chips.length > 0 && (

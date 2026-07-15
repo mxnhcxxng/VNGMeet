@@ -12,6 +12,7 @@ import {
 import { Clock } from "@gravity-ui/icons";
 import { api, type Booking } from "@/lib/api";
 import { attendeesToInput } from "@/lib/attendees";
+import { roomFlag } from "@/lib/roomFlags";
 import { useT } from "@/app/providers";
 
 export function EditBookingModal({
@@ -126,7 +127,12 @@ export function EditBookingModal({
           />
           <div className="absolute inset-0 bg-gradient-to-b from-transparent from-50% to-black/90" />
           <div className="absolute inset-x-0 bottom-0 flex flex-col gap-1 p-6 text-white">
-            <p className="text-2xl font-bold leading-8">{roomName}</p>
+            <p className="text-2xl font-bold leading-8">
+              {roomFlag(booking.room_name) && (
+                <span className="mr-2">{roomFlag(booking.room_name)}</span>
+              )}
+              {roomName}
+            </p>
             <p className="text-sm font-medium leading-5">
               {booking.room_email}
             </p>
