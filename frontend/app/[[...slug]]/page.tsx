@@ -1340,6 +1340,7 @@ export default function Home() {
               threadId={activeThreadId}
               onThreadSelected={setActiveThreadId}
               onThreadsChanged={setChatThreads}
+              onRefresh={loadSchedule}
               userRole={me.profile?.role}
               userDomain={
                 me.profile?.email_username ||

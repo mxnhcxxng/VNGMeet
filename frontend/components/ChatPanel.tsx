@@ -3,6 +3,7 @@
 import {
   createContext,
   memo,
+  useCallback,
   useContext,
   useEffect,
   useLayoutEffect,
@@ -285,6 +286,21 @@ function pendingBookingFromMessage(message: ChatMessage): PendingBooking | null 
   };
 }
 
+// Detects a booking that was placed inline (book_without_confirmation), i.e.
+// without a confirmation card. Such a booking still starts "pending" and needs
+// the same post-booking calendar re-sync as a card-confirmed one.
+function messagesBookedDirectly(messages: ChatMessage[]): boolean {
+  return messages.some((message) => {
+    const toolResults = (message.metadata as any)?.tool_results;
+    if (!Array.isArray(toolResults)) return false;
+    return toolResults.some(
+      (item) =>
+        (item?.name === "book_room" || item?.name === "schedule_room") &&
+        item?.result?.booked === true
+    );
+  });
+}
+
 function actionStatusByConfirmation(messages: ChatMessage[], confirmationId: string) {
   return ([...messages].reverse().find((message) => {
     return (message.metadata as any)?.booking_action?.confirmation_id === confirmationId;
@@ -299,12 +315,14 @@ function BookingConfirmationCard({
   actioned,
   outcome,
   onActionMessage,
+  onBookingConfirmed,
 }: {
   pending: PendingBooking;
   threadId: string | null;
   actioned: boolean;
   outcome: BookingOutcome;
   onActionMessage: (message: ChatMessage) => void;
+  onBookingConfirmed?: () => void;
 }) {
   const t = useT();
   const [busyAction, setBusyAction] = useState<"accept" | "reject" | null>(null);
@@ -368,8 +386,9 @@ function BookingConfirmationCard({
         book_without_confirmation: action === "accept" ? skipConfirmation : undefined,
       });
       // A confirmed booking changes the user's history — drop the cache so the
-      // Booking History tab refetches fresh data next time it opens.
-      if (action === "accept") clearBookingHistoryCache();
+      // Booking History tab refetches fresh data next time it opens, and force a
+      // calendar re-sync so its "pending" status flips to success/failed soon.
+      if (action === "accept") onBookingConfirmed?.();
       onActionMessage(res.message);
     } catch (e: any) {
       setLocalError(e.message);
@@ -640,12 +659,14 @@ export function ChatPanel({
   onThreadsChanged,
   userRole = "user",
   userDomain = "",
+  onRefresh,
 }: {
   threadId: string | null;
   onThreadSelected: (threadId: string) => void;
   onThreadsChanged: (threads: ChatThread[]) => void;
   userRole?: UserRole;
   userDomain?: string;
+  onRefresh?: (opts?: { force?: boolean }) => void;
 }) {
   const { language, t } = useLanguage();
   const [messages, setMessages] = useState<ChatMessage[]>(() =>
@@ -762,6 +783,21 @@ export function ChatPanel({
     refreshThreads();
   };
 
+  // A chatbot booking starts "pending" until the room mailbox responds
+  // asynchronously. Force a calendar re-sync now and again at 15/45/90s (past
+  // the 60s throttle) so the status flips to success/failed on the grid and
+  // Booking History — mirroring the post-booking refresh in BrowseRooms.
+  const syncAfterBooking = useCallback(() => {
+    clearBookingHistoryCache();
+    onRefresh?.({ force: true });
+    for (const delay of [15000, 45000, 90000]) {
+      window.setTimeout(() => {
+        clearBookingHistoryCache();
+        onRefresh?.({ force: true });
+      }, delay);
+    }
+  }, [onRefresh]);
+
   const handleFeedbackChange = (
     messageId: string,
     feedback: "positive" | "negative" | null
@@ -797,6 +833,7 @@ export function ChatPanel({
         res.thread.id
       );
       if (!threadId) onThreadSelected(res.thread.id);
+      if (messagesBookedDirectly(returned)) syncAfterBooking();
       await refreshThreads();
     } catch (e: any) {
       setError(e.message);
@@ -951,6 +988,7 @@ export function ChatPanel({
                           actioned={actioned}
                           outcome={outcome}
                           onActionMessage={appendActionMessage}
+                          onBookingConfirmed={syncAfterBooking}
                         />
                       )}
                       {displayContent.trim() && (
