@@ -233,16 +233,28 @@ function isFreeStatus(status: number) {
   return status === 0 || status === 3;
 }
 
+// Ranks a room for the current-time availability sort (lower sorts first). Only
+// meaningful when viewing today; `info` carries the current slot index and the
+// total number of business slots in the day. The returned tuple is compared
+// element-wise, encoding three tie-breaks in priority order:
+//   1. Most free slots from the current slot through end of day (more = better).
+//   2. Free in the slot immediately after the current one.
+//   3. Free right now (the current slot).
 function availabilityRank(
   room: ScheduleRoom,
   dayIndex: number,
-  range: { start: number; end: number } | null
-) {
-  if (!range) return 0;
-  for (let index = range.start; index < range.end; index += 1) {
-    if (!isFreeStatus(room.grid[index]?.[dayIndex] ?? 1)) return 1;
+  info: { current: number; total: number } | null
+): number[] {
+  if (!info) return [0, 0, 0];
+  const { current, total } = info;
+  let freeCount = 0;
+  for (let index = current; index < total; index += 1) {
+    if (isFreeStatus(room.grid[index]?.[dayIndex] ?? 1)) freeCount += 1;
   }
-  return 0;
+  const freeCurrent = isFreeStatus(room.grid[current]?.[dayIndex] ?? 1) ? 0 : 1;
+  const freeNext = isFreeStatus(room.grid[current + 1]?.[dayIndex] ?? 1) ? 0 : 1;
+  // Negate the count so that more free slots sort first under ascending order.
+  return [-freeCount, freeNext, freeCurrent];
 }
 
 export function BrowseRooms({
@@ -391,8 +403,8 @@ export function BrowseRooms({
       currentSlotMinutes % 60
     ).padStart(2, "0")}`;
     const start = businessIndexByTime.get(currentTime);
-    return start === undefined ? null : { start, end: start + 1 };
-  }, [businessIndexByTime, nowMinutes, selectedDay, slotMinutes, todayIso]);
+    return start === undefined ? null : { current: start, total: times.length };
+  }, [businessIndexByTime, nowMinutes, selectedDay, slotMinutes, todayIso, times.length]);
 
   // Optimistic "pending" cells shown instantly after a booking succeeds, before
   // the availability re-fetch lands. Each entry paints the booked slots pending
@@ -425,10 +437,12 @@ export function BrowseRooms({
           Number(!myMeetingEmails.has(b.room.email.toLowerCase()));
         if (myMeetingDiff) return myMeetingDiff;
 
-        const availabilityDiff =
-          availabilityRank(a.room, dayIndex, currentRange) -
-          availabilityRank(b.room, dayIndex, currentRange);
-        if (availabilityDiff) return availabilityDiff;
+        const aAvailability = availabilityRank(a.room, dayIndex, currentRange);
+        const bAvailability = availabilityRank(b.room, dayIndex, currentRange);
+        for (let i = 0; i < aAvailability.length; i += 1) {
+          const diff = aAvailability[i] - bAvailability[i];
+          if (diff) return diff;
+        }
 
         const favoriteDiff =
           Number(!favorites.has(a.room.email.toLowerCase())) -
