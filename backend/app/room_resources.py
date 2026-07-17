@@ -7,9 +7,9 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
 
-from . import auth, availability, graph
+from . import auth, availability, graph, token_pool
 from .app_context import AVAILABILITY_CACHE_TTL, log, settings
 from .profiles import _request_identity
 
@@ -264,11 +264,14 @@ async def _ensure_availability_cache_fresh(
     room_ids: list[str],
     day_list: list[str],
 ) -> dict[tuple[str, str], dict]:
-    """Refresh room_availability with the current user's Graph token when stale.
+    """HARD-FALLBACK inline refresh — normally a no-op.
 
-    The read path remains cheap when the cache is fresh. When rows are missing or
-    older than five minutes, the backend briefly borrows the request user's Graph
-    access, updates Supabase via service role, and then serves the refreshed rows.
+    Freshness is owned by the background job (app-only cron, or the 1-minute
+    graph_token_pool job), so the read path just serves whatever the cache
+    holds. Only when rows are missing or older than AVAILABILITY_CACHE_TTL
+    (job dead: no usable pool token, first deploy, scheduler down) does the
+    request borrow the user's own Graph token to rebuild the table inline —
+    and that token is saved to the pool so the background job can take over.
     """
     cache = _read_availability_cache(sb, room_ids, day_list)
     if not _availability_cache_is_stale(cache, room_ids, day_list):
@@ -281,9 +284,13 @@ async def _ensure_availability_cache_fresh(
             return cache
 
         was_empty = _availability_cache_is_empty(cache, room_ids, day_list)
-        token, _ = await auth.resolve_token(request)
+        token, user_id = await auth.resolve_token(request)
+        if user_id:
+            # Reseed the pool so the next background run stops falling through
+            # to this inline path. (Manual tokens are saved at paste time.)
+            token_pool.save_token(user_id, token)
         summary = await availability.refresh_availability_delegated(token)
-        log.info("availability cache refreshed on-demand: %s", summary)
+        log.info("availability cache refreshed on-demand (fallback): %s", summary)
 
         cache = _read_availability_cache(sb, room_ids, day_list)
         if was_empty and _availability_cache_is_empty(cache, room_ids, day_list):
@@ -389,9 +396,23 @@ def _my_meetings_for_room(
     return out
 
 
+async def _sync_calendar_after_response(
+    token: str,
+    user_profile_id: str | None,
+    me_email: str | None,
+) -> None:
+    """Personal-calendar sync, run by BackgroundTasks after the grid was sent."""
+    try:
+        summary = await availability.sync_my_calendar(token, user_profile_id, me_email)
+        log.info("calendar synced in background: %s", summary)
+    except Exception as e:  # noqa: BLE001 - background sync must never raise
+        log.warning("background calendar sync failed: %s", e)
+
+
 @router.get("/api/availability")
 async def availability_grid(
     request: Request,
+    background_tasks: BackgroundTasks,
     days: int = Query(14, ge=1, le=31),
     emails: str = Query(
         "",
@@ -402,9 +423,11 @@ async def availability_grid(
 
     Same response shape as /api/schedule so the frontend grid is a drop-in swap.
     The cache stores full-day 15-min slots; here we fold them into the displayed
-    business-hours window at slot_minutes granularity. If the requested cache
-    rows are missing or older than five minutes, the backend refreshes the table
-    with the current user's delegated Graph token before returning the grid.
+    business-hours window at slot_minutes granularity. The cache is kept fresh by
+    the background job (see graph_token_pool); a request only refreshes inline as
+    a hard fallback when the cache is empty or very old. The user's personal
+    calendar sync runs AFTER the response is sent — the grid never waits on it,
+    and the next poll picks up the attributed slots.
     """
     _, current_user_email = _request_identity(request)
     current_user_email = (current_user_email or "").strip().lower()
@@ -442,21 +465,26 @@ async def availability_grid(
     cache = await _ensure_availability_cache_fresh(request, sb, room_ids, day_list)
 
     # Attribute the signed-in user's real events (organized or invited, incl. ones
-    # made directly in Outlook) into the shared cache before building the grid.
+    # made directly in Outlook) into the shared cache — AFTER the response, so the
+    # grid never waits on Graph. The frontend re-polls (≤2 min, and at 15/45/90s
+    # after a booking) and picks up the attributed slots on the next fetch.
     current_user_profile_id = _profile_id_by_email(sb, current_user_email)
     # The post-booking refresh sends sync=force to bypass the throttle so a freshly
-    # created "pending" booking gets its room response (ok/failed) right away.
+    # created "pending" booking gets its room response (ok/failed) on the next poll.
     force_sync = request.query_params.get("sync") == "force"
     if availability.should_sync_calendar(current_user_profile_id, force=force_sync):
         try:
+            # resolve_token needs the request context, so resolve now (normally a
+            # cache hit) and hand the token to the post-response task.
             token, _ = await auth.resolve_token(request)
-            summary = await availability.sync_my_calendar(
-                token, current_user_profile_id, current_user_email
+            background_tasks.add_task(
+                _sync_calendar_after_response,
+                token,
+                current_user_profile_id,
+                current_user_email,
             )
-            log.info("calendar synced on grid load: %s", summary)
-            cache = _read_availability_cache(sb, room_ids, day_list)
         except Exception as e:  # noqa: BLE001 - calendar sync must not block the grid
-            log.warning("calendar sync on grid load skipped: %s", e)
+            log.warning("calendar sync scheduling skipped: %s", e)
 
     owner_profile_ids = {
         str(owner_id)

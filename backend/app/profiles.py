@@ -9,7 +9,7 @@ from uuid import UUID
 from fastapi import APIRouter, Body, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from . import auth
+from . import auth, token_pool
 from .app_context import log, settings
 from .models import UserProfileUpdateRequest
 
@@ -338,6 +338,10 @@ async def set_token(request: Request, access_token: str = Body(..., embed=True))
         access_token,
         user_profile_id=user_profile_id,
     )
+    if user_profile_id:
+        token_pool.save_token(
+            user_profile_id, access_token, user_email=_profile_email(claims)
+        )
     return JSONResponse({"ok": True, "username": _profile_display_name(claims)})
 
 
@@ -376,6 +380,7 @@ async def link_microsoft(
         user_profile_id=user_profile_id,
         auth_user_id=auth_user_id,
     )
+    token_pool.save_token(auth_user_id, graph_token, user_email=_profile_email(claims))
     return {"ok": True}
 
 

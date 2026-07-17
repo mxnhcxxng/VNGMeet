@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 from cryptography.fernet import Fernet, InvalidToken
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
 from . import auth, availability, booking_schedule, graph
 from .app_context import (
@@ -24,7 +24,7 @@ from .app_context import (
 from .chat import _resolve_booking_room_from_metadata
 from .models import BookingRequest, UpdateBookingRequest
 from .profiles import _booking_auth_context
-from .room_resources import _availability_slot_index
+from .room_resources import _availability_slot_index, _sync_calendar_after_response
 
 router = APIRouter()
 
@@ -489,7 +489,7 @@ def _release_room_availability_owner(
 
 
 @router.get("/api/bookings")
-async def list_my_bookings(request: Request):
+async def list_my_bookings(request: Request, background_tasks: BackgroundTasks):
     """Return the caller's own booking history.
 
     The owner id (user_profiles.id) is derived server-side from the verified
@@ -500,15 +500,15 @@ async def list_my_bookings(request: Request):
     if not user_profile_id or not settings.supabase_enabled:
         return {"bookings": []}
 
-    # Self-heal before reading: pull the user's calendar so bookings they deleted
+    # Self-heal AFTER responding: pull the user's calendar so bookings they deleted
     # directly in Outlook flip to "canceled" here too, even if they never opened the
-    # browse grid. Throttled (shared with the grid) so it's at most one Graph call
-    # per minute; best-effort so a Graph hiccup never blocks the history list.
+    # browse grid. Runs post-response so the history list never waits on Graph; the
+    # next poll shows the reconciled statuses. Throttled (shared with the grid) so
+    # it's at most one Graph call per minute.
     if token and availability.should_sync_calendar(user_profile_id):
-        try:
-            await availability.sync_my_calendar(token, user_profile_id, _email)
-        except Exception as e:  # noqa: BLE001 - history must render regardless
-            log.warning("sync_my_calendar on booking history skipped: %s", e)
+        background_tasks.add_task(
+            _sync_calendar_after_response, token, user_profile_id, _email
+        )
 
     from .supabase_client import get_supabase
 

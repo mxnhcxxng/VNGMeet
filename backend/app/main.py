@@ -43,6 +43,18 @@ async def lifespan(app: FastAPI):
                 coalesce=True,
                 misfire_grace_time=120,
             )
+        else:
+            # No app-only creds: refresh the cache every minute with the newest
+            # active delegated token from graph_token_pool, so user requests
+            # never have to refresh Graph themselves.
+            scheduler.add_job(
+                _safe_refresh_from_pool,
+                CronTrigger(minute="*", timezone=settings.timezone),
+                id="refresh_availability_pool",
+                max_instances=1,
+                coalesce=True,
+                misfire_grace_time=55,
+            )
         prep_h, prep_m, prep_s = booking_schedule.shifted_hms(-booking_schedule.PREP_LEAD_SECONDS)
         fire_h, fire_m, fire_s = booking_schedule.shifted_hms(-booking_schedule.FIRE_LEAD_SECONDS)
         cu_h, cu_m, cu_s = booking_schedule.shifted_hms(booking_schedule.CATCHUP_DELAY_SECONDS)
@@ -89,10 +101,12 @@ async def lifespan(app: FastAPI):
         )
         if settings.graph_app_enabled:
             scheduler.add_job(_safe_refresh, "date", run_date=None)
+        else:
+            scheduler.add_job(_safe_refresh_from_pool, "date", run_date=None)
         scheduler.start()
         log.warning(
             "Background scheduler started (availability=%s, scheduled_bookings=True, room_scouts=True, cron minute=%s).",
-            settings.graph_app_enabled,
+            "app-only" if settings.graph_app_enabled else "token-pool (*/1)",
             settings.availability_refresh_minutes,
         )
     else:
@@ -119,6 +133,16 @@ async def _safe_refresh() -> None:
         await availability.refresh_availability()
     except Exception as e:  # noqa: BLE001
         log.exception("refresh_availability failed: %s", e)
+
+
+async def _safe_refresh_from_pool() -> None:
+    """Scheduler entry point for the delegated token-pool refresh."""
+    try:
+        from . import token_pool
+
+        await token_pool.refresh_availability_from_pool()
+    except Exception as e:  # noqa: BLE001
+        log.exception("refresh_availability_from_pool failed: %s", e)
 
 
 async def _safe_process_scheduled_bookings() -> None:

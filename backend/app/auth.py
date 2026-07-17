@@ -222,6 +222,18 @@ async def get_graph_token(user_id: str) -> str:
     if new_refresh and new_refresh != refresh_token:
         store_refresh_token(user_id, new_refresh)
 
+    # Feed the fresh token to the background availability pool. Only reached on
+    # an actual exchange (~once/hour/user thanks to the cache above), and
+    # save_token itself is best-effort, so this never slows or breaks auth.
+    from .token_pool import save_token
+
+    save_token(
+        user_id,
+        access_token,
+        user_email=_decode_jwt_claim(access_token, "upn", "unique_name", "email"),
+        expires_in=expires_in,
+    )
+
     return access_token
 
 
