@@ -5,11 +5,11 @@ import {
   EllipsisVertical,
   Pencil,
   PencilToSquare,
-  LayoutHeaderCells,
+  Magnifier,
   Gear,
   ArrowRightFromSquare,
   ClockArrowRotateLeft,
-  Magnifier,
+  Binoculars,
   TrashBin,
 } from "@gravity-ui/icons";
 import { Button, Dropdown, Label } from "@heroui/react";
@@ -319,7 +319,7 @@ export function Sidebar({
           onClick={() => onChange("browse")}
           className={`${ROW} ${view === "browse" ? "bg-[var(--default)]" : "hover:bg-[#f5f5f5] dark:hover:bg-[#22262f]"}`}
         >
-          <LayoutHeaderCells width={16} height={16} />
+          <Magnifier width={16} height={16} />
           {t("sidebar.browseRooms")}
         </button>
         <button
@@ -327,7 +327,7 @@ export function Sidebar({
           onClick={() => onChange("roomScout")}
           className={`${ROW} ${view === "roomScout" ? "bg-[var(--default)]" : "hover:bg-[#f5f5f5] dark:hover:bg-[#22262f]"}`}
         >
-          <Magnifier width={16} height={16} />
+          <Binoculars width={16} height={16} />
           {t("sidebar.roomScout")}
           {scoutingActive && (
             <span className="relative ml-1 flex size-2" aria-label={t("sidebar.scoutingActive")}>

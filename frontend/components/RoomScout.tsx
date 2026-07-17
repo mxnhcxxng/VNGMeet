@@ -24,13 +24,13 @@ import {
 import { parseDate } from "@internationalized/date";
 import { I18nProvider } from "react-aria-components";
 import {
+  Binoculars,
   Calendar as CalendarIcon,
   Check,
   ChevronLeft,
   ChevronRight,
   CircleInfo,
   Copy,
-  Magnifier,
 } from "@gravity-ui/icons";
 import type { ReactNode } from "react";
 import {
@@ -368,7 +368,7 @@ function ScoutPermissionGuide({ userName }: { userName?: string }) {
     <div>
       <div className="mb-1 flex items-center gap-1.5">
         <BrandIcon size={34} />
-        <Magnifier className="size-7 text-[#F05A22]" />
+        <Binoculars className="size-7 text-[#F05A22]" />
       </div>
       <h1 className="mt-3 text-2xl font-bold text-default-900">
         {t("scout.greeting", { name: userName || t("scout.greetingThere") })}
@@ -592,7 +592,7 @@ function ScoutForm({
     <div>
       <div className="mb-1 flex items-center gap-1.5">
         <BrandIcon size={34} />
-        <Magnifier className="size-7 text-[#F05A22]" />
+        <Binoculars className="size-7 text-[#F05A22]" />
       </div>
       <h1 className="mt-3 text-2xl font-bold text-default-900">
         {t("scout.greeting", { name: userName || t("scout.greetingThere") })}

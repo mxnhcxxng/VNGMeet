@@ -7,7 +7,6 @@ import {
   useContext,
   useEffect,
   useLayoutEffect,
-  useMemo,
   useRef,
   useState,
 } from "react";
@@ -24,11 +23,14 @@ import {
 } from "@heroui/react";
 import {
   ArrowDown,
+  ArrowUp,
+  Binoculars,
   Calendar,
   Check,
   Clock,
   Copy,
-  PaperPlane,
+  Magnifier,
+  MapPin,
   ThumbsDown,
   ThumbsUp,
   Xmark,
@@ -39,12 +41,30 @@ import type { TranslationKey } from "@/lib/i18n";
 import { BrandIcon } from "./BrandIcon";
 import { clearBookingHistoryCache } from "./BookingHistory";
 
-const SUGGESTION_KEYS: TranslationKey[] = [
-  "chatp.suggestion1",
-  "chatp.suggestion2",
-  "chatp.suggestion3",
-  "chatp.suggestion4",
+// Quick-text shortcuts shown under the composer on the empty screen. Selecting
+// one drops an icon + label chip into the composer (ChatGPT-style), which is
+// prepended to whatever the user types before sending.
+const QUICK_TEXTS = [
+  { key: "chatp.quickFind" as TranslationKey, Icon: Magnifier },
+  { key: "chatp.quickSchedule" as TranslationKey, Icon: Clock },
+  { key: "chatp.quickScout" as TranslationKey, Icon: Binoculars },
+  { key: "chatp.quickDirections" as TranslationKey, Icon: MapPin },
 ];
+
+type QuickText = (typeof QUICK_TEXTS)[number];
+
+// Welcome titles for the empty chat screen. One is picked at random each time
+// the empty screen is entered. "chatp.welcomeBack" is name-aware and falls back
+// to a no-name variant when the user has no domain.
+const WELCOME_TITLE_KEYS = [
+  "chatp.welcomeHelp",
+  "chatp.welcomeBack",
+  "chatp.welcomeFindRoom",
+] as const satisfies readonly TranslationKey[];
+
+function randomWelcomeIndex() {
+  return Math.floor(Math.random() * WELCOME_TITLE_KEYS.length);
+}
 
 function TypingDots() {
   const t = useT();
@@ -668,11 +688,16 @@ export function ChatPanel({
   userDomain?: string;
   onRefresh?: (opts?: { force?: boolean }) => void;
 }) {
-  const { language, t } = useLanguage();
+  const { t } = useLanguage();
   const [messages, setMessages] = useState<ChatMessage[]>(() =>
     threadId ? cachedMessagesByThread.get(threadId) ?? [] : []
   );
   const [input, setInput] = useState("");
+  const [selectedQuick, setSelectedQuick] = useState<QuickText | null>(null);
+  // Composer collapses to a single pill row while the text fits one line, and
+  // expands (chip on top, actions on a bottom row) once it wraps — mirroring
+  // the ChatGPT composer.
+  const [multiline, setMultiline] = useState(false);
   const [loading, setLoading] = useState(
     Boolean(threadId && !cachedMessagesByThread.has(threadId))
   );
@@ -680,6 +705,11 @@ export function ChatPanel({
   const [error, setError] = useState<string | null>(null);
   const [showScrollDown, setShowScrollDown] = useState(false);
   const [zoomImage, setZoomImage] = useState<ZoomImage | null>(null);
+  // Random welcome title for the empty screen. Seeded on mount, then re-rolled
+  // whenever the user starts a fresh chat (an existing thread → no thread), so
+  // each time you land on the empty screen you get a different greeting.
+  const [welcomeIndex, setWelcomeIndex] = useState(randomWelcomeIndex);
+  const prevThreadRef = useRef(threadId);
   const endRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -732,6 +762,14 @@ export function ChatPanel({
     return () => {
       alive = false;
     };
+  }, [threadId]);
+
+  // Re-roll the welcome title when moving from an open thread back to a fresh
+  // empty chat. The mount seed already covers first entry (and remounts on tab
+  // switches), so we skip the initial run to avoid a flash of a second title.
+  useEffect(() => {
+    if (prevThreadRef.current && !threadId) setWelcomeIndex(randomWelcomeIndex());
+    prevThreadRef.current = threadId;
   }, [threadId]);
 
   useLayoutEffect(() => {
@@ -812,9 +850,13 @@ export function ChatPanel({
   };
 
   const send = async (override?: string) => {
-    const content = (override ?? input).trim();
+    const typed = (override ?? input).trim();
+    const quickLabel = selectedQuick ? t(selectedQuick.key) : "";
+    const content = [quickLabel, typed].filter(Boolean).join(" ").trim();
     if (!content || sending) return;
     setInput("");
+    setSelectedQuick(null);
+    setMultiline(false);
     resetTextareaHeight();
     setError(null);
     setSending(true);
@@ -846,32 +888,152 @@ export function ChatPanel({
     }
   };
 
-  const pickSuggestion = (text: string) => {
-    setInput(text);
+  const pickQuick = (item: QuickText) => {
+    setSelectedQuick(item);
     textareaRef.current?.focus();
   };
 
   const empty = !threadId && messages.length === 0 && !sending;
 
-  // Tonight's booking can reach 15 days out (the max bookable date).
-  const maxBookableDate = useMemo(() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 15);
-    return d.toLocaleDateString(
-      language === "vi" ? "vi-VN" : "en-US",
-      language === "vi"
-        ? { day: "numeric", month: "numeric" }
-        : { month: "long", day: "numeric" }
-    );
-  }, [language]);
+  const welcomeKey = WELCOME_TITLE_KEYS[welcomeIndex] ?? WELCOME_TITLE_KEYS[0];
+  const welcomeTitle =
+    welcomeKey === "chatp.welcomeBack"
+      ? userDomain
+        ? t("chatp.welcomeBack", { name: userDomain })
+        : t("chatp.welcomeBackNoName")
+      : t(welcomeKey);
 
-  const suggestionVars: Partial<Record<TranslationKey, Record<string, string>>> = {
-    "chatp.suggestion3": { date: maxBookableDate },
-  };
+  // The composer is shared between the empty screen (centered) and an active
+  // conversation (docked at the bottom), so the input, quick-text chip, and
+  // send behaviour stay identical in both places.
+  const quickChip = selectedQuick && (
+    <div className="flex shrink-0 items-center gap-1.5 text-sm font-medium text-[#f05a22]">
+      <selectedQuick.Icon width={16} height={16} />
+      <span>{t(selectedQuick.key)}</span>
+    </div>
+  );
+
+  const sendButton = (
+    <Button
+      isIconOnly
+      variant="primary"
+      aria-label={t("chatp.send")}
+      className="size-8 shrink-0 rounded-full"
+      isDisabled={!input.trim() && !selectedQuick}
+      isPending={sending}
+      onPress={() => send()}
+    >
+      <ArrowUp width={16} />
+    </Button>
+  );
+
+  const composerTextarea = (
+    <textarea
+      ref={textareaRef}
+      rows={1}
+      value={input}
+      onChange={(event) => {
+        const el = event.target;
+        setInput(el.value);
+        el.style.height = "auto";
+        // Grow from one line up to nine (line-height 20px), then scroll.
+        el.style.height = `${Math.min(el.scrollHeight, 180)}px`;
+        setMultiline(el.value.includes("\n") || el.scrollHeight > 24);
+      }}
+      placeholder={
+        selectedQuick
+          ? ""
+          : empty
+            ? t("chatp.inputPlaceholder")
+            : t("chatp.inputPlaceholderShort")
+      }
+      // In the pill (row) layout flex-1 lets the field fill the row; in the
+      // wrapped (column) layout flex-basis:0% would override the JS-set height
+      // and stop it growing, so drop flex-1 there and let `height` drive it.
+      className={`composer-scroll block max-h-[180px] min-h-[20px] w-full resize-none bg-transparent text-sm leading-5 text-[#181d27] dark:text-[#f7f7f7] outline-none placeholder:text-[#71717a] dark:placeholder:text-[#94979c] ${
+        multiline ? "" : "flex-1"
+      }`}
+      onKeyDown={(e) => {
+        // Ignore Enter while an IME composition is active (Vietnamese / CJK
+        // input methods on macOS, etc.). The Enter that commits the
+        // composition would otherwise send the message early and leave the
+        // just-committed syllable (e.g. "không") behind in the input.
+        if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+        // Backspace on an empty line clears the quick-text chip (ChatGPT-style).
+        if (e.key === "Backspace" && !input && selectedQuick) {
+          e.preventDefault();
+          setSelectedQuick(null);
+          return;
+        }
+        if (e.key === "Enter" && !e.shiftKey) {
+          e.preventDefault();
+          send();
+        }
+      }}
+    />
+  );
+
+  // One stable tree (so the textarea never remounts / loses focus mid-typing),
+  // restyled by `multiline`: single line → pill row [chip][textarea][send];
+  // wrapped → rounded box with the chip stacked above the textarea and the send
+  // button dropped to its own bottom row.
+  const renderComposer = () => (
+    <div
+      className={`bg-[var(--default)] ${
+        multiline
+          ? "flex flex-col gap-2 rounded-3xl px-4 py-3"
+          : "flex items-center gap-2 rounded-full py-2 pl-4 pr-2"
+      }`}
+    >
+      <div
+        className={`flex min-w-0 flex-1 gap-1 ${
+          multiline ? "flex-col" : "items-center"
+        }`}
+      >
+        {quickChip}
+        {composerTextarea}
+      </div>
+      <div className={multiline ? "flex justify-end" : "flex"}>{sendButton}</div>
+    </div>
+  );
 
   return (
     <ImageZoomContext.Provider value={setZoomImage}>
     <div className="flex h-full w-full flex-col">
+      {empty ? (
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto px-5 py-6">
+          <div className="flex w-full max-w-3xl flex-col items-center gap-10">
+            {error && (
+              <Chip color="danger" variant="soft" size="sm">
+                {error}
+              </Chip>
+            )}
+            <div className="flex items-center gap-2.5">
+              <BrandIcon size={48} className="shrink-0" />
+              <h1 className="text-2xl font-semibold tracking-tight text-[#181d27] dark:text-[#f7f7f7]">
+                {welcomeTitle}
+              </h1>
+            </div>
+            <div className="flex w-full flex-col gap-5">
+              {renderComposer()}
+              <div className="flex flex-col gap-1">
+                {QUICK_TEXTS.map(({ key, Icon }) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => pickQuick({ key, Icon })}
+                    className="flex h-12 w-full items-center gap-2 rounded-[12px] py-2 pl-3 pr-2 text-sm text-[#71717a] transition-colors hover:bg-[#ebebec80] hover:text-[#f05a22] dark:text-[#94979c] dark:hover:bg-[#22262f] dark:hover:text-[#f05a22]"
+                  >
+                    <Icon width={16} height={16} className="shrink-0" />
+                    {t(key)}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : (
+      <>
       <ScrollShadow
         ref={scrollRef}
         onScroll={onScroll}
@@ -896,37 +1058,6 @@ export function ChatPanel({
                   </div>
                 </div>
               ))}
-            </div>
-          ) : empty ? (
-            <div className="flex h-[60vh] flex-col items-center justify-center text-center">
-              <Avatar size="lg" className="mb-5 bg-[#FEEAE2] dark:bg-[#3B1202]">
-                <Avatar.Fallback className="bg-[#FEEAE2] dark:bg-[#3B1202]">
-                  <BrandIcon size={28} />
-                </Avatar.Fallback>
-              </Avatar>
-              <h1 className="text-2xl font-semibold tracking-tight text-[#181d27] dark:text-[#f7f7f7]">
-                {userDomain
-                  ? t("chatp.greeting", { name: userDomain })
-                  : t("chatp.greetingNoName")}
-              </h1>
-              <p className="mt-2 max-w-md text-sm text-[#535862] dark:text-[#94979c]">
-                {t("chatp.greetingSubtitle")}
-              </p>
-              <div className="mt-8 grid w-full max-w-3xl gap-2 sm:grid-cols-2">
-                {SUGGESTION_KEYS.map((key) => {
-                  const text = t(key, suggestionVars[key]);
-                  return (
-                    <button
-                      key={key}
-                      type="button"
-                      onClick={() => pickSuggestion(text)}
-                      className="rounded-xl border border-[#e9eaeb] dark:border-[#373a41] bg-white dark:bg-[#13161b] px-4 py-3 text-left text-sm text-[#414651] dark:text-[#f7f7f7] transition hover:border-[#d5d7da] dark:hover:border-[#373a41] hover:bg-[#f9f9fa] dark:hover:bg-[#22262f]"
-                    >
-                      {text}
-                    </button>
-                  );
-                })}
-              </div>
             </div>
           ) : (
             <div className="space-y-6 pb-4">
@@ -1016,8 +1147,8 @@ export function ChatPanel({
       </ScrollShadow>
 
       <div className="relative mx-auto w-full max-w-3xl px-5 pb-6">
-        {showScrollDown && !empty && (
-          <div className="pointer-events-none absolute -top-2 left-0 right-0 flex justify-center">
+        {showScrollDown && (
+          <div className="pointer-events-none absolute -top-12 left-0 right-0 flex justify-center">
             <Button
               isIconOnly
               size="sm"
@@ -1031,47 +1162,13 @@ export function ChatPanel({
           </div>
         )}
 
-        <div className="flex flex-col gap-2 rounded-2xl border border-[#e9eaeb] dark:border-[#373a41] bg-[var(--default)] p-3">
-          <textarea
-            ref={textareaRef}
-            rows={2}
-            value={input}
-            onChange={(event) => {
-              setInput(event.target.value);
-              const el = event.target;
-              el.style.height = "auto";
-              el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
-            }}
-            placeholder={t("chatp.inputPlaceholder")}
-            className="block max-h-[200px] min-h-[60px] w-full resize-none bg-transparent px-1 py-1.5 text-sm leading-6 text-[#181d27] dark:text-[#f7f7f7] outline-none placeholder:text-[#a4a7ae] dark:placeholder:text-[#94979c]"
-            onKeyDown={(e) => {
-              // Ignore Enter while an IME composition is active (Vietnamese / CJK
-              // input methods on macOS, etc.). The Enter that commits the
-              // composition would otherwise send the message early and leave the
-              // just-committed syllable (e.g. "không") behind in the input.
-              if (e.nativeEvent.isComposing || e.keyCode === 229) return;
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                send();
-              }
-            }}
-          />
-          <Button
-            isIconOnly
-            variant="primary"
-            aria-label={t("chatp.send")}
-            className="size-10 shrink-0 self-end rounded-full"
-            isDisabled={!input.trim()}
-            isPending={sending}
-            onPress={() => send()}
-          >
-            <PaperPlane width={18} />
-          </Button>
-        </div>
+        {renderComposer()}
         <p className="mt-2 text-center text-xs text-[#a4a7ae] dark:text-[#94979c]">
           {t("chatp.aiDisclaimer")}
         </p>
       </div>
+      </>
+      )}
       <ImageZoomModal image={zoomImage} onClose={() => setZoomImage(null)} />
     </div>
     </ImageZoomContext.Provider>
