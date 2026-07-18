@@ -31,6 +31,8 @@ import {
   ChevronRight,
   CircleInfo,
   Copy,
+  Pencil,
+  Persons,
 } from "@gravity-ui/icons";
 import type { ReactNode } from "react";
 import {
@@ -138,6 +140,15 @@ function capacityLabel(t: TFunction, size?: CapacitySize | null) {
   return CAPACITY_KEY[size] ? t(CAPACITY_KEY[size]) : size;
 }
 
+// People-count range shown on the success card's capacity chip. Matches
+// BookingModal's CAPACITY_RANGE so the two surfaces read identically.
+function capacityRange(size?: CapacitySize | null): string {
+  if (size === "small") return "≤4";
+  if (size === "medium") return "5-12";
+  if (size === "large") return "13+";
+  return "";
+}
+
 function pickRandom<T>(list: T[]): T | undefined {
   if (!list.length) return undefined;
   return list[Math.floor(Math.random() * list.length)];
@@ -173,6 +184,8 @@ export function RoomScout({
   // Only show the skeleton on the very first load; once cached, a tab switch
   // renders the cached view instantly and revalidates silently in the background.
   const [loading, setLoading] = useState(cachedScouts === null);
+  // When true, the active scout is shown in an editable form instead of the card.
+  const [editing, setEditing] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -204,6 +217,50 @@ export function RoomScout({
     [scouts],
   );
 
+  // Leave edit mode if the active scout disappears (e.g. it expired mid-edit).
+  useEffect(() => {
+    if (!activeScout && editing) setEditing(false);
+  }, [activeScout, editing]);
+
+  // A booked (success) scout that hasn't been dismissed and whose meeting day
+  // hasn't passed yet — this drives the "we found a room" screen. Scouts are
+  // ordered newest-first, so `find` returns the most recent qualifying one.
+  const successScout = useMemo(() => {
+    const today = localDateAfter(0);
+    return (
+      scouts.find(
+        (s) =>
+          s.status === "success" &&
+          !s.acknowledged_at &&
+          (s.scout_date ?? "") >= today,
+      ) ?? null
+    );
+  }, [scouts]);
+
+  // While a scout is actively hunting, the auto-booker runs every minute in the
+  // background; poll so the tab flips to the success screen without a reload.
+  useEffect(() => {
+    if (!activeScout) return;
+    const id = setInterval(() => {
+      load();
+    }, 20_000);
+    return () => clearInterval(id);
+  }, [activeScout, load]);
+
+  // Auto-dismiss the success screen at midnight ending the meeting day.
+  useEffect(() => {
+    if (!successScout?.scout_date) return;
+    const midnight = new Date(`${successScout.scout_date}T00:00:00`);
+    midnight.setDate(midnight.getDate() + 1);
+    const ms = midnight.getTime() - Date.now();
+    if (ms <= 0) {
+      load();
+      return;
+    }
+    const id = setTimeout(() => load(), Math.min(ms, 2 ** 31 - 1));
+    return () => clearTimeout(id);
+  }, [successScout, load]);
+
   // Scout now auto-books instead of emailing, so Mail.Send is no longer required
   // and we don't gate the form on it. The `!canSendMail` term is kept (disabled by
   // the leading `false`) in case the email-notification path is re-enabled later.
@@ -216,11 +273,32 @@ export function RoomScout({
           {loading ? (
             <ScoutFormSkeleton />
           ) : activeScout ? (
-            <ScoutingCard
-              scout={activeScout}
+            editing ? (
+              <ScoutForm
+                mode="edit"
+                scout={activeScout}
+                userName={userName}
+                userOffice={userOffice}
+                onSaved={async () => {
+                  setEditing(false);
+                  await load();
+                }}
+                onCancel={() => setEditing(false)}
+              />
+            ) : (
+              <ScoutingCard
+                scout={activeScout}
+                thumbnails={roomThumbnails}
+                officeOptions={officeOptions}
+                onChanged={load}
+                onEdit={() => setEditing(true)}
+              />
+            )
+          ) : successScout ? (
+            <ScoutSuccessCard
+              scout={successScout}
               thumbnails={roomThumbnails}
-              officeOptions={officeOptions}
-              onChanged={load}
+              onDismiss={load}
             />
           ) : showGuide ? (
             <ScoutPermissionGuide userName={userName} />
@@ -228,7 +306,7 @@ export function RoomScout({
             <ScoutForm
               userName={userName}
               userOffice={userOffice}
-              onCreated={load}
+              onSaved={load}
             />
           )}
         </div>
@@ -484,28 +562,44 @@ function ScoutFormSkeleton() {
 function ScoutForm({
   userName,
   userOffice,
-  onCreated,
+  mode = "create",
+  scout,
+  onSaved,
+  onCancel,
 }: {
   userName?: string;
   userOffice?: string;
-  onCreated: () => void | Promise<void>;
+  mode?: "create" | "edit";
+  scout?: RoomScoutRow;
+  onSaved: () => void | Promise<void>;
+  onCancel?: () => void;
 }) {
   const t = useT();
-  const [office, setOffice] = useState(userOffice || "");
-  const [scoutDate, setScoutDate] = useState(() => localDateAfter(0));
-  const [startTime, setStartTime] = useState(() => defaultStartTime());
-  const [endTime, setEndTime] = useState("");
-  const [duration, setDuration] = useState("");
-  const [capacities, setCapacities] = useState<CapacitySize[]>([]);
-  const [ignoreLunch, setIgnoreLunch] = useState(false);
+  const isEdit = mode === "edit";
+  // In edit mode every field is seeded from the existing scout; in create mode
+  // office defaults to the user's profile office.
+  const [office, setOffice] = useState(scout?.office || userOffice || "");
+  const [scoutDate, setScoutDate] = useState(() => scout?.scout_date || localDateAfter(0));
+  const [startTime, setStartTime] = useState(() => scout?.scout_start_time || defaultStartTime());
+  const [endTime, setEndTime] = useState(scout?.scout_end_time || "");
+  const [duration, setDuration] = useState(scout ? String(scout.duration_minutes) : "");
+  const [capacities, setCapacities] = useState<CapacitySize[]>(
+    scout?.capacity_sizes?.length
+      ? scout.capacity_sizes
+      : scout?.capacity_size
+        ? [scout.capacity_size]
+        : [],
+  );
+  const [ignoreLunch, setIgnoreLunch] = useState(Boolean(scout?.ignore_lunch_break));
   const [saving, setSaving] = useState(false);
   // The custom DatePicker trigger has no DateInput for react-aria to anchor the
   // popover against, so wire the trigger ref (matches BrowseRooms' date picker).
   const dateTriggerRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
-    setOffice(userOffice || "");
-  }, [userOffice]);
+    // Only mirror the profile office in create mode; edit keeps the scout's value.
+    if (!isEdit) setOffice(userOffice || "");
+  }, [userOffice, isEdit]);
 
   const today = localDateAfter(0);
   const maxScoutDate = localDateAfter(SCOUT_MAX_ADVANCE_DAYS);
@@ -530,9 +624,14 @@ function ScoutForm({
   }, [startTime, endTime]);
 
   // Auto-check the option as soon as the range crosses lunch (and clear it when
-  // it no longer does). Runs only on the crossesLunch transition, so a user who
-  // manually unchecks it while still crossing lunch keeps their choice.
+  // it no longer does). Skip the initial run so the seeded value (create: false;
+  // edit: the scout's stored choice) is preserved until the user changes the range.
+  const lunchFirstRun = useRef(true);
   useEffect(() => {
+    if (lunchFirstRun.current) {
+      lunchFirstRun.current = false;
+      return;
+    }
     setIgnoreLunch(crossesLunch);
   }, [crossesLunch]);
 
@@ -561,23 +660,29 @@ function ScoutForm({
       toast.warning(t("scout.rangeTooShort"));
       return;
     }
+    const payload = {
+      scout_date: scoutDate,
+      duration_minutes: Number(duration),
+      capacity_sizes: capacities,
+      scout_start_time: startTime,
+      scout_end_time: endTime,
+      ignore_lunch_break: ignoreLunch,
+      office: office || null,
+    };
     setSaving(true);
     try {
-      await api.createRoomScout({
-        scout_date: scoutDate,
-        duration_minutes: Number(duration),
-        capacity_sizes: capacities,
-        scout_start_time: startTime,
-        scout_end_time: endTime,
-        ignore_lunch_break: ignoreLunch,
-        office: office || null,
-      });
-      toast.success(t("scout.started"), {
-        description: t("scout.startedDesc"),
-      });
-      await onCreated();
+      if (isEdit && scout) {
+        await api.updateRoomScout(scout.id, payload);
+        toast.success(t("scout.updated"), { description: t("scout.updatedDesc") });
+      } else {
+        await api.createRoomScout(payload);
+        toast.success(t("scout.started"), { description: t("scout.startedDesc") });
+      }
+      await onSaved();
     } catch (e: any) {
-      toast.danger(t("scout.startFailed"), { description: e.message });
+      toast.danger(isEdit ? t("scout.updateFailed") : t("scout.startFailed"), {
+        description: e.message,
+      });
     } finally {
       setSaving(false);
     }
@@ -775,13 +880,33 @@ function ScoutForm({
           </Select.Popover>
         </Select>
 
-        <Button
-          className="mt-2 w-full rounded-full"
-          onPress={submit}
-          isPending={saving}
-        >
-          {t("scout.start")}
-        </Button>
+        {isEdit ? (
+          <div className="mt-2 flex items-center gap-2">
+            <Button
+              variant="tertiary"
+              className="rounded-full"
+              isDisabled={saving}
+              onPress={() => onCancel?.()}
+            >
+              {t("scout.cancelEdit")}
+            </Button>
+            <Button
+              className="flex-1 rounded-full"
+              onPress={submit}
+              isPending={saving}
+            >
+              {t("scout.update")}
+            </Button>
+          </div>
+        ) : (
+          <Button
+            className="mt-2 w-full rounded-full"
+            onPress={submit}
+            isPending={saving}
+          >
+            {t("scout.start")}
+          </Button>
+        )}
       </div>
     </div>
   );
@@ -792,14 +917,19 @@ function ScoutingCard({
   thumbnails,
   officeOptions,
   onChanged,
+  onEdit,
 }: {
   scout: RoomScoutRow;
   thumbnails: string[];
   officeOptions: UserProfileOption[];
   onChanged: () => void | Promise<void>;
+  onEdit?: () => void;
 }) {
   const t = useT();
   const [busy, setBusy] = useState<"cancel" | "found" | null>(null);
+  // The auto-stop-at-midnight caveat only matters when scouting a day other than
+  // today (a future-dated scout still stops at midnight tonight).
+  const differentDay = Boolean(scout.scout_date) && scout.scout_date !== localDateAfter(0);
 
   // Random thumbnail that crossfades to another random one every 5s.
   const [pair, setPair] = useState<{ cur?: string; prev?: string }>(() => ({
@@ -867,13 +997,25 @@ function ScoutingCard({
         )}
       </div>
 
-      <h1 className="mt-5 text-2xl font-bold text-default-900">
-        {t("scout.scouting")}
-        <span className="ml-0.5 inline-block w-6 text-left align-baseline">
-          {".".repeat(dots)}
-        </span>
-      </h1>
-      <p className="mt-1.5 text-sm leading-5 text-default-500">{t("scout.subtitle")}</p>
+      <div className="mt-5 flex items-center justify-between gap-3">
+        <h1 className="text-2xl font-bold text-default-900">
+          {t("scout.scouting")}
+          <span className="ml-0.5 inline-block w-6 text-left align-baseline">
+            {".".repeat(dots)}
+          </span>
+        </h1>
+        <Button
+          size="sm"
+          variant="secondary"
+          className="shrink-0 gap-1.5 rounded-full text-[#F05A22]"
+          isDisabled={!!busy}
+          onPress={() => onEdit?.()}
+        >
+          <Pencil width={14} height={14} />
+          {t("scout.edit")}
+        </Button>
+      </div>
+      <p className="mt-1.5 text-sm leading-5 text-default-500">{t("scout.scoutingSubtitle")}</p>
 
       <dl className="mt-5 grid gap-2.5 text-sm">
         <DetailRow
@@ -909,10 +1051,12 @@ function ScoutingCard({
         <DetailRow label={t("scout.lastChecked")} value={formatLastChecked(scout.last_checked_at)} />
       </dl>
 
-      <div className="mt-4 flex items-start gap-1.5 text-sm leading-5 text-default-500">
-        <CircleInfo className="mt-0.5 size-4 shrink-0 text-[#F05A22]" />
-        <span>{t("scout.endsAtMidnightNote")}</span>
-      </div>
+      {differentDay && (
+        <div className="mt-4 flex items-start gap-1.5 text-sm leading-5 text-default-500">
+          <CircleInfo className="mt-0.5 size-4 shrink-0 text-[#F05A22]" />
+          <span>{t("scout.endsAtMidnightNote")}</span>
+        </div>
+      )}
 
       <div className="mt-5 flex items-center gap-2">
         <Button
@@ -933,6 +1077,126 @@ function ScoutingCard({
           {t("scout.foundRoom")}
         </Button>
       </div>
+    </div>
+  );
+}
+
+// Shown when a scout auto-books a room. Persists until the user taps "Great"
+// (acknowledge) or midnight of the meeting day, per the Room Scout spec.
+function ScoutSuccessCard({
+  scout,
+  thumbnails,
+  onDismiss,
+}: {
+  scout: RoomScoutRow;
+  thumbnails: string[];
+  onDismiss: () => void | Promise<void>;
+}) {
+  const t = useT();
+  const [busy, setBusy] = useState(false);
+  const room = scout.booked_room ?? null;
+  // Prefer the booked room's own thumbnail; fall back to a random one (stable
+  // across re-renders so tapping "Great" doesn't reshuffle the image).
+  const [bg] = useState(
+    () => room?.thumbnail_link || pickRandom(thumbnails) || "/default-room-thumbnail.png",
+  );
+  const roomName = room?.name || scout.booked_room_email || t("scout.cardTitle");
+  const email = room?.email || scout.booked_room_email || "";
+  const time =
+    scout.booked_start_time && scout.booked_end_time
+      ? `${scout.booked_start_time} - ${scout.booked_end_time}`
+      : "";
+  const zoneText = [room?.building, room?.zone]
+    .map((v) => String(v ?? "").trim())
+    .filter(Boolean)
+    .join(" ");
+
+  // Same chip system as the booking modal's banner: capacity is the primary
+  // (orange) accent chip, floor/venue are secondary. Each drops when absent.
+  const chips = [
+    room?.capacity_size
+      ? {
+          label: capacityRange(room.capacity_size),
+          variant: "primary" as const,
+          icon: <Persons width={14} height={14} />,
+        }
+      : null,
+    room?.floor
+      ? {
+          label: t("booking.floor", { floor: String(room.floor) }),
+          variant: "secondary" as const,
+          icon: null as ReactNode,
+        }
+      : null,
+    zoneText
+      ? { label: zoneText, variant: "secondary" as const, icon: null as ReactNode }
+      : null,
+  ].filter(Boolean) as {
+    label: string;
+    variant: "primary" | "secondary";
+    icon: ReactNode;
+  }[];
+
+  const dismiss = async () => {
+    setBusy(true);
+    try {
+      await api.acknowledgeRoomScout(scout.id);
+      await onDismiss();
+    } catch (e: any) {
+      toast.danger(t("scout.acknowledgeFailed"), { description: e.message });
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-6">
+      {/* Card: 480×600 mockup — image + dark gradients, heading top, room bottom. */}
+      <div className="relative h-[600px] w-full overflow-hidden rounded-2xl bg-default-100">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={bg} alt={roomName} className="absolute inset-0 h-full w-full object-cover" />
+        <div className="absolute inset-0 bg-gradient-to-b from-transparent from-50% to-black/90" />
+
+        {/* Heading (top), over its own dark-to-transparent gradient. */}
+        <div className="absolute inset-x-0 top-0 flex flex-col gap-1 bg-gradient-to-b from-black/80 to-transparent p-6 text-white">
+          <p className="whitespace-pre-line text-2xl font-bold leading-8">
+            {t("scout.foundHeading")}
+          </p>
+          <p className="text-base leading-6">{t("scout.foundSubtitle")}</p>
+        </div>
+
+        {/* Room details (bottom), centered like the booking modal banner. */}
+        <div className="absolute inset-x-0 bottom-0 flex flex-col items-center gap-2 p-6">
+          <div className="w-full text-center text-white">
+            <p className="text-xl font-bold leading-8">
+              {roomName}
+              {time && <span> • {time}</span>}
+            </p>
+            {email && <p className="text-sm font-medium leading-5">{email}</p>}
+          </div>
+          {chips.length > 0 && (
+            <div className="flex flex-wrap items-center justify-center gap-1">
+              {chips.map((chip) => (
+                <Chip
+                  key={chip.label}
+                  size="md"
+                  color="accent"
+                  variant={chip.variant}
+                  className="backdrop-blur-sm"
+                >
+                  <span className="inline-flex items-center gap-1">
+                    {chip.icon}
+                    {chip.label}
+                  </span>
+                </Chip>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <Button className="w-full rounded-full" onPress={dismiss} isPending={busy}>
+        {t("scout.great")}
+      </Button>
     </div>
   );
 }

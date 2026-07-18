@@ -439,6 +439,12 @@ alter table room_scouts add column if not exists ignore_lunch_break boolean not 
 -- processing cycle can re-check whether the room accepted or declined.
 alter table room_scouts add column if not exists pending_activity_id uuid
   references public.user_activity(id) on delete set null;
+-- The room + exact window an auto-book landed, so the tab can show a success
+-- screen; acknowledged_at records when the user dismissed it ("Great").
+alter table room_scouts add column if not exists booked_room_email text;
+alter table room_scouts add column if not exists booked_start_time text;
+alter table room_scouts add column if not exists booked_end_time text;
+alter table room_scouts add column if not exists acknowledged_at timestamptz;
 create index if not exists idx_room_scouts_user_status on room_scouts(user_id, status);
 create index if not exists idx_room_scouts_active_expires on room_scouts(status, expires_at);
 alter table room_scouts enable row level security;

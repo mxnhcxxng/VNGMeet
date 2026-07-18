@@ -493,6 +493,9 @@ async def process_room_scouts() -> dict:
                     if status == "success":
                         sb.table("room_scouts").update(
                             {"status": "success", "pending_activity_id": None,
+                             "booked_room_email": act.get("room_email"),
+                             "booked_start_time": act.get("start_time"),
+                             "booked_end_time": act.get("end_time"),
                              "last_checked_at": checked_at, "updated_at": checked_at}
                         ).eq("id", scout_id).execute()
                         booked += 1
@@ -581,6 +584,9 @@ async def process_room_scouts() -> dict:
                 if status == "success":
                     sb.table("room_scouts").update(
                         {"status": "success", "pending_activity_id": None,
+                         "booked_room_email": room["email"],
+                         "booked_start_time": start_label,
+                         "booked_end_time": end_label,
                          "last_checked_at": checked_at, "updated_at": checked_at}
                     ).eq("id", scout_id).execute()
                     booked += 1
@@ -629,13 +635,14 @@ async def list_room_scouts(request: Request):
         return {"scouts": [], "can_send_mail": can_send_mail}
     from .supabase_client import get_supabase
 
+    sb = get_supabase()
     rows = (
-        get_supabase()
+        sb
         .table("room_scouts")
         .select(
             "id, email, scout_date, duration_minutes, capacity_size, capacity_sizes, scout_start_time, scout_end_time, "
             "ignore_lunch_break, office, status, last_checked_at, last_notified_at, "
-            "expires_at, created_at"
+            "expires_at, created_at, booked_room_email, booked_start_time, booked_end_time, acknowledged_at"
         )
         .eq("user_id", user_profile_id)
         .order("created_at", desc=True)
@@ -644,7 +651,47 @@ async def list_room_scouts(request: Request):
         .data
         or []
     )
+    _attach_booked_rooms(sb, rows)
     return {"scouts": rows, "can_send_mail": can_send_mail}
+
+
+def _attach_booked_rooms(sb, rows: list[dict]) -> None:
+    """Enrich success scouts with the booked room's display metadata so the tab
+    can render the 'we found a room' screen without a second round-trip."""
+    emails = {
+        str(r.get("booked_room_email") or "").strip().lower()
+        for r in rows
+        if r.get("status") == "success" and r.get("booked_room_email")
+    }
+    emails.discard("")
+    if not emails:
+        return
+    meta_rows = (
+        sb.table("meeting_room_metadata")
+        .select("name, email, building, floor, zone, capacity_size, thumbnail_link, map_link")
+        .execute()
+        .data
+        or []
+    )
+    by_email = {
+        str(m.get("email") or "").strip().lower(): m
+        for m in meta_rows
+        if m.get("email")
+    }
+    for r in rows:
+        email = str(r.get("booked_room_email") or "").strip().lower()
+        meta = by_email.get(email)
+        if r.get("status") == "success" and meta:
+            r["booked_room"] = {
+                "name": meta.get("name"),
+                "email": meta.get("email"),
+                "building": meta.get("building"),
+                "floor": meta.get("floor"),
+                "zone": meta.get("zone"),
+                "capacity_size": _effective_capacity_size(meta),
+                "thumbnail_link": meta.get("thumbnail_link"),
+                "map_link": meta.get("map_link"),
+            }
 
 
 @router.post("/api/room-scouts")
@@ -726,6 +773,83 @@ async def create_room_scout(request: Request, payload: RoomScoutRequest):
     return {"ok": True, "scout": res.data[0] if res.data else row}
 
 
+@router.patch("/api/room-scouts/{scout_id}")
+async def update_room_scout(request: Request, scout_id: str, payload: RoomScoutRequest):
+    _token, _auth_user_id, user_profile_id, email = await _booking_auth_context(request)
+    if not settings.supabase_enabled or not user_profile_id or not email:
+        raise HTTPException(503, "Room Scout requires Supabase and a user profile email.")
+    from .supabase_client import get_supabase
+
+    sb = get_supabase()
+    existing = (
+        sb.table("room_scouts")
+        .select("id, status")
+        .eq("id", scout_id)
+        .eq("user_id", user_profile_id)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    if not existing:
+        raise HTTPException(404, "Room Scout not found.")
+    if existing[0].get("status") != "active":
+        raise HTTPException(409, "Chỉ có thể sửa phiên Săn phòng đang chạy.")
+
+    profile = _read_user_profile(user_profile_id, email) or {}
+    office = (payload.office or profile.get("office") or "").strip() or None
+
+    start_minutes = _time_to_minutes(payload.scout_start_time)
+    end_minutes = _time_to_minutes(payload.scout_end_time)
+    if start_minutes is None or end_minutes is None or end_minutes <= start_minutes:
+        raise HTTPException(422, "Scout range must have a valid start and end time.")
+    if end_minutes - start_minutes < payload.duration_minutes:
+        raise HTTPException(422, "Scout range must be at least as long as the duration.")
+
+    tz = ZoneInfo(settings.timezone)
+    local_today = datetime.now(tz).date()
+    scout_date = payload.scout_date or local_today
+    max_scout_date = local_today + timedelta(days=14)
+    if scout_date < local_today or scout_date > max_scout_date:
+        raise HTTPException(
+            422, "Scout date must be between today and 14 days from today."
+        )
+    # Recompute the expiry exactly like create_room_scout: midnight after today,
+    # clamped to scout_end_time when scouting today.
+    scout_end_local = datetime.combine(
+        local_today + timedelta(days=1), datetime.min.time(), tzinfo=tz
+    )
+    if scout_date == local_today:
+        window_end_local = datetime.combine(
+            local_today, datetime.min.time(), tzinfo=tz
+        ) + timedelta(minutes=end_minutes)
+        scout_end_local = min(scout_end_local, window_end_local)
+
+    now = datetime.now(timezone.utc).isoformat()
+    update = {
+        "scout_date": scout_date.isoformat(),
+        "duration_minutes": payload.duration_minutes,
+        "capacity_size": payload.capacity_size,
+        "capacity_sizes": list(dict.fromkeys(payload.capacity_sizes)),
+        "scout_start_time": _minutes_to_label(start_minutes),
+        "scout_end_time": _minutes_to_label(end_minutes),
+        "ignore_lunch_break": payload.ignore_lunch_break,
+        "office": office,
+        "expires_at": scout_end_local.astimezone(timezone.utc).isoformat(),
+        # Params changed → let the next matching scan act on the new criteria.
+        "last_notified_signature": None,
+        "updated_at": now,
+    }
+    res = (
+        sb.table("room_scouts")
+        .update(update)
+        .eq("id", scout_id)
+        .eq("user_id", user_profile_id)
+        .execute()
+    )
+    return {"ok": True, "scout": res.data[0] if res.data else update}
+
+
 @router.delete("/api/room-scouts/{scout_id}")
 async def stop_room_scout(request: Request, scout_id: str, outcome: str = "canceled"):
     # outcome: "canceled" (user gave up) or "success" (user found a room).
@@ -740,6 +864,22 @@ async def stop_room_scout(request: Request, scout_id: str, outcome: str = "cance
         {"status": status, "updated_at": now}
     ).eq("id", scout_id).eq("user_id", user_profile_id).execute()
     return {"ok": True, "status": status}
+
+
+@router.post("/api/room-scouts/{scout_id}/acknowledge")
+async def acknowledge_room_scout(request: Request, scout_id: str):
+    """Dismiss the success screen ("Great"): mark the auto-booked scout as seen so
+    the tab returns to the default form instead of re-showing the success card."""
+    _token, _auth_user_id, user_profile_id, _email = await _booking_auth_context(request)
+    if not user_profile_id or not settings.supabase_enabled:
+        raise HTTPException(503, "Room Scout requires Supabase.")
+    from .supabase_client import get_supabase
+
+    now = datetime.now(timezone.utc).isoformat()
+    get_supabase().table("room_scouts").update(
+        {"acknowledged_at": now, "updated_at": now}
+    ).eq("id", scout_id).eq("user_id", user_profile_id).eq("status", "success").execute()
+    return {"ok": True}
 
 
 @router.post("/api/room-scouts/process")

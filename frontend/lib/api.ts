@@ -181,6 +181,21 @@ export interface RoomScout {
   last_notified_at?: string | null;
   expires_at: string;
   created_at: string;
+  // Set once an auto-book lands; drives the "we found a room" success screen.
+  booked_room_email?: string | null;
+  booked_start_time?: string | null; // "HH:MM"
+  booked_end_time?: string | null; // "HH:MM"
+  acknowledged_at?: string | null;
+  booked_room?: {
+    name?: string | null;
+    email?: string | null;
+    building?: string | null;
+    floor?: string | null;
+    zone?: string | null;
+    capacity_size?: CapacitySize | null;
+    thumbnail_link?: string | null;
+    map_link?: string | null;
+  } | null;
 }
 
 export interface RoomScoutPayload {
@@ -307,11 +322,19 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     }),
+  updateRoomScout: (id: string, payload: RoomScoutPayload) =>
+    req<{ ok: boolean; scout: RoomScout }>(`/api/room-scouts/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
   stopRoomScout: (id: string, outcome: "canceled" | "success" = "canceled") =>
     req<{ ok: boolean; status: string }>(
       `/api/room-scouts/${id}?outcome=${outcome}`,
       { method: "DELETE" },
     ),
+  acknowledgeRoomScout: (id: string) =>
+    req<{ ok: boolean }>(`/api/room-scouts/${id}/acknowledge`, { method: "POST" }),
   processRoomScouts: () =>
     req<{ ok: boolean; checked: number; notified: number; matches: number; errors: number }>(
       "/api/room-scouts/process",
