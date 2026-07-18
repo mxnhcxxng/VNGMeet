@@ -1083,9 +1083,9 @@ export default function Home() {
   useEffect(() => {
     refreshScoutStatus();
   }, [refreshScoutStatus]);
-  // The bot enabled a scout from chat: light up the sidebar dot now, and drop
-  // the RoomScout cache so opening that tab shows the active scout immediately.
-  const handleScoutCreated = useCallback(() => {
+  // The bot enabled or cancelled a scout from chat: re-sync the sidebar dot now,
+  // and drop the RoomScout cache so opening that tab reflects the change at once.
+  const handleScoutChanged = useCallback(() => {
     clearRoomScoutCache();
     refreshScoutStatus();
   }, [refreshScoutStatus]);
@@ -1363,7 +1363,7 @@ export default function Home() {
               onThreadsChanged={setChatThreads}
               onRefresh={loadSchedule}
               onNavigate={handleChatNavigate}
-              onScoutCreated={handleScoutCreated}
+              onScoutChanged={handleScoutChanged}
               userRole={me.profile?.role}
               userDomain={
                 me.profile?.email_username ||

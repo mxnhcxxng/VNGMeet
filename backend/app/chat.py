@@ -102,6 +102,11 @@ Luồng Săn phòng (Room Scout):
 - ignore_lunch_break: khi khung giờ [scout_start_time, scout_end_time) có giao với giờ nghỉ trưa 12:00-13:00 (ví dụ 11:30-14:00, hoặc 12:30-15:00), MẶC ĐỊNH đặt ignore_lunch_break = true (tự động chấp nhận đặt phòng trong giờ nghỉ trưa), KHÔNG cần hỏi user; chỉ đặt false khi user chủ động nói không muốn đặt phòng vào giờ nghỉ trưa. Nếu khung giờ KHÔNG chạm 12:00-13:00 (ví dụ 09:00-11:00 hoặc 14:00-17:00) thì để mặc định false.
 - Nếu thiếu trường bắt buộc nào (ngày, thời lượng, khung giờ, sức chứa), hỏi bổ sung ngắn gọn trước khi gọi function. Xác nhận lại thông tin với user trước khi bật.
 - Xử lý kết quả create_room_scout: nếu ok=true và created=true thì báo đã bật Săn phòng thành công, tóm tắt ngày/khung giờ/thời lượng/sức chứa, và nói hệ thống sẽ email khi có phòng trống; nhắc user có thể vào trang [Săn phòng](/room-scout) để theo dõi hoặc dừng. Nếu ok=false thì báo lý do (ví dụ chưa cấp quyền Mail.Send, đang có phiên săn phòng khác, hoặc thông tin không hợp lệ) và hướng dẫn user xử lý.
+- Huỷ/dừng Săn phòng: khi user muốn DỪNG/HUỶ/TẮT săn phòng, xác định outcome rồi gọi cancel_room_scout:
+  • Nếu user ĐÃ NÓI RÕ đã đặt/tìm được phòng (ví dụ "tìm được phòng rồi, dừng săn đi", "đặt được phòng rồi huỷ giúp") → gọi ngay với outcome='success', KHÔNG hỏi lại.
+  • Nếu user nói rõ chưa đặt được / chỉ muốn dừng (ví dụ "chưa được, tắt đi") → outcome='canceled', không cần hỏi.
+  • Nếu KHÔNG rõ user đã đặt được phòng hay chưa (chỉ nói chung chung "huỷ săn phòng", "dừng săn phòng") → HỎI "Bạn đã đặt được phòng chưa?" rồi gọi theo câu trả lời.
+  Xử lý kết quả: nếu stopped=true thì báo đã dừng phiên Săn phòng (nếu outcome='success' có thể chúc mừng user đã đặt được phòng); nếu stopped=false với reason=no_active_scout thì báo user hiện không có phiên Săn phòng nào đang chạy; nếu ok=false thì báo lý do.
 
 Nguyên tắc phản hồi:
 - Trả lời ngắn gọn, rõ ràng, tập trung vào hành động tiếp theo.
@@ -311,6 +316,31 @@ CHAT_TOOLS = [
                     "scout_end_time",
                     "capacity_sizes",
                 ],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "cancel_room_scout",
+            "description": (
+                "Dừng phiên Săn phòng (Room Scout) đang chạy của user. Chọn outcome: "
+                "user đã đặt/tìm được phòng thì outcome='success', chưa (chỉ muốn dừng) "
+                "thì outcome='canceled'. Nếu tin nhắn của user đã cho biết rõ đã đặt "
+                "được phòng hay chưa thì gọi luôn với outcome tương ứng, KHÔNG hỏi lại; "
+                "chỉ hỏi khi chưa rõ. User chỉ có tối đa một phiên đang chạy nên không "
+                "cần id."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "outcome": {
+                        "type": "string",
+                        "enum": ["success", "canceled"],
+                        "description": "success = user đã đặt/tìm được phòng; canceled = user chưa đặt được, chỉ muốn dừng săn.",
+                    },
+                },
+                "required": ["outcome"],
             },
         },
     },
@@ -1651,6 +1681,63 @@ async def _tool_create_room_scout(
     }
 
 
+async def _tool_cancel_room_scout(
+    request: Request,
+    args: dict,
+    user_profile_id: str | None,
+) -> dict:
+    """Stop the user's active Room Scout, if any. Mirrors the in-app card's two
+    buttons: `outcome="success"` when the user already found/booked a room, else
+    `outcome="canceled"`. The user only ever has one active scout, so no id is
+    needed — we look it up and stop it."""
+    if not settings.supabase_enabled:
+        return {"ok": False, "error": "Room Scout requires Supabase."}
+    if not user_profile_id:
+        return {"ok": False, "error": "Không xác định được user."}
+
+    # Only "success" (user booked a room) vs "canceled" (gave up); default the
+    # safer "canceled" if the model omits/garbles it.
+    outcome = "success" if str(args.get("outcome") or "").strip().lower() == "success" else "canceled"
+
+    from .supabase_client import get_supabase
+
+    active = (
+        get_supabase()
+        .table("room_scouts")
+        .select("id, scout_date, scout_start_time, scout_end_time")
+        .eq("user_id", user_profile_id)
+        .eq("status", "active")
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    if not active:
+        return {"ok": True, "stopped": False, "reason": "no_active_scout"}
+
+    scout = active[0]
+    from .room_scouts import stop_room_scout
+
+    try:
+        await stop_room_scout(request, str(scout["id"]), outcome)
+    except HTTPException as e:
+        return {"ok": False, "error": str(e.detail)}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": str(e)}
+
+    return {
+        "ok": True,
+        "stopped": True,
+        "outcome": outcome,
+        "scout": {
+            "scout_date": scout.get("scout_date"),
+            "scout_start_time": scout.get("scout_start_time"),
+            "scout_end_time": scout.get("scout_end_time"),
+        },
+    }
+
+
 async def _run_chat_tool(
     request: Request,
     name: str,
@@ -1677,6 +1764,8 @@ async def _run_chat_tool(
         )
     if name == "create_room_scout":
         return await _tool_create_room_scout(request, args, user_profile_id)
+    if name == "cancel_room_scout":
+        return await _tool_cancel_room_scout(request, args, user_profile_id)
     return {"ok": False, "error": f"Unknown tool: {name}"}
 
 

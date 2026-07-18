@@ -345,17 +345,20 @@ function messagesBookedDirectly(messages: ChatMessage[]): boolean {
   });
 }
 
-// Detects that the bot enabled a Room Scout in this batch, so the caller can
-// refresh the sidebar's active-scout indicator without waiting for a reload.
-function messagesCreatedScout(messages: ChatMessage[]): boolean {
+// Detects that the bot enabled OR cancelled a Room Scout in this batch, so the
+// caller can refresh the sidebar's active-scout indicator without a reload.
+function messagesScoutChanged(messages: ChatMessage[]): boolean {
   return messages.some((message) => {
     const toolResults = (message.metadata as any)?.tool_results;
     if (!Array.isArray(toolResults)) return false;
     return toolResults.some(
       (item) =>
-        item?.name === "create_room_scout" &&
-        item?.result?.ok === true &&
-        item?.result?.created === true
+        (item?.name === "create_room_scout" &&
+          item?.result?.ok === true &&
+          item?.result?.created === true) ||
+        (item?.name === "cancel_room_scout" &&
+          item?.result?.ok === true &&
+          item?.result?.stopped === true)
     );
   });
 }
@@ -720,7 +723,7 @@ export function ChatPanel({
   userDomain = "",
   onRefresh,
   onNavigate,
-  onScoutCreated,
+  onScoutChanged,
 }: {
   threadId: string | null;
   onThreadSelected: (threadId: string) => void;
@@ -729,7 +732,7 @@ export function ChatPanel({
   userDomain?: string;
   onRefresh?: (opts?: { force?: boolean }) => void;
   onNavigate?: (href: string) => void;
-  onScoutCreated?: () => void;
+  onScoutChanged?: () => void;
 }) {
   const { t } = useLanguage();
   const [messages, setMessages] = useState<ChatMessage[]>(() =>
@@ -919,7 +922,7 @@ export function ChatPanel({
       );
       if (!threadId) onThreadSelected(res.thread.id);
       if (messagesBookedDirectly(returned)) syncAfterBooking();
-      if (messagesCreatedScout(returned)) onScoutCreated?.();
+      if (messagesScoutChanged(returned)) onScoutChanged?.();
       await refreshThreads();
     } catch (e: any) {
       setError(e.message);

@@ -393,6 +393,22 @@ async def create_room_scout(request: Request, payload: RoomScoutRequest):
         raise HTTPException(403, MAIL_SEND_REQUIRED_MESSAGE)
     from .supabase_client import get_supabase
 
+    # Enforce at most one active scout per user (the UI and chat bot assume this).
+    if (
+        get_supabase()
+        .table("room_scouts")
+        .select("id")
+        .eq("user_id", user_profile_id)
+        .eq("status", "active")
+        .limit(1)
+        .execute()
+        .data
+    ):
+        raise HTTPException(
+            409,
+            "Bạn đang có một phiên Săn phòng đang chạy. Hãy dừng phiên hiện tại trước khi tạo phiên mới.",
+        )
+
     profile = _read_user_profile(user_profile_id, email) or {}
     office = (payload.office or profile.get("office") or "").strip() or None
 
