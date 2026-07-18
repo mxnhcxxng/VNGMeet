@@ -254,7 +254,7 @@ create table if not exists user_activity (
   web_link text,
   processed_at timestamptz,
   created_at timestamptz not null default now(),
-  constraint user_activity_booking_type_check check (booking_type in ('instant', 'scheduled')),
+  constraint user_activity_booking_type_check check (booking_type in ('instant', 'scheduled', 'scout')),
   constraint user_activity_method_check check (method in ('manual', 'chatbot')),
   constraint user_activity_status_check check (status in ('ok', 'failed', 'pending', 'canceled', 'success'))
 );
@@ -277,7 +277,7 @@ update user_activity
 set booking_type = 'scheduled'
 where booking_type = 'schedule';
 alter table user_activity
-  add constraint user_activity_booking_type_check check (booking_type in ('instant', 'scheduled'));
+  add constraint user_activity_booking_type_check check (booking_type in ('instant', 'scheduled', 'scout'));
 alter table user_activity
   drop constraint if exists user_activity_status_check;
 alter table user_activity
@@ -435,6 +435,10 @@ alter table room_scouts add column if not exists scout_start_time text;
 alter table room_scouts add column if not exists scout_end_time text;
 -- When true, scouting treats the 12:00-13:00 lunch window as free/skippable.
 alter table room_scouts add column if not exists ignore_lunch_break boolean not null default false;
+-- Scout now auto-books: this tracks the in-flight (pending) booking so the next
+-- processing cycle can re-check whether the room accepted or declined.
+alter table room_scouts add column if not exists pending_activity_id uuid
+  references public.user_activity(id) on delete set null;
 create index if not exists idx_room_scouts_user_status on room_scouts(user_id, status);
 create index if not exists idx_room_scouts_active_expires on room_scouts(status, expires_at);
 alter table room_scouts enable row level security;

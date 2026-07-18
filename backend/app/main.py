@@ -91,13 +91,16 @@ async def lifespan(app: FastAPI):
             fire_h, fire_m, fire_s,
             cu_h, cu_m, cu_s,
         )
+        # Runs every minute, ~30s after the :00 availability poll, so it auto-books
+        # against a freshly refreshed cache. Kept a separate job so its per-scout
+        # room-response waits never delay the availability refresh.
         scheduler.add_job(
             _safe_process_room_scouts,
-            CronTrigger(minute="16,46", second=0, timezone=settings.timezone),
+            CronTrigger(minute="*", second=30, timezone=settings.timezone),
             id="process_room_scouts",
             max_instances=1,
             coalesce=True,
-            misfire_grace_time=120,
+            misfire_grace_time=55,
         )
         if settings.graph_app_enabled:
             scheduler.add_job(_safe_refresh, "date", run_date=None)

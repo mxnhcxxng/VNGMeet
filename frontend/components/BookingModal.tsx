@@ -391,7 +391,7 @@ export function BookingModal({
               onPress={onClose}
               isDisabled={loading}
             >
-              {t("common.cancel")}
+              {t("common.close")}
             </Button>
             <Button
               className="flex-1 rounded-full"

@@ -36,13 +36,15 @@ def _log_user_booking_activity(
     auth_user_id: str | None = None,
     graph_event_id: str | None = None,
     web_link: str | None = None,
-) -> None:
+) -> str | None:
+    """Insert a booking-history row. Returns the new row id (or None). Room Scout
+    relies on the id to re-check the pending booking's room response later."""
     if not user_profile_id or not settings.supabase_enabled:
-        return
+        return None
     try:
         from .supabase_client import get_supabase
 
-        get_supabase().table("user_activity").insert(
+        res = get_supabase().table("user_activity").insert(
             {
                 "user_id": user_profile_id,
                 "auth_user_id": auth_user_id,
@@ -62,11 +64,15 @@ def _log_user_booking_activity(
                 "web_link": web_link,
             }
         ).execute()
+        return str(res.data[0]["id"]) if res.data else None
     except Exception as e:  # noqa: BLE001 - booking log must not block booking flow
         log.warning("could not insert user_activity booking log: %s", e)
+        return None
 
 
 def _booking_type_for_db(booking_type: str) -> str:
+    if booking_type == "scout":
+        return "scout"
     return "scheduled" if booking_type in {"schedule", "scheduled"} else "instant"
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import html
 from datetime import date as date_cls, datetime, timedelta, timezone
@@ -14,12 +15,24 @@ from pydantic import BaseModel, Field
 
 from . import auth, availability, graph
 from .app_context import log, settings
-from .bookings import _decrypt_scheduled_graph_token, _encrypt_scheduled_graph_token
+from .bookings import (
+    _decrypt_scheduled_graph_token,
+    _encrypt_scheduled_graph_token,
+    _log_user_booking_activity,
+    _mark_room_availability_owner,
+    _release_room_availability_owner,
+)
 from .chat import _effective_capacity_size
+from .models import BookingRequest
 from .profiles import _booking_auth_context, _read_user_profile
 from .room_resources import _read_availability_cache, _require_auth
 
 router = APIRouter()
+
+# After booking a scout room we poll the room's accept/decline response by syncing
+# the organizer's calendar a few times; auto-accept rooms usually answer in seconds.
+SCOUT_SYNC_TRIES = 3
+SCOUT_SYNC_DELAY_SECONDS = 4
 
 class RoomScoutRequest(BaseModel):
     scout_date: date_cls | None = None
@@ -49,14 +62,27 @@ def _minutes_to_label(minutes: int) -> str:
     return f"{minutes // 60:02d}:{minutes % 60:02d}"
 
 
-def _scout_scan_window(tz: ZoneInfo, scout: dict) -> tuple[int, int, int]:
+def _next_half_hour_slot(now_local: datetime) -> int:
+    """Slot index of the next :00/:30 mark strictly after `now_local`.
+
+    Auto-booking must never pick a window that has already started, so on the
+    current day we scan only from the nearest upcoming half-hour boundary.
+    """
+    now_min = now_local.hour * 60 + now_local.minute
+    nxt = ((now_min // 30) + 1) * 30
+    return nxt // settings.availability_slot_minutes
+
+
+def _scout_scan_window(
+    tz: ZoneInfo, scout: dict, now_local: datetime | None = None
+) -> tuple[int, int, int]:
     """Slot range to scan on the selected date for a free `duration` block.
 
-    Returns (scan_start_idx, scan_end_idx, duration_slots). We scan the whole
-    configured scout range [scout_start_time, scout_end_time) and report a match
-    if any room is free for the duration *anywhere* inside it — e.g. scout range
-    14:00-18:00, duration 2h, a room free 15:00-17:00 counts. If the range is
-    missing we fall back to the full day.
+    Returns (scan_start_idx, scan_end_idx, duration_slots). We scan the configured
+    scout range [scout_start_time, scout_end_time) and can book any free block of
+    the duration inside it. When `now_local` is given and the scout is for today,
+    the scan start is clamped to the next :00/:30 mark after now so we never book
+    a window in the past. If the range is missing we fall back to the full day.
     """
     avail = settings.availability_slot_minutes
 
@@ -70,6 +96,9 @@ def _scout_scan_window(tz: ZoneInfo, scout: dict) -> tuple[int, int, int]:
     )
     if end_idx <= start_idx:
         end_idx = availability.SLOTS_PER_DAY
+
+    if now_local is not None and str(scout.get("scout_date") or "") == now_local.date().isoformat():
+        start_idx = max(start_idx, _next_half_hour_slot(now_local))
 
     duration_slots = max(
         1,
@@ -119,6 +148,28 @@ def _has_free_block(slots: list, scan_start: int, scan_end: int, duration_slots:
         else:
             run = 0
     return False
+
+
+def _earliest_free_block(
+    slots: list,
+    scan_start: int,
+    scan_end: int,
+    duration_slots: int,
+    reserved: set[int] | None = None,
+) -> int | None:
+    """Start index of the earliest free block of `duration_slots` consecutive slots
+    inside [scan_start, scan_end), or None. A slot counts as taken if it is busy in
+    `slots` OR present in `reserved` (held by an earlier scout this cycle)."""
+    run = 0
+    for idx in range(scan_start, scan_end):
+        free = slots[idx] == 0 and (reserved is None or idx not in reserved)
+        if free:
+            run += 1
+            if run >= duration_slots:
+                return idx - duration_slots + 1
+        else:
+            run = 0
+    return None
 
 
 def _available_room_scout_matches(sb, scout: dict, day: str) -> tuple[list[dict], str, str]:
@@ -268,6 +319,72 @@ async def _room_scout_graph_token(row: dict) -> str:
     return _decrypt_scheduled_graph_token(row.get("graph_access_token"))
 
 
+def _scout_subject(email: str) -> str:
+    """Default meeting subject for an auto-booked scout, mirroring instant booking
+    (frontend uses "{name}'s Meeting"; backend falls back to "Meeting")."""
+    local = str(email or "").split("@")[0].strip()
+    return f"{local}'s Meeting" if local else "Meeting"
+
+
+def _scout_rooms_in_browse_order(sb, scout: dict) -> list[dict]:
+    """Candidate rooms filtered by office + capacity size, in the same order the
+    browse grid shows them (in_use, no explicit sort)."""
+    query = (
+        sb.table("meeting_room_metadata")
+        .select("id, name, email, capacity, capacity_size, building, floor, office")
+        .eq("in_use", True)
+    )
+    office = str(scout.get("office") or "").strip()
+    if office:
+        query = query.eq("office", office)
+    rooms = [r for r in (query.execute().data or []) if r.get("id") and r.get("email")]
+
+    wanted_sizes = {
+        str(size).strip().lower()
+        for size in (scout.get("capacity_sizes") or [])
+        if str(size).strip()
+    }
+    legacy_size = str(scout.get("capacity_size") or "").strip().lower()
+    if legacy_size:
+        wanted_sizes.add(legacy_size)
+    if wanted_sizes:
+        rooms = [r for r in rooms if _effective_capacity_size(r) in wanted_sizes]
+    return rooms
+
+
+async def _poll_scout_room_response(
+    token: str, user_profile_id: str | None, email: str, activity_id: str, sb
+) -> str:
+    """Confirmation state of the scout booking `activity_id`: 'success' (room
+    accepted), 'failed' (declined), or 'pending' (no answer yet).
+
+    Syncs the organizer's calendar up to SCOUT_SYNC_TRIES times — sync_my_calendar
+    reconciles the booking row (accept -> success, decline -> failed + delete).
+    """
+    for attempt in range(SCOUT_SYNC_TRIES):
+        try:
+            await availability.sync_my_calendar(token, user_profile_id, email)
+        except Exception as e:  # noqa: BLE001 - a sync hiccup shouldn't abort the scout
+            log.warning("scout sync_my_calendar failed: %s", e)
+        rows = (
+            sb.table("user_activity")
+            .select("status")
+            .eq("id", activity_id)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+        status = rows[0].get("status") if rows else None
+        if status == "success":
+            return "success"
+        if status == "failed":
+            return "failed"
+        if attempt < SCOUT_SYNC_TRIES - 1:
+            await asyncio.sleep(SCOUT_SYNC_DELAY_SECONDS)
+    return "pending"
+
+
 async def process_room_scouts() -> dict:
     if not settings.supabase_enabled:
         raise RuntimeError("Supabase not configured; cannot process room scouts.")
@@ -276,73 +393,219 @@ async def process_room_scouts() -> dict:
     sb = get_supabase()
     tz = ZoneInfo(settings.timezone)
     now = datetime.now(timezone.utc)
-    # Auto-cancel scouts at midnight after the day they were created.
+    now_local = datetime.now(tz)
+    avail = settings.availability_slot_minutes
+
+    # Auto-cancel scouts past their expiry (midnight of the creation day, or the
+    # scout end-time when scouting today — whichever is sooner, set at create time).
     sb.table("room_scouts").update(
         {"status": "canceled", "updated_at": now.isoformat()}
     ).eq("status", "active").lte("expires_at", now.isoformat()).execute()
 
+    # First come, first served: process the oldest requests first so an earlier
+    # scout gets first pick of a room contested by a later, overlapping scout.
     scouts = (
         sb.table("room_scouts")
         .select(
             "id, user_id, auth_user_id, email, duration_minutes, capacity_size, capacity_sizes, "
             "scout_date, scout_start_time, scout_end_time, ignore_lunch_break, office, "
-            "graph_access_token, last_notified_signature"
+            "graph_access_token, pending_activity_id, created_at"
         )
         .eq("status", "active")
         .gt("expires_at", now.isoformat())
+        .order("created_at")
         .execute()
         .data
         or []
     )
     if not scouts:
-        return {"checked": 0, "notified": 0, "matches": 0, "errors": 0}
+        return {"checked": 0, "booked": 0, "pending": 0, "errors": 0}
 
+    # room_id lookup by email — to resolve an in-flight booking's room and reserve it.
+    room_id_by_email = {
+        str(r["email"]).strip().lower(): r["id"]
+        for r in (
+            sb.table("meeting_room_metadata")
+            .select("id, email")
+            .eq("in_use", True)
+            .execute()
+            .data
+            or []
+        )
+        if r.get("id") and r.get("email")
+    }
+
+    # Slots held by earlier scouts this run (their fresh or still-pending bookings),
+    # so a later overlapping scout can't grab the same room+window. Keyed (room_id,
+    # day). This only ever affects scouts whose windows actually overlap.
+    reserved: dict[tuple[str, str], set[int]] = {}
+
+    def _reserve(room_id, day, start_idx, end_idx):
+        if room_id and start_idx is not None and end_idx is not None:
+            reserved.setdefault((room_id, day), set()).update(range(start_idx, end_idx))
+
+    def _unreserve(room_id, day, start_idx, end_idx):
+        if room_id and start_idx is not None and end_idx is not None:
+            reserved.get((room_id, day), set()).difference_update(range(start_idx, end_idx))
+
+    lunch_slots = range((12 * 60) // avail, (13 * 60) // avail)
+    booked = 0
+    pending = 0
     errors = 0
-    notified = 0
-    total_matches = 0
-    try:
-        if settings.graph_app_enabled:
-            await availability.refresh_availability()
-        else:
-            token = await _room_scout_graph_token(scouts[0])
-            await availability.refresh_availability_delegated(token)
-    except Exception as e:  # noqa: BLE001 - stale cache can still be useful
-        errors += 1
-        log.warning("room scout availability refresh failed: %s", e)
 
     for scout in scouts:
         scout_id = scout["id"]
         scout_day = str(scout.get("scout_date") or "")
+        user_profile_id = scout.get("user_id")
         checked_at = datetime.now(timezone.utc).isoformat()
         try:
-            rooms, start_time, end_time = _available_room_scout_matches(
-                sb, scout, scout_day
-            )
-            total_matches += len(rooms)
-            update = {"last_checked_at": checked_at, "updated_at": checked_at}
-            if rooms:
-                # Dedup on the configured range (not the now-clamped scan window),
-                # so we don't re-email the same match set as the day advances.
-                sig_start = scout.get("scout_start_time") or start_time
-                sig_end = scout.get("scout_end_time") or end_time
-                signature = _room_scout_signature(
-                    scout_day, sig_start, sig_end, rooms
+            token = await _room_scout_graph_token(scout)
+
+            # 1) Re-check an in-flight booking created on a previous cycle.
+            pending_id = scout.get("pending_activity_id")
+            if pending_id:
+                rows = (
+                    sb.table("user_activity")
+                    .select("room_email, date, start_time, end_time, status")
+                    .eq("id", pending_id)
+                    .limit(1)
+                    .execute()
+                    .data
+                    or []
                 )
-                if signature != scout.get("last_notified_signature"):
-                    token = await _room_scout_graph_token(scout)
-                    await graph.send_mail(
-                        token,
-                        scout["email"],
-                        f"Room Scout: {len(rooms)} room(s) available at {start_time}",
-                        _room_scout_email_body(
-                            scout, rooms, scout_day, start_time, end_time
-                        ),
-                        inline_images=_vng_meet_inline_images(),
+                act = rows[0] if rows else None
+                if not act or act.get("status") == "canceled":
+                    sb.table("room_scouts").update(
+                        {"pending_activity_id": None, "updated_at": checked_at}
+                    ).eq("id", scout_id).execute()
+                else:
+                    a_room_id = room_id_by_email.get(str(act.get("room_email") or "").strip().lower())
+                    a_day = str(act.get("date"))
+                    a_start_min = _time_to_minutes(act.get("start_time"))
+                    a_end_min = _time_to_minutes(act.get("end_time"))
+                    a_s = (a_start_min // avail) if a_start_min is not None else None
+                    a_e = ((a_end_min + avail - 1) // avail) if a_end_min is not None else None
+                    # Hold it up front so a later overlapping scout can't take it.
+                    _reserve(a_room_id, a_day, a_s, a_e)
+                    status = await _poll_scout_room_response(
+                        token, user_profile_id, scout["email"], pending_id, sb
                     )
-                    update["last_notified_at"] = checked_at
-                    update["last_notified_signature"] = signature
-                    notified += 1
-            sb.table("room_scouts").update(update).eq("id", scout_id).execute()
+                    if status == "success":
+                        sb.table("room_scouts").update(
+                            {"status": "success", "pending_activity_id": None,
+                             "last_checked_at": checked_at, "updated_at": checked_at}
+                        ).eq("id", scout_id).execute()
+                        booked += 1
+                        continue
+                    if status == "pending":
+                        sb.table("room_scouts").update(
+                            {"last_checked_at": checked_at, "updated_at": checked_at}
+                        ).eq("id", scout_id).execute()
+                        pending += 1
+                        continue
+                    # declined: sync already deleted the event — free slots and retry.
+                    _unreserve(a_room_id, a_day, a_s, a_e)
+                    _release_room_availability_owner(
+                        user_profile_id, act.get("room_email"), a_day,
+                        act.get("start_time"), act.get("end_time"),
+                    )
+                    sb.table("room_scouts").update(
+                        {"pending_activity_id": None}
+                    ).eq("id", scout_id).execute()
+
+            # 2) Try to book a room in browse order.
+            scan_start, scan_end, duration_slots = _scout_scan_window(tz, scout, now_local)
+            if scan_start + duration_slots > scan_end:
+                sb.table("room_scouts").update(
+                    {"last_checked_at": checked_at, "updated_at": checked_at}
+                ).eq("id", scout_id).execute()
+                continue
+
+            rooms = _scout_rooms_in_browse_order(sb, scout)
+            cache = _read_availability_cache(sb, [r["id"] for r in rooms], [scout_day]) if rooms else {}
+            ignore_lunch = bool(scout.get("ignore_lunch_break"))
+            outcome = None
+            for room in rooms:
+                row = cache.get((room["id"], scout_day))
+                slots = list(row.get("slots") or []) if row else []
+                if len(slots) != availability.SLOTS_PER_DAY:
+                    continue
+                if ignore_lunch:
+                    for idx in lunch_slots:
+                        slots[idx] = 0
+                block = _earliest_free_block(
+                    slots, scan_start, scan_end, duration_slots,
+                    reserved.get((room["id"], scout_day)),
+                )
+                if block is None:
+                    continue
+
+                start_label = _minutes_to_label(block * avail)
+                end_label = _minutes_to_label((block + duration_slots) * avail)
+                payload = BookingRequest(
+                    room_email=room["email"],
+                    room_name=room.get("name"),
+                    date=scout_day,
+                    start_time=start_label,
+                    end_time=end_label,
+                    booking_type="scout",
+                    method="manual",
+                    subject=_scout_subject(scout["email"]),
+                    attendees=[],
+                    body=None,
+                )
+                ev = await graph.create_event(
+                    token, payload.subject,
+                    f"{scout_day}T{start_label}:00", f"{scout_day}T{end_label}:00",
+                    settings.timezone, room["email"], room.get("name"), [], None,
+                )
+                activity_id = _log_user_booking_activity(
+                    user_profile_id, payload, "pending",
+                    auth_user_id=scout.get("auth_user_id"),
+                    graph_event_id=ev.get("id"), web_link=ev.get("webLink"),
+                )
+                _mark_room_availability_owner(user_profile_id, payload)
+                _reserve(room["id"], scout_day, block, block + duration_slots)
+                if activity_id:
+                    sb.table("room_scouts").update(
+                        {"pending_activity_id": activity_id}
+                    ).eq("id", scout_id).execute()
+
+                status = (
+                    await _poll_scout_room_response(
+                        token, user_profile_id, scout["email"], activity_id, sb
+                    )
+                    if activity_id
+                    else "pending"
+                )
+                if status == "success":
+                    sb.table("room_scouts").update(
+                        {"status": "success", "pending_activity_id": None,
+                         "last_checked_at": checked_at, "updated_at": checked_at}
+                    ).eq("id", scout_id).execute()
+                    booked += 1
+                    outcome = "success"
+                    break
+                if status == "pending":
+                    sb.table("room_scouts").update(
+                        {"last_checked_at": checked_at, "updated_at": checked_at}
+                    ).eq("id", scout_id).execute()
+                    pending += 1
+                    outcome = "pending"
+                    break
+                # declined: event already deleted by sync — free slots, try next room.
+                _unreserve(room["id"], scout_day, block, block + duration_slots)
+                _release_room_availability_owner(
+                    user_profile_id, room["email"], scout_day, start_label, end_label
+                )
+                sb.table("room_scouts").update(
+                    {"pending_activity_id": None}
+                ).eq("id", scout_id).execute()
+
+            if outcome is None:
+                sb.table("room_scouts").update(
+                    {"last_checked_at": checked_at, "updated_at": checked_at}
+                ).eq("id", scout_id).execute()
         except Exception as e:  # noqa: BLE001 - one scout must not block others
             errors += 1
             log.warning("room scout failed for %s: %s", scout_id, e)
@@ -352,8 +615,8 @@ async def process_room_scouts() -> dict:
 
     return {
         "checked": len(scouts),
-        "notified": notified,
-        "matches": total_matches,
+        "booked": booked,
+        "pending": pending,
         "errors": errors,
     }
 
@@ -389,8 +652,11 @@ async def create_room_scout(request: Request, payload: RoomScoutRequest):
     token, auth_user_id, user_profile_id, email = await _booking_auth_context(request)
     if not settings.supabase_enabled or not user_profile_id or not email:
         raise HTTPException(503, "Room Scout requires Supabase and a user profile email.")
-    if not _token_has_mail_send(token):
-        raise HTTPException(403, MAIL_SEND_REQUIRED_MESSAGE)
+    # Scout now auto-books instead of emailing, so Mail.Send is no longer required
+    # (booking uses Calendars.ReadWrite, already granted). Kept commented in case the
+    # email-notification path is re-enabled later.
+    # if not _token_has_mail_send(token):
+    #     raise HTTPException(403, MAIL_SEND_REQUIRED_MESSAGE)
     from .supabase_client import get_supabase
 
     # Enforce at most one active scout per user (the UI and chat bot assume this).
@@ -428,11 +694,17 @@ async def create_room_scout(request: Request, payload: RoomScoutRequest):
             422, "Scout date must be between today and 14 days from today."
         )
     now = datetime.now(timezone.utc).isoformat()
-    # The selected date controls which availability row is checked. The job
-    # itself only runs until midnight of the day it was created.
+    # The selected date controls which availability row is checked. A scout expires
+    # at midnight after the day it was created; when scouting *today*, it also can't
+    # outlive its own window, so it expires at scout_end_time (whichever is sooner).
     scout_end_local = datetime.combine(
         local_today + timedelta(days=1), datetime.min.time(), tzinfo=tz
     )
+    if scout_date == local_today:
+        window_end_local = datetime.combine(
+            local_today, datetime.min.time(), tzinfo=tz
+        ) + timedelta(minutes=end_minutes)
+        scout_end_local = min(scout_end_local, window_end_local)
     row = {
         "user_id": user_profile_id,
         "auth_user_id": auth_user_id,

@@ -28,7 +28,7 @@ class BookingRequest(BaseModel):
     date: str  # "2026-06-11"
     start_time: str  # "09:00"
     end_time: str  # "10:00"
-    booking_type: Literal["instant", "schedule", "scheduled"] = "instant"
+    booking_type: Literal["instant", "schedule", "scheduled", "scout"] = "instant"
     method: Literal["manual", "chatbot"] = "manual"
     subject: str
     attendees: list[str] = []

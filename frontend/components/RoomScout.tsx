@@ -43,9 +43,6 @@ import { useT } from "@/app/providers";
 import type { TFunction, TranslationKey } from "@/lib/i18n";
 import { BrandIcon } from "./BrandIcon";
 
-// Same-day scouting can only start within business hours. Future dates remain
-// selectable after 18:00 because their scan windows have not started yet.
-const SCOUT_CUTOFF_HOUR = 18;
 const SCOUT_MAX_ADVANCE_DAYS = 14;
 
 const DURATION_VALUES = ["30", "60", "90", "120", "150", "180"] as const;
@@ -207,9 +204,10 @@ export function RoomScout({
     [scouts],
   );
 
-  // When the signed-in token lacks Mail.Send we can't run a scout, so we guide
-  // the user through granting the permission instead of showing the form.
-  const showGuide = !loading && !activeScout && !canSendMail;
+  // Scout now auto-books instead of emailing, so Mail.Send is no longer required
+  // and we don't gate the form on it. The `!canSendMail` term is kept (disabled by
+  // the leading `false`) in case the email-notification path is re-enabled later.
+  const showGuide = false && !loading && !activeScout && !canSendMail;
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-y-auto">
@@ -501,8 +499,6 @@ function ScoutForm({
   const [capacities, setCapacities] = useState<CapacitySize[]>([]);
   const [ignoreLunch, setIgnoreLunch] = useState(false);
   const [saving, setSaving] = useState(false);
-  // Re-evaluate the after-hours cutoff each minute so the form locks at 18:00.
-  const [nowMs, setNowMs] = useState(() => Date.now());
   // The custom DatePicker trigger has no DateInput for react-aria to anchor the
   // popover against, so wire the trigger ref (matches BrowseRooms' date picker).
   const dateTriggerRef = useRef<HTMLButtonElement>(null);
@@ -511,15 +507,8 @@ function ScoutForm({
     setOffice(userOffice || "");
   }, [userOffice]);
 
-  useEffect(() => {
-    const id = setInterval(() => setNowMs(Date.now()), 30_000);
-    return () => clearInterval(id);
-  }, []);
-
   const today = localDateAfter(0);
   const maxScoutDate = localDateAfter(SCOUT_MAX_ADVANCE_DAYS);
-  const afterHours =
-    scoutDate === today && new Date(nowMs).getHours() >= SCOUT_CUTOFF_HOUR;
 
   const startOptions = useMemo(
     () => TIME_OPTIONS.slice(0, -1).map((tm) => ({ value: tm, label: tm })),
@@ -570,10 +559,6 @@ function ScoutForm({
     }
     if (timeToMinutes(endTime) - timeToMinutes(startTime) < Number(duration)) {
       toast.warning(t("scout.rangeTooShort"));
-      return;
-    }
-    if (afterHours) {
-      toast.warning(t("scout.afterHoursNote"));
       return;
     }
     setSaving(true);
@@ -790,18 +775,10 @@ function ScoutForm({
           </Select.Popover>
         </Select>
 
-        {afterHours && (
-          <div className="flex items-center gap-2 rounded-xl bg-[#fee7de] p-3 text-sm leading-6 text-[#535862] dark:bg-[#3B1202] dark:text-[#fee7de]">
-            <CircleInfo className="size-4 shrink-0 text-[#F05A22]" />
-            <span>{t("scout.afterHoursNote")}</span>
-          </div>
-        )}
-
         <Button
           className="mt-2 w-full rounded-full"
           onPress={submit}
           isPending={saving}
-          isDisabled={afterHours}
         >
           {t("scout.start")}
         </Button>

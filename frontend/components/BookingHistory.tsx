@@ -177,6 +177,7 @@ export function BookingHistory() {
     { value: "all", label: t("bh.all") },
     { value: "instant", label: t("bh.typeInstant") },
     { value: "scheduled", label: t("bh.typeScheduled") },
+    { value: "scout", label: t("bh.typeScout") },
   ];
   const METHOD_OPTS = [
     { value: "all", label: t("bh.all") },
@@ -632,7 +633,9 @@ export function BookingHistory() {
                       <TableCell>
                         {b.booking_type === "scheduled"
                           ? t("bh.typeScheduled")
-                          : t("bh.typeInstant")}
+                          : b.booking_type === "scout"
+                            ? t("bh.typeScout")
+                            : t("bh.typeInstant")}
                       </TableCell>
                       <TableCell>
                         {b.method === "chatbot"

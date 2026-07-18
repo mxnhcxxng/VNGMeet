@@ -153,7 +153,7 @@ export interface Booking {
   date: string; // "2026-06-11"
   start_time: string; // "09:00"
   end_time: string; // "10:00"
-  booking_type: "instant" | "scheduled";
+  booking_type: "instant" | "scheduled" | "scout";
   method: "manual" | "chatbot";
   subject?: string | null;
   attendees?: string[] | null;
