@@ -707,26 +707,29 @@ function ScoutForm({
               maxRows={5}
             />
           </div>
-        </div>
+          <p className="mt-1.5 text-xs leading-5 text-default-400">
+            {t("scout.scoutRangeHint")}
+          </p>
 
-        {crossesLunch && (
-          <div className="scout-lunch-reveal">
-            <Checkbox
-              variant="secondary"
-              isSelected={ignoreLunch}
-              onChange={setIgnoreLunch}
-            >
-              <Checkbox.Content>
-                <Checkbox.Control>
-                  <Checkbox.Indicator />
-                </Checkbox.Control>
-                <span className="text-sm font-medium text-default-700">
-                  {t("scout.ignoreLunch")}
-                </span>
-              </Checkbox.Content>
-            </Checkbox>
-          </div>
-        )}
+          {crossesLunch && (
+            <div className="scout-lunch-reveal mt-1.5">
+              <Checkbox
+                variant="secondary"
+                isSelected={ignoreLunch}
+                onChange={setIgnoreLunch}
+              >
+                <Checkbox.Content>
+                  <Checkbox.Control>
+                    <Checkbox.Indicator />
+                  </Checkbox.Control>
+                  <span className="text-sm font-medium text-default-700">
+                    {t("scout.ignoreLunch")}
+                  </span>
+                </Checkbox.Content>
+              </Checkbox>
+            </div>
+          )}
+        </div>
 
         <Select<{ value: CapacitySize; label: string }, "multiple">
           variant="secondary"
