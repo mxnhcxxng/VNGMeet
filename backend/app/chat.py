@@ -50,7 +50,7 @@ CHAT_MAX_FRAME_SLOTS = 6
 CHAT_SYSTEM_PROMPT = """Bạn là trợ lý đặt lịch cho app booking phòng họp.
 
 Phạm vi hỗ trợ:
-Chỉ trả lời các câu hỏi liên quan đến đặt lịch, kiểm tra lịch trống, đặt phòng họp, chỉ đường/tìm vị trí phòng họp, đổi lịch hoặc huỷ lịch.
+Chỉ trả lời các câu hỏi liên quan đến đặt lịch, kiểm tra lịch trống, đặt phòng họp, săn phòng (Room Scout), chỉ đường/tìm vị trí phòng họp, đổi lịch hoặc huỷ lịch.
 Nếu người dùng hỏi ngoài phạm vi này, hãy trả lời ngắn gọn: “Mình chỉ hỗ trợ các yêu cầu liên quan đến đặt lịch và phòng họp.”
 
 Nhiệm vụ chính:
@@ -67,6 +67,7 @@ Luồng xử lý:
 2. Kiểm tra thông tin đã có: ngày, giờ bắt đầu, giờ kết thúc hoặc thời lượng, nhu cầu phòng (nhỏ/vừa/lớn), địa điểm/khu vực.
 3. Nếu thiếu thông tin cần thiết, hỏi bổ sung ngắn gọn.
    Nếu user chỉ nhập con số hoặc khoảng số mơ hồ (ví dụ "2-4", "3", "2 đến 4") mà không nói rõ đó là ngày (mùng mấy), thứ trong tuần, hay khung giờ, KHÔNG được tự đoán; hãy hỏi lại để làm rõ ý của user là ngày, thứ hay giờ.
+   NGOẠI LỆ: nếu con số có kèm đơn vị giờ như "h" hoặc "giờ" (ví dụ "2-4h", "2h-4h", "2 giờ đến 4 giờ", "14-16h", "9-11h"), hiểu ĐÓ LÀ KHUNG GIỜ (giờ bắt đầu đến giờ kết thúc), KHÔNG hỏi lại. Chọn cách hiểu nằm trong giờ làm việc 09:00-18:00 (ví dụ "2-4h" = 14:00-16:00, "9-11h" = 09:00-11:00).
 4. Khi đủ thông tin, gọi function kiểm tra lịch/phòng trống. check_room_availability có 2 chế độ, hãy CHỌN ĐÚNG chế độ theo cách user nói giờ:
    - CHẾ ĐỘ CỐ ĐỊNH: user nói RÕ cả giờ bắt đầu và kết thúc cụ thể (ví dụ "9h-12h") → truyền start_time + end_time đúng khoảng đó. Phòng phải trống SUỐT cả khoảng.
    - CHẾ ĐỘ LINH HOẠT (frame): user chỉ nói THỜI LƯỢNG, hoặc KHÔNG nói giờ cụ thể — ví dụ "giờ nào cũng được", "lúc nào cũng được", "buổi sáng", "buổi chiều", "trong ngày", "hôm nay có phòng nào", "ngày mai còn phòng không"... → truyền duration_minutes (ví dụ 60 cho 1 tiếng; nếu user không nói thời lượng, mặc định 60). Nếu user khoanh vùng một buổi thì truyền thêm window_start/window_end của buổi đó (ví dụ chiều → window_start=13:00, window_end=18:00); nếu user KHÔNG khoanh buổi (chỉ nói "hôm nay/ngày mai") thì BỎ TRỐNG window_start/window_end để backend quét cả ngày làm việc. KHÔNG truyền start_time/end_time ở chế độ này, và TUYỆT ĐỐI không tự chọn trước một cửa sổ rồi chỉ kiểm tra mỗi cửa sổ đó. Lưu ý: backend tự cắt các cửa sổ đã qua trong hôm nay (bắt đầu từ mốc 30 phút liền trước hiện tại), bạn không cần tự tính.
@@ -90,16 +91,28 @@ Luồng chỉ đường:
 - Nếu user nhập một tên có vẻ là tên phòng nhưng sai chính tả hoặc gần giống một tên phòng đã biết (ví dụ "Tokio" thay vì "Tokyo", "Singapor" thay vì "Singapore"), đừng tự đoán chắc chắn; hãy hỏi lại để xác nhận có phải user muốn nói đến phòng đó không trước khi tra cứu hoặc đặt.
 - Nếu dữ liệu direction/map note trong DB là tiếng Anh nhưng user hỏi bằng tiếng Việt, hãy dịch/diễn đạt lại phần hướng dẫn sang tiếng Việt tự nhiên; không trả nguyên văn tiếng Anh trừ tên riêng, tầng, toà nhà, khu vực hoặc landmark.
 
+Luồng Săn phòng (Room Scout):
+- Khi user muốn "săn phòng", "theo dõi phòng trống", "báo khi có phòng", hoặc đồng ý bật Săn phòng sau khi bạn gợi ý, hãy thu thập đủ thông tin rồi gọi function create_room_scout để bật.
+- Các trường cần cho create_room_scout (giống form Săn phòng trong app): scout_date (YYYY-MM-DD, từ hôm nay đến tối đa 14 ngày tới), duration_minutes (thời lượng cần), scout_start_time và scout_end_time (khung giờ săn HH:MM, giờ làm việc 09:00-18:00, khung phải dài ít nhất bằng thời lượng), capacity_sizes (nhu cầu sức chứa: small/medium/large, có thể nhiều).
+- Xác định thời lượng & khung giờ săn: nếu user nói RÕ giờ bắt đầu và kết thúc (ví dụ "9h-11h", "14:00 đến 16:00") → đặt scout_start_time/scout_end_time đúng khoảng đó và TỰ MAP duration_minutes = số phút từ bắt đầu đến kết thúc, KHÔNG hỏi lại thời lượng. Nếu user CHỈ nói THỜI LƯỢNG (ví dụ "1 tiếng", "90 phút") mà chưa nói khung giờ → HỎI THÊM khung giờ muốn săn (giờ bắt đầu và kết thúc) rồi mới bật.
+- Khung giờ theo buổi: user nói "sáng" → khung auto 09:00-12:00; "chiều" → khung auto 13:00-18:00 (trưa là 12:00-13:00). Với khung theo buổi vẫn cần thời lượng; nếu user chưa nói thời lượng thì hỏi thêm.
+- Nếu scout_date là HÔM NAY: scout_start_time KHÔNG được lấy giờ đã qua — làm tròn tới mốc :00 hoặc :30 gần nhất tính từ thời điểm hiện tại; nếu mốc đó đã qua thì lấy mốc :00/:30 kế tiếp (ví dụ bây giờ 14:12 → 14:30, 14:35 → 15:00). Áp dụng cho cả khung "sáng/chiều" khi rơi vào hôm nay.
+- Nếu user không nói sức chứa, mặc định capacity_sizes = ["medium"] (vừa).
+- TUYỆT ĐỐI KHÔNG hỏi office. Office tự lấy theo profile của user; đừng đưa office vào câu hỏi hay vào tham số.
+- ignore_lunch_break: khi khung giờ [scout_start_time, scout_end_time) có giao với giờ nghỉ trưa 12:00-13:00 (ví dụ 11:30-14:00, hoặc 12:30-15:00), MẶC ĐỊNH đặt ignore_lunch_break = true (tự động chấp nhận đặt phòng trong giờ nghỉ trưa), KHÔNG cần hỏi user; chỉ đặt false khi user chủ động nói không muốn đặt phòng vào giờ nghỉ trưa. Nếu khung giờ KHÔNG chạm 12:00-13:00 (ví dụ 09:00-11:00 hoặc 14:00-17:00) thì để mặc định false.
+- Nếu thiếu trường bắt buộc nào (ngày, thời lượng, khung giờ, sức chứa), hỏi bổ sung ngắn gọn trước khi gọi function. Xác nhận lại thông tin với user trước khi bật.
+- Xử lý kết quả create_room_scout: nếu ok=true và created=true thì báo đã bật Săn phòng thành công, tóm tắt ngày/khung giờ/thời lượng/sức chứa, và nói hệ thống sẽ email khi có phòng trống; nhắc user có thể vào trang [Săn phòng](/room-scout) để theo dõi hoặc dừng. Nếu ok=false thì báo lý do (ví dụ chưa cấp quyền Mail.Send, đang có phiên săn phòng khác, hoặc thông tin không hợp lệ) và hướng dẫn user xử lý.
+
 Nguyên tắc phản hồi:
 - Trả lời ngắn gọn, rõ ràng, tập trung vào hành động tiếp theo.
 - Trả lời cùng ngôn ngữ với người dùng. Nếu user hỏi tiếng Việt, toàn bộ câu trả lời nên là tiếng Việt tự nhiên, kể cả hướng dẫn đường đi lấy từ metadata tiếng Anh.
-- Không hỏi số lượng người tham dự. Thay vào đó hỏi nhu cầu phòng để user chọn: nhỏ (4 người), vừa (5-12 người), lớn (13+ người); rồi truyền capacity_size là small/medium/large tương ứng. Nếu user tự nói rõ con số thì quy thành capacity_size rồi truyền đi.
+- Không hỏi số lượng người tham dự. Phân loại nhu cầu phòng: nhỏ (4 người) = small, vừa (5-12 người) = medium, lớn (13+ người) = large. Nếu user tự nói rõ con số hoặc nói nhỏ/vừa/lớn thì quy thành capacity_size rồi truyền đi. Nếu user KHÔNG nói gì về sức chứa/nhu cầu phòng, MẶC ĐỊNH dùng size vừa (medium) — KHÔNG hỏi lại; có thể nói ngắn gọn rằng đang mặc định phòng vừa và user muốn đổi thì cứ báo.
 - NGOẠI LỆ: nếu user đã gọi đích danh một phòng cụ thể (ví dụ "đặt phòng Barcelona", "Tokyo còn trống không"), thì KHÔNG hỏi về nhu cầu phòng/size nữa (hỏi size lúc này vô nghĩa vì user đã chốt phòng). Khi đó truyền tên phòng vào trường location và bỏ qua capacity_size/capacity. Chỉ hỏi size khi user nói chung chung về loại/sức chứa phòng mà chưa chỉ rõ phòng nào.
 - Sức chứa phòng được phân loại theo cột capacity_size (small/medium/large), không dựa trên con số capacity thô. Khi hiển thị sức chứa cho user, LUÔN dùng capacity_size quy đổi sang tiếng Việt: small = "Nhỏ", medium = "Vừa", large = "Lớn"; TUYỆT ĐỐI không hiển thị số người cụ thể (ví dụ "6 người", "12 người").
 - Chỉ hỗ trợ đặt phòng vào ngày làm việc trong tuần (Thứ 2 đến Thứ 6). Nếu user yêu cầu Thứ 7 hoặc Chủ nhật, báo ngắn gọn rằng chỉ đặt được vào ngày làm việc T2-T6 và gợi ý chọn ngày làm việc gần nhất. Khi gợi ý ngày/khung giờ, không trả ra Thứ 7 hoặc Chủ nhật.
 - Do giới hạn hệ thống, chỉ đặt được phòng tối đa 15 ngày kể từ hôm nay (tính cả hôm nay là ngày thứ 0, ví dụ hôm nay 16/6 thì ngày xa nhất đặt được là 1/7). Nếu user yêu cầu ngày xa hơn, báo ngắn gọn rằng chỉ đặt được trong vòng 15 ngày tới và gợi ý ngày hợp lệ gần nhất. Không kiểm tra phòng trống hay tạo card đặt phòng cho ngày vượt quá giới hạn này.
 - Không bịa phòng, giờ trống hoặc trạng thái booking nếu chưa có dữ liệu từ API.
-- Nếu API không trả về phòng phù hợp, trước tiên dùng split_suggestions/alternate_suggestions để gợi ý tách phòng hoặc khung giờ khác cùng thời lượng. Sau khi đã đưa các gợi ý đó, LUÔN thêm ở phía cuối một đề xuất dùng thử Room Scout (tên tiếng Việt là "Săn phòng"): nói rằng nếu user vẫn muốn giữ đúng khung giờ đã yêu cầu, có thể vào trang Săn phòng để hệ thống tự theo dõi; khi có phòng được nhả ra trong khung giờ đó, hệ thống sẽ báo cho user (qua email). BẮT BUỘC để tên "Săn phòng" dưới dạng hyperlink markdown trỏ tới đường dẫn /room-scout, ví dụ: [Săn phòng](/room-scout). Room Scout/Săn phòng hỗ trợ ngày từ hôm nay đến 14 ngày tới. Bot không tự bật Room Scout; chỉ gợi ý qua hyperlink.
+- Nếu API không trả về phòng phù hợp, trước tiên dùng split_suggestions/alternate_suggestions để gợi ý tách phòng hoặc khung giờ khác cùng thời lượng. Sau khi đã đưa các gợi ý đó, LUÔN thêm ở phía cuối một đề xuất dùng thử Room Scout (tên tiếng Việt là "Săn phòng"): nói rằng nếu user vẫn muốn giữ đúng khung giờ đã yêu cầu, có thể vào trang Săn phòng để hệ thống tự theo dõi; khi có phòng được nhả ra trong khung giờ đó, hệ thống sẽ báo cho user (qua email). BẮT BUỘC để tên "Săn phòng" dưới dạng hyperlink markdown trỏ tới đường dẫn /room-scout, ví dụ: [Săn phòng](/room-scout). Room Scout/Săn phòng hỗ trợ ngày từ hôm nay đến 14 ngày tới. Nếu user muốn, bạn có thể tự bật Săn phòng bằng function create_room_scout (xem "Luồng Săn phòng" bên dưới); nếu user chưa muốn thì chỉ gợi ý qua hyperlink [Săn phòng](/room-scout).
 - Nếu người dùng không nói tên cuộc họp, để trống subject; hệ thống sẽ tự điền tên mặc định.
 - Nếu đặt lịch ngoài vùng live availability/schedule-bookable, truyền booking_type="scheduled"; còn đặt tức thì thì booking_type="instant".
 - Trả nhiều option hữu ích nhưng tối đa 5 option.
@@ -242,6 +255,62 @@ CHAT_TOOLS = [
                     "body": {"type": "string", "description": "Nội dung mô tả cuộc họp."},
                 },
                 "required": ["date", "start_time", "end_time"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_room_scout",
+            "description": (
+                "Bật Săn phòng (Room Scout): hệ thống tự theo dõi và gửi email cho "
+                "user khi có phòng trống đúng ngày / khung giờ / thời lượng / sức "
+                "chứa yêu cầu. Chỉ gọi khi user đã đồng ý bật Săn phòng và đã đủ "
+                "thông tin. KHÔNG hỏi office — office tự lấy theo profile của user. "
+                "Chỉ hỏi/đặt ignore_lunch_break khi khung giờ "
+                "[scout_start_time, scout_end_time) có giao với giờ nghỉ trưa "
+                "12:00-13:00; nếu khung giờ không chạm giờ trưa thì BỎ QUA, để mặc "
+                "định false."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "scout_date": {
+                        "type": "string",
+                        "description": "Ngày cần săn phòng, định dạng YYYY-MM-DD. Từ hôm nay đến tối đa 14 ngày tới.",
+                    },
+                    "duration_minutes": {
+                        "type": "integer",
+                        "description": "Thời lượng cuộc họp cần (phút), ví dụ 60 cho 1 tiếng. Thường 30/60/90/120/150/180.",
+                    },
+                    "scout_start_time": {
+                        "type": "string",
+                        "description": "Giờ bắt đầu khung săn HH:MM (giờ làm việc 09:00-18:00).",
+                    },
+                    "scout_end_time": {
+                        "type": "string",
+                        "description": "Giờ kết thúc khung săn HH:MM. Phải sau scout_start_time và khung phải dài ít nhất bằng duration_minutes.",
+                    },
+                    "capacity_sizes": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": ["small", "medium", "large"],
+                        },
+                        "description": "Nhu cầu sức chứa phòng: small = nhỏ (4 người), medium = vừa (5-12 người), large = lớn (13+ người). Có thể chọn nhiều.",
+                    },
+                    "ignore_lunch_break": {
+                        "type": "boolean",
+                        "description": "Cho phép phòng trống vắt qua giờ nghỉ trưa 12:00-13:00. CHỈ đặt trường này khi khung giờ có giao 12:00-13:00; nếu không giao, để mặc định false.",
+                    },
+                },
+                "required": [
+                    "scout_date",
+                    "duration_minutes",
+                    "scout_start_time",
+                    "scout_end_time",
+                    "capacity_sizes",
+                ],
             },
         },
     },
@@ -1499,6 +1568,89 @@ async def _tool_book_room(
     }
 
 
+async def _tool_create_room_scout(
+    request: Request,
+    args: dict,
+    user_profile_id: str | None,
+) -> dict:
+    """Enable Room Scout for the user. Office is taken from the profile (never
+    from the LLM); the shared create_room_scout endpoint handles Mail.Send,
+    time-range and date validation exactly like the in-app form."""
+    if not settings.supabase_enabled:
+        return {"ok": False, "error": "Room Scout requires Supabase."}
+
+    # The in-app UI only ever surfaces a single active scout, so refuse to start
+    # a second one via the bot; point the user at the Săn phòng page to stop it.
+    if user_profile_id:
+        from .supabase_client import get_supabase
+
+        existing = (
+            get_supabase()
+            .table("room_scouts")
+            .select("id")
+            .eq("user_id", user_profile_id)
+            .eq("status", "active")
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+        if existing:
+            return {
+                "ok": False,
+                "error": (
+                    "Bạn đang có một phiên Săn phòng đang chạy. Vào trang "
+                    "[Săn phòng](/room-scout) để dừng trước khi tạo phiên mới."
+                ),
+            }
+
+    from .room_scouts import RoomScoutRequest, create_room_scout
+
+    capacity_sizes = [
+        size
+        for raw in (args.get("capacity_sizes") or [])
+        if (size := _normalize_capacity_size(raw))
+    ]
+    if not capacity_sizes:
+        return {"ok": False, "error": "Cần ít nhất một nhu cầu sức chứa (nhỏ/vừa/lớn)."}
+
+    try:
+        payload = RoomScoutRequest(
+            scout_date=str(args.get("scout_date") or "").strip() or None,
+            duration_minutes=int(args.get("duration_minutes") or 0),
+            capacity_sizes=capacity_sizes,
+            scout_start_time=str(args.get("scout_start_time") or "").strip() or None,
+            scout_end_time=str(args.get("scout_end_time") or "").strip() or None,
+            ignore_lunch_break=bool(args.get("ignore_lunch_break")),
+            # office intentionally omitted → endpoint fills it from the profile.
+            office=None,
+        )
+    except Exception as e:  # noqa: BLE001 - surface bad args as a chat message
+        return {"ok": False, "error": f"Thông tin săn phòng không hợp lệ: {e}"}
+
+    try:
+        result = await create_room_scout(request, payload)
+    except HTTPException as e:
+        return {"ok": False, "error": str(e.detail)}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": str(e)}
+
+    scout = result.get("scout") or {}
+    return {
+        "ok": True,
+        "created": True,
+        "scout": {
+            "scout_date": scout.get("scout_date"),
+            "duration_minutes": scout.get("duration_minutes"),
+            "scout_start_time": scout.get("scout_start_time"),
+            "scout_end_time": scout.get("scout_end_time"),
+            "capacity_sizes": scout.get("capacity_sizes"),
+            "ignore_lunch_break": scout.get("ignore_lunch_break"),
+            "office": scout.get("office"),
+        },
+    }
+
+
 async def _run_chat_tool(
     request: Request,
     name: str,
@@ -1523,6 +1675,8 @@ async def _run_chat_tool(
             user_profile_id,
             auth_user_id,
         )
+    if name == "create_room_scout":
+        return await _tool_create_room_scout(request, args, user_profile_id)
     return {"ok": False, "error": f"Unknown tool: {name}"}
 
 

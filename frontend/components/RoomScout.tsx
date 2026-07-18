@@ -230,7 +230,6 @@ export function RoomScout({
             <ScoutForm
               userName={userName}
               userOffice={userOffice}
-              officeOptions={officeOptions}
               onCreated={load}
             />
           )}
@@ -477,7 +476,6 @@ function ScoutFormSkeleton() {
           <div className="size-4 animate-pulse rounded bg-default" />
           <div className="h-3 w-44 animate-pulse rounded-full bg-default" />
         </div>
-        <Field labelWidth="w-20" />
         <Field labelWidth="w-24" />
         <div className="mt-2 h-10 w-full animate-pulse rounded-full bg-default" />
       </div>
@@ -488,12 +486,10 @@ function ScoutFormSkeleton() {
 function ScoutForm({
   userName,
   userOffice,
-  officeOptions,
   onCreated,
 }: {
   userName?: string;
   userOffice?: string;
-  officeOptions: UserProfileOption[];
   onCreated: () => void | Promise<void>;
 }) {
   const t = useT();
@@ -536,6 +532,20 @@ function ScoutForm({
       label: tm,
     }));
   }, [startTime]);
+
+  // The lunch-break option is only meaningful when the chosen range actually
+  // overlaps the 12:00-13:00 lunch window; otherwise it's hidden and reset.
+  const crossesLunch = useMemo(() => {
+    if (!startTime || !endTime) return false;
+    return timeToMinutes(startTime) < 13 * 60 && timeToMinutes(endTime) > 12 * 60;
+  }, [startTime, endTime]);
+
+  // Auto-check the option as soon as the range crosses lunch (and clear it when
+  // it no longer does). Runs only on the crossesLunch transition, so a user who
+  // manually unchecks it while still crossing lunch keeps their choice.
+  useEffect(() => {
+    setIgnoreLunch(crossesLunch);
+  }, [crossesLunch]);
 
   const submit = async () => {
     if (!office) {
@@ -600,14 +610,6 @@ function ScoutForm({
       <p className="mt-1.5 text-sm leading-5 text-default-500">{t("scout.subtitle")}</p>
 
       <div className="mt-6 grid gap-4">
-        <SelectField
-          label={t("scout.office")}
-          placeholder={t("scout.selectOffice")}
-          value={office}
-          onChange={setOffice}
-          options={officeOptions.map((o) => ({ value: o.value, label: o.label }))}
-        />
-
         <I18nProvider locale="en-GB">
           <div className="flex flex-col gap-1.5">
             <Label>{t("scout.date")}</Label>
@@ -674,6 +676,14 @@ function ScoutForm({
           </div>
         </I18nProvider>
 
+        <SelectField
+          label={t("scout.duration")}
+          placeholder={t("scout.selectDuration")}
+          value={duration}
+          onChange={setDuration}
+          options={durationOptions(t)}
+        />
+
         <div>
           <Label className="mb-1.5 block">{t("scout.scoutRange")}</Label>
           <div className="grid grid-cols-2 gap-4">
@@ -699,28 +709,24 @@ function ScoutForm({
           </div>
         </div>
 
-        <Checkbox
-          variant="secondary"
-          isSelected={ignoreLunch}
-          onChange={setIgnoreLunch}
-        >
-          <Checkbox.Content>
-            <Checkbox.Control>
-              <Checkbox.Indicator />
-            </Checkbox.Control>
-            <span className="text-sm font-medium text-default-700">
-              {t("scout.ignoreLunch")}
-            </span>
-          </Checkbox.Content>
-        </Checkbox>
-
-        <SelectField
-          label={t("scout.duration")}
-          placeholder={t("scout.selectDuration")}
-          value={duration}
-          onChange={setDuration}
-          options={durationOptions(t)}
-        />
+        {crossesLunch && (
+          <div className="scout-lunch-reveal">
+            <Checkbox
+              variant="secondary"
+              isSelected={ignoreLunch}
+              onChange={setIgnoreLunch}
+            >
+              <Checkbox.Content>
+                <Checkbox.Control>
+                  <Checkbox.Indicator />
+                </Checkbox.Control>
+                <span className="text-sm font-medium text-default-700">
+                  {t("scout.ignoreLunch")}
+                </span>
+              </Checkbox.Content>
+            </Checkbox>
+          </div>
+        )}
 
         <Select<{ value: CapacitySize; label: string }, "multiple">
           variant="secondary"
@@ -898,11 +904,11 @@ function ScoutingCard({
                 : t("scout.allOffices")
             }
           />
-        <DetailRow label={t("scout.duration")} value={durationLabel(t, scout.duration_minutes)} />
         <DetailRow
           label={t("scout.date")}
           value={scout.scout_date ? formatDmy(scout.scout_date) : "-"}
         />
+        <DetailRow label={t("scout.duration")} value={durationLabel(t, scout.duration_minutes)} />
         <DetailRow
           label={t("scout.scoutRangeLabel")}
           value={

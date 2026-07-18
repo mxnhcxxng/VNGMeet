@@ -165,6 +165,26 @@ input[type="password"]::-ms-clear {
   animation: scout-thumb-fade 1s ease forwards;
 }
 
+/* Room Scout: reveal the "ignore lunch break" checkbox when the chosen scout
+   range crosses the 12:00-13:00 lunch window. Expands height + fades in. */
+@keyframes scout-lunch-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+    max-height: 0;
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    max-height: 3rem;
+  }
+}
+
+.scout-lunch-reveal {
+  overflow: hidden;
+  animation: scout-lunch-reveal 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
 /* Brand: switch the global HeroUI accent from blue to orange. Everything that
    reads var(--accent) — primary buttons, office tabs, badges, spinners, icons,
    plus the soft/hover shades derived from it via color-mix — follows along. */

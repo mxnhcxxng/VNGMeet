@@ -81,6 +81,10 @@ type ZoomImage = { src: string; alt: string };
 
 const ImageZoomContext = createContext<((image: ZoomImage) => void) | null>(null);
 
+// Lets markdown links to in-app paths (e.g. "/room-scout") switch the active
+// view instead of opening a new browser tab. Null when no handler is provided.
+const InternalNavContext = createContext<((href: string) => void) | null>(null);
+
 function ImageZoomModal({
   image,
   onClose,
@@ -140,6 +144,7 @@ const MarkdownMessage = memo(function MarkdownMessage({
 }) {
   const t = useT();
   const openZoom = useContext(ImageZoomContext);
+  const navigateInApp = useContext(InternalNavContext);
   return (
     <div className="text-sm leading-7 text-[#252b37] dark:text-[#f7f7f7]">
       <ReactMarkdown
@@ -150,16 +155,35 @@ const MarkdownMessage = memo(function MarkdownMessage({
             <strong className="font-semibold text-[#181d27] dark:text-[#f7f7f7]">{children}</strong>
           ),
           em: ({ children }) => <em className="italic">{children}</em>,
-          a: ({ children, href }) => (
-            <a
-              href={href}
-              target="_blank"
-              rel="noreferrer"
-              className="font-medium text-[#175cd3] underline underline-offset-2 hover:text-[#1449a3]"
-            >
-              {children}
-            </a>
-          ),
+          a: ({ children, href }) => {
+            // In-app paths (e.g. "/room-scout") switch the active view in place
+            // instead of opening a new tab; external links still open a new tab.
+            const isInternal = typeof href === "string" && href.startsWith("/");
+            if (isInternal && navigateInApp) {
+              return (
+                <a
+                  href={href}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    navigateInApp(href);
+                  }}
+                  className="cursor-pointer font-medium text-[var(--accent)] underline underline-offset-2 hover:opacity-80"
+                >
+                  {children}
+                </a>
+              );
+            }
+            return (
+              <a
+                href={href}
+                target="_blank"
+                rel="noreferrer"
+                className="font-medium text-[var(--accent)] underline underline-offset-2 hover:opacity-80"
+              >
+                {children}
+              </a>
+            );
+          },
           img: ({ src, alt }) => {
             const resolvedAlt = alt ?? t("chatp.mapAlt");
             return (
@@ -317,6 +341,21 @@ function messagesBookedDirectly(messages: ChatMessage[]): boolean {
       (item) =>
         (item?.name === "book_room" || item?.name === "schedule_room") &&
         item?.result?.booked === true
+    );
+  });
+}
+
+// Detects that the bot enabled a Room Scout in this batch, so the caller can
+// refresh the sidebar's active-scout indicator without waiting for a reload.
+function messagesCreatedScout(messages: ChatMessage[]): boolean {
+  return messages.some((message) => {
+    const toolResults = (message.metadata as any)?.tool_results;
+    if (!Array.isArray(toolResults)) return false;
+    return toolResults.some(
+      (item) =>
+        item?.name === "create_room_scout" &&
+        item?.result?.ok === true &&
+        item?.result?.created === true
     );
   });
 }
@@ -680,6 +719,8 @@ export function ChatPanel({
   userRole = "user",
   userDomain = "",
   onRefresh,
+  onNavigate,
+  onScoutCreated,
 }: {
   threadId: string | null;
   onThreadSelected: (threadId: string) => void;
@@ -687,6 +728,8 @@ export function ChatPanel({
   userRole?: UserRole;
   userDomain?: string;
   onRefresh?: (opts?: { force?: boolean }) => void;
+  onNavigate?: (href: string) => void;
+  onScoutCreated?: () => void;
 }) {
   const { t } = useLanguage();
   const [messages, setMessages] = useState<ChatMessage[]>(() =>
@@ -876,6 +919,7 @@ export function ChatPanel({
       );
       if (!threadId) onThreadSelected(res.thread.id);
       if (messagesBookedDirectly(returned)) syncAfterBooking();
+      if (messagesCreatedScout(returned)) onScoutCreated?.();
       await refreshThreads();
     } catch (e: any) {
       setError(e.message);
@@ -999,6 +1043,7 @@ export function ChatPanel({
 
   return (
     <ImageZoomContext.Provider value={setZoomImage}>
+    <InternalNavContext.Provider value={onNavigate ?? null}>
     <div className="flex h-full w-full flex-col">
       {empty ? (
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto px-5 py-6">
@@ -1171,6 +1216,7 @@ export function ChatPanel({
       )}
       <ImageZoomModal image={zoomImage} onClose={() => setZoomImage(null)} />
     </div>
+    </InternalNavContext.Provider>
     </ImageZoomContext.Provider>
   );
 }

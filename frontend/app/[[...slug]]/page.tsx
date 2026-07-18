@@ -862,6 +862,17 @@ export default function Home() {
     if (next === view) return;
     guardNav(() => setView(next));
   };
+  // Handle in-app markdown links from the chat bot (e.g. "/room-scout") by
+  // switching the active view in place instead of opening a new browser tab.
+  const handleChatNavigate = (href: string) => {
+    const path = href.split(/[?#]/)[0];
+    if (!path.startsWith("/")) return;
+    const { view: nextView, threadId } = parseRoute(path);
+    guardNav(() => {
+      setActiveThreadId(threadId);
+      setView(nextView);
+    });
+  };
   // "Save and leave": persist the Settings form, then run the stashed
   // navigation only if the save succeeded (otherwise keep the user on Settings
   // so they can fix the error).
@@ -1061,13 +1072,23 @@ export default function Home() {
   }, [canEnterBooking]);
 
   // Track whether the user currently has an active Room Scout so the sidebar can
-  // show a blinking indicator next to the Room Scout tab.
-  useEffect(() => {
+  // show a blinking indicator next to the Room Scout tab. Exposed as a callback
+  // so it can be re-run after the chat bot enables a scout (no reload needed).
+  const refreshScoutStatus = useCallback(() => {
     if (!canEnterBooking) return;
     api.roomScouts()
       .then((res) => setScoutingActive(res.scouts.some((s) => s.status === "active")))
       .catch(() => setScoutingActive(false));
   }, [canEnterBooking]);
+  useEffect(() => {
+    refreshScoutStatus();
+  }, [refreshScoutStatus]);
+  // The bot enabled a scout from chat: light up the sidebar dot now, and drop
+  // the RoomScout cache so opening that tab shows the active scout immediately.
+  const handleScoutCreated = useCallback(() => {
+    clearRoomScoutCache();
+    refreshScoutStatus();
+  }, [refreshScoutStatus]);
 
   useEffect(() => {
     if (!canEnterBooking) return;
@@ -1341,6 +1362,8 @@ export default function Home() {
               onThreadSelected={setActiveThreadId}
               onThreadsChanged={setChatThreads}
               onRefresh={loadSchedule}
+              onNavigate={handleChatNavigate}
+              onScoutCreated={handleScoutCreated}
               userRole={me.profile?.role}
               userDomain={
                 me.profile?.email_username ||
