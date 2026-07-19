@@ -650,7 +650,7 @@ const vi: Partial<Record<TranslationKey, string>> = {
   "bh.statusFailed": "Thất bại",
   "bh.statusCanceled": "Đã hủy",
   "bh.typeInstant": "Tức thì",
-  "bh.typeScheduled": "Theo lịch",
+  "bh.typeScheduled": "Hẹn giờ",
   "bh.typeScout": "Săn phòng",
   "bh.methodManual": "Thủ công",
   "bh.methodChatbot": "Chatbot",

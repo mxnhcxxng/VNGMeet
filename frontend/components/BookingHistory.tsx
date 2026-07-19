@@ -16,10 +16,20 @@ import {
   TableContent,
   TableHeader,
   TableRow,
+  Tooltip,
   toast,
 } from "@heroui/react";
-import { ArrowsRotateRight, Ban, Magnifier, Pencil } from "@gravity-ui/icons";
+import {
+  ArrowsRotateRight,
+  Ban,
+  Binoculars,
+  Clock,
+  Comments,
+  Magnifier,
+  Pencil,
+} from "@gravity-ui/icons";
 import { api, type Booking } from "@/lib/api";
+import { roomFlag } from "@/lib/roomFlags";
 import { useT } from "@/app/providers";
 import type { TFunction, TranslationKey } from "@/lib/i18n";
 import { EditBookingModal } from "./EditBookingModal";
@@ -134,6 +144,25 @@ function isPastBooking(b: Booking): boolean {
   const end = new Date(`${b.date}T${b.end_time}:00`);
   if (Number.isNaN(end.getTime())) return false;
   return end.getTime() < Date.now();
+}
+
+// Replaces the (hidden) booking-type and method columns with small orange icons
+// shown beside the subject. Type and method are independent, so a booking can
+// carry two icons: a clock (scheduled) or binoculars (scout) for the type, plus
+// a comment bubble when it was created via the chatbot. Instant / manual add no
+// icon. Each icon keeps its own label available on hover so no info is lost.
+function bookingIndicators(
+  b: Booking,
+  t: TFunction
+): { key: string; Icon: typeof Clock; label: string }[] {
+  const out: { key: string; Icon: typeof Clock; label: string }[] = [];
+  if (b.booking_type === "scheduled")
+    out.push({ key: "type", Icon: Clock, label: t("bh.typeScheduled") });
+  else if (b.booking_type === "scout")
+    out.push({ key: "type", Icon: Binoculars, label: t("bh.typeScout") });
+  if (b.method === "chatbot")
+    out.push({ key: "method", Icon: Comments, label: t("bh.methodChatbot") });
+  return out;
 }
 
 function withinTimeRange(dateStr: string, range: string): boolean {
@@ -496,8 +525,6 @@ export function BookingHistory() {
                 <TableColumn id="room">{t("bh.colRoom")}</TableColumn>
                 <TableColumn id="time">{t("bh.colTime")}</TableColumn>
                 <TableColumn id="subject">{t("bh.colSubject")}</TableColumn>
-                <TableColumn id="type">{t("bh.colType")}</TableColumn>
-                <TableColumn id="method">{t("bh.colMethod")}</TableColumn>
                 <TableColumn id="status">{t("bh.colStatus")}</TableColumn>
                 <TableColumn id="actions">{t("bh.colActions")}</TableColumn>
               </TableHeader>
@@ -515,12 +542,6 @@ export function BookingHistory() {
                     </TableCell>
                     <TableCell>
                       <div className="h-3 w-40 animate-pulse rounded-full bg-default" />
-                    </TableCell>
-                    <TableCell>
-                      <div className="h-3 w-16 animate-pulse rounded-full bg-default" />
-                    </TableCell>
-                    <TableCell>
-                      <div className="h-3 w-16 animate-pulse rounded-full bg-default" />
                     </TableCell>
                     <TableCell>
                       <div className="h-5 w-16 animate-pulse rounded-full bg-default" />
@@ -594,20 +615,6 @@ export function BookingHistory() {
                         </Table.SortableColumnHeader>
                       )}
                     </TableColumn>
-                    <TableColumn id="type" allowsSorting>
-                      {({ sortDirection }) => (
-                        <Table.SortableColumnHeader sortDirection={sortDirection}>
-                          {t("bh.colType")}
-                        </Table.SortableColumnHeader>
-                      )}
-                    </TableColumn>
-                    <TableColumn id="method" allowsSorting>
-                      {({ sortDirection }) => (
-                        <Table.SortableColumnHeader sortDirection={sortDirection}>
-                          {t("bh.colMethod")}
-                        </Table.SortableColumnHeader>
-                      )}
-                    </TableColumn>
                     <TableColumn id="status" allowsSorting>
                       {({ sortDirection }) => (
                         <Table.SortableColumnHeader sortDirection={sortDirection}>
@@ -621,26 +628,34 @@ export function BookingHistory() {
                   {(b) => (
                     <TableRow id={b.id}>
                       <TableCell>{b.date}</TableCell>
-                      <TableCell>{b.room_name || b.room_email}</TableCell>
+                      <TableCell>
+                        {roomFlag(b.room_name) && (
+                          <span className="mr-2">{roomFlag(b.room_name)}</span>
+                        )}
+                        {b.room_name || b.room_email}
+                      </TableCell>
                       <TableCell>
                         {b.start_time} – {b.end_time}
                       </TableCell>
                       <TableCell className="max-w-[200px]">
-                        <span className="block truncate" title={b.subject || undefined}>
-                          {b.subject || "—"}
-                        </span>
-                      </TableCell>
-                      <TableCell>
-                        {b.booking_type === "scheduled"
-                          ? t("bh.typeScheduled")
-                          : b.booking_type === "scout"
-                            ? t("bh.typeScout")
-                            : t("bh.typeInstant")}
-                      </TableCell>
-                      <TableCell>
-                        {b.method === "chatbot"
-                          ? t("bh.methodChatbot")
-                          : t("bh.methodManual")}
+                        <div className="flex items-center gap-1.5">
+                          {bookingIndicators(b, t).map(({ key, Icon, label }) => (
+                            <Tooltip key={key} delay={200}>
+                              <Tooltip.Trigger className="inline-flex shrink-0">
+                                <Icon
+                                  width={16}
+                                  height={16}
+                                  className="text-[#f97316]"
+                                  aria-label={label}
+                                />
+                              </Tooltip.Trigger>
+                              <Tooltip.Content>{label}</Tooltip.Content>
+                            </Tooltip>
+                          ))}
+                          <span className="block truncate" title={b.subject || undefined}>
+                            {b.subject || "—"}
+                          </span>
+                        </div>
                       </TableCell>
                       <TableCell>
                         <Chip
