@@ -304,6 +304,18 @@ def _create_pending_scheduled_booking(
     if _scheduled_slot_has_conflict(user_profile_id, payload):
         raise HTTPException(409, "Slot này không còn khả dụng để scheduled booking.")
 
+    # The booking isn't sent until the next fire instant (midnight the target
+    # day opens); block if the token won't survive until then. Covers the
+    # chat-bot flow too — there is no modal there. Mirrors BookingModal.tsx.
+    from .token_guard import ensure_token_survives_until
+
+    now_local = datetime.now(ZoneInfo(settings.timezone))
+    ensure_token_survives_until(
+        graph_access_token,
+        booking_schedule.next_fire_instant(now_local),
+        blocked_action="Không thể tạo lịch đặt phòng (scheduled booking)",
+    )
+
     try:
         from .supabase_client import get_supabase
 

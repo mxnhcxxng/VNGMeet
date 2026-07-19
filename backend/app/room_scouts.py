@@ -752,6 +752,16 @@ async def create_room_scout(request: Request, payload: RoomScoutRequest):
             local_today, datetime.min.time(), tzinfo=tz
         ) + timedelta(minutes=end_minutes)
         scout_end_local = min(scout_end_local, window_end_local)
+    # The scout keeps auto-booking until `scout_end_local`; block if the token
+    # won't survive that long (covers the chat-bot flow too — there is no modal
+    # there). Mirrors the frontend gate in RoomScout.tsx.
+    from .token_guard import ensure_token_survives_until
+
+    ensure_token_survives_until(
+        token,
+        scout_end_local,
+        blocked_action="Không thể bật Săn phòng (Room Scout)",
+    )
     row = {
         "user_id": user_profile_id,
         "auth_user_id": auth_user_id,
@@ -824,6 +834,14 @@ async def update_room_scout(request: Request, scout_id: str, payload: RoomScoutR
             local_today, datetime.min.time(), tzinfo=tz
         ) + timedelta(minutes=end_minutes)
         scout_end_local = min(scout_end_local, window_end_local)
+
+    from .token_guard import ensure_token_survives_until
+
+    ensure_token_survives_until(
+        _token,
+        scout_end_local,
+        blocked_action="Không thể cập nhật phiên Săn phòng (Room Scout)",
+    )
 
     now = datetime.now(timezone.utc).isoformat()
     update = {

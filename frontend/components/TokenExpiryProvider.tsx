@@ -212,7 +212,7 @@ function TokenInfoModal({
             <CircleInfo width={22} height={22} />
           </span>
           <h2 className="flex-1 pt-1.5 text-lg font-semibold text-[#181d27] dark:text-[#f7f7f7]">
-            {t("tokenModal.title")}
+            {reason === "refresh" ? t("tokenModal.refreshTitle") : t("tokenModal.title")}
           </h2>
           <button
             type="button"

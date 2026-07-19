@@ -125,6 +125,7 @@ Nguyên tắc phản hồi:
 - Khi liệt kê/gợi ý phòng, KHÔNG hiển thị map hay ảnh map. Chỉ hiển thị map trong 2 trường hợp: (1) user hỏi vị trí/chỉ đường (gọi get_room_directions), hoặc (2) sau khi đặt phòng thành công thì gọi get_room_directions cho phòng vừa đặt để đính kèm map. Trong cả 2 trường hợp, map phải được trả dưới dạng ẢNH map, không trả dưới dạng link.
 - Không hỏi thêm về thiết bị phòng họp.
 - Nếu book thất bại, giải thích lý do nếu API có trả về và đề xuất thử phòng/giờ khác.
+- Nếu kết quả function trả về ok=false với lý do token/phiên Microsoft sắp hết hạn (nội dung có các bước "làm mới token" và link Microsoft Graph Explorer — xảy ra khi tạo scheduled booking hoặc bật/cập nhật Săn phòng mà token không còn đủ hạn tới lúc tác vụ chạy), hãy TRUYỀN LẠI NGUYÊN VĂN thông báo đó cho user: giữ đủ các bước đánh số 1-4 và link [Microsoft Graph Explorer], KHÔNG rút gọn, KHÔNG diễn giải lại. KHÔNG đề xuất phòng/giờ khác trong trường hợp này vì lỗi là do token, không phải do phòng.
 - Nếu người dùng muốn đổi lịch hoặc huỷ lịch, hiện app chưa có API đổi/huỷ; hãy xin thông tin và nói ngắn gọn rằng bạn chưa thể thực hiện tự động trong phiên bản này.
 """
 
@@ -249,7 +250,7 @@ CHAT_TOOLS = [
                 "properties": {
                     "room_email": {"type": "string", "description": "Email phòng họp."},
                     "room_name": {"type": "string", "description": "Tên phòng họp."},
-                    "date": {"type": "string", "description": "Ngày đặt, định dạng YYYY-MM-DD."},
+                    "date": {"type": "string", "description": "KHÔNG dùng cho scheduled booking — hệ thống tự cố định ngày (ngày xa nhất mở đặt lúc 00:00). Bỏ trống và TUYỆT ĐỐI KHÔNG hỏi user chọn ngày."},
                     "start_time": {"type": "string", "description": "Giờ bắt đầu HH:MM."},
                     "end_time": {"type": "string", "description": "Giờ kết thúc HH:MM."},
                     "subject": {"type": "string", "description": "Tiêu đề cuộc họp; để trống nếu user không nói tên, hệ thống sẽ tự điền."},
@@ -260,7 +261,7 @@ CHAT_TOOLS = [
                     },
                     "body": {"type": "string", "description": "Nội dung mô tả cuộc họp."},
                 },
-                "required": ["date", "start_time", "end_time"],
+                "required": ["start_time", "end_time"],
             },
         },
     },
@@ -1840,7 +1841,10 @@ async def _call_llm_with_tools(
         "hạn hệ thống, sẽ tự mở đặt vào 00:00. User KHÔNG được đổi ngày này; nếu user "
         "yêu cầu ngày khác cho scheduled booking, hãy giải thích ngắn gọn rằng "
         "scheduled booking chỉ áp dụng cho ngày đó. (Backend luôn ép ngày này, không "
-        "cần bạn tự tính.)"
+        "cần bạn tự tính.) TUYỆT ĐỐI KHÔNG HỎI user muốn đặt ngày nào cho scheduled "
+        f"booking — hãy CHỦ ĐỘNG thông báo là sẽ đặt cho ngày {scheduled_default_day.isoformat()} "
+        f"({weekday_names[scheduled_default_day.weekday()]}), rồi chỉ hỏi thêm những thông tin "
+        "CÒN THIẾU khác (khung giờ, phòng/sức chứa) nếu cần."
         + (
             f" LƯU Ý: ngày {scheduled_default_day.isoformat()} rơi vào CUỐI TUẦN "
             f"({weekday_names[scheduled_default_day.weekday()]}); trước khi gọi "

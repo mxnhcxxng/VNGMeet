@@ -44,6 +44,7 @@ import {
 import { useT } from "@/app/providers";
 import type { TFunction, TranslationKey } from "@/lib/i18n";
 import { BrandIcon } from "./BrandIcon";
+import { useTokenExpiry } from "./TokenExpiryProvider";
 
 const SCOUT_MAX_ADVANCE_DAYS = 14;
 
@@ -590,6 +591,7 @@ function ScoutForm({
   onCancel?: () => void;
 }) {
   const t = useT();
+  const { ensureTokenTime } = useTokenExpiry();
   const isEdit = mode === "edit";
   // In edit mode every field is seeded from the existing scout; in create mode
   // office defaults to the user's profile office.
@@ -675,6 +677,24 @@ function ScoutForm({
       toast.warning(t("scout.rangeTooShort"));
       return;
     }
+    // The backend keeps the scout alive until its `expires_at`: the scout's
+    // end-time when scouting today, otherwise midnight after today (start of
+    // tomorrow) — mirroring create_room_scout. Block if the token won't survive
+    // that long so the scout can actually book before it lapses.
+    const scoutExpiry =
+      scoutDate === today
+        ? new Date(`${scoutDate}T${endTime}:00`)
+        : (() => {
+            const midnight = new Date();
+            midnight.setHours(0, 0, 0, 0);
+            midnight.setDate(midnight.getDate() + 1);
+            return midnight;
+          })();
+    const neededSeconds = Math.max(
+      0,
+      Math.ceil((scoutExpiry.getTime() - Date.now()) / 1000),
+    );
+    if (!ensureTokenTime(neededSeconds)) return;
     const payload = {
       scout_date: scoutDate,
       duration_minutes: Number(duration),

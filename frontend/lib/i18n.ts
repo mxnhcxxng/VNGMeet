@@ -73,6 +73,7 @@ const en = {
   "tokenModal.a4step4": "Copy the new token and update it in the app",
   "tokenModal.a4note": "The new token will be valid for at most around 24 hours.",
   "tokenModal.close": "Got it",
+  "tokenModal.refreshTitle": "You need to refresh your token",
   "tokenModal.refreshBanner":
     "The token will expire before this task finishes. Please refresh it using the steps below before continuing.",
 
@@ -502,6 +503,7 @@ const vi: Partial<Record<TranslationKey, string>> = {
   "tokenModal.a4step4": "Sao chép token mới và cập nhật vào ứng dụng",
   "tokenModal.a4note": "Token mới sẽ có thời hạn tối đa khoảng 24 giờ.",
   "tokenModal.close": "Đã hiểu",
+  "tokenModal.refreshTitle": "Bạn cần làm mới token",
   "tokenModal.refreshBanner":
     "Token sẽ hết hạn trước khi tác vụ này hoàn thành. Vui lòng làm mới token theo các bước bên dưới trước khi tiếp tục.",
 
