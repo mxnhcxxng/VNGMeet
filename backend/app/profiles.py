@@ -75,6 +75,9 @@ def _upsert_user_profile(claims: dict) -> str | None:
         }
         if user_id:
             payload["auth_user_id"] = user_id
+        phone = claims.get("phone")
+        if isinstance(phone, str) and phone.strip():
+            payload["phone"] = phone.strip()
         supabase = get_supabase()
         res = (
             supabase.table("user_profiles")
@@ -231,6 +234,7 @@ def _profile_payload(profile: dict | None, email: str | None = None) -> dict | N
         "email": profile_email,
         "email_username": row.get("email_username")
         or (profile_email.split("@", 1)[0] if "@" in profile_email else ""),
+        "phone": row.get("phone") or "",
         "office": row.get("office") or "",
         "floor": row.get("floor") or "",
         "building": row.get("building") or "",
@@ -252,7 +256,7 @@ def _read_user_profile(profile_id: str | None, email: str | None = None) -> dict
             get_supabase()
             .table("user_profiles")
             .select(
-                "id, email, email_username, office, floor, building, "
+                "id, email, email_username, phone, office, floor, building, "
                 "preferred_rooms, book_without_confirmation, theme, language, role"
             )
             .limit(1)

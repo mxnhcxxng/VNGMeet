@@ -27,6 +27,8 @@ create table if not exists user_profiles (
   updated_at timestamptz not null default now(),
   constraint user_profiles_email_has_at check (position('@' in email) > 1)
 );
+-- Mobile phone from Graph `mobilePhone`, stored in local VN format (+84 trimmed to 0).
+alter table user_profiles add column if not exists phone text;
 alter table user_profiles add column if not exists office text;
 alter table user_profiles add column if not exists floor text;
 alter table user_profiles add column if not exists building text;

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 import time
 import uuid
 
@@ -99,6 +100,24 @@ def logout(sid: str) -> None:
     _MANUAL_CLAIMS.pop(sid, None)
 
 
+def normalize_vn_phone(value: str | None) -> str | None:
+    """Normalize a Graph `mobilePhone` to local VN format, trimming the +84 prefix.
+
+    Graph values are inconsistent — the country code may or may not include the
+    trunk 0, e.g. "(+84) 0339758256", "+84 912 345 678", "84912345678",
+    "0912345678" -> "0339758256" / "0912345678". Returns None when there's
+    nothing usable to store.
+    """
+    if not isinstance(value, str):
+        return None
+    digits = re.sub(r"\D", "", value)  # drop spaces, dashes, parens, the leading +
+    if digits.startswith("84"):
+        digits = digits[2:]  # strip the +84 country code
+    if digits and not digits.startswith("0"):
+        digits = "0" + digits  # restore the trunk 0 if the country code ate it
+    return digits or None
+
+
 async def verify_manual_graph_token(access_token: str) -> dict:
     """Validate a pasted Graph token by calling Microsoft Graph /me."""
     token = access_token.strip()
@@ -123,6 +142,7 @@ async def verify_manual_graph_token(access_token: str) -> dict:
         "preferred_username": user.get("userPrincipalName") or email,
         "upn": user.get("userPrincipalName"),
         "graph_user_id": user.get("id"),
+        "phone": normalize_vn_phone(user.get("mobilePhone")),
     }
     return {key: value for key, value in claims.items() if value}
 
