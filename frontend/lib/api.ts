@@ -232,6 +232,11 @@ export interface ChatBookingActionPayload {
   book_without_confirmation?: boolean;
 }
 
+// Profile options (offices/floors/buildings/rooms) are effectively static for a
+// session, so cache the in-flight/resolved promise and reuse it across Settings
+// remounts and the page-level prefetch instead of re-hitting the endpoint.
+let profileOptionsCache: Promise<UserProfileOptions> | null = null;
+
 export const api = {
   // Supabase path (only when configured): OAuth via Azure (Microsoft) provider.
   signIn: () =>
@@ -256,7 +261,19 @@ export const api = {
     }),
   logout: () => req<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
   me: () => req<Me>("/api/auth/me"),
-  userProfileOptions: () => req<UserProfileOptions>("/api/users/profile-options"),
+  userProfileOptions: (force?: boolean) => {
+    if (force) profileOptionsCache = null;
+    if (!profileOptionsCache) {
+      profileOptionsCache = req<UserProfileOptions>(
+        "/api/users/profile-options"
+      ).catch((e) => {
+        // Don't cache failures so the next caller can retry.
+        profileOptionsCache = null;
+        throw e;
+      });
+    }
+    return profileOptionsCache;
+  },
   updateUserProfile: (
     payload: Pick<UserProfile, "office" | "floor" | "building" | "preferred_rooms"> & {
       book_without_confirmation?: boolean;
