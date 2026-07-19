@@ -120,11 +120,26 @@ function isWeekendHeaderLabel(label: string) {
   );
 }
 
+// Business hours end at 18:00 (the last slot in TIME_OPTIONS). Opening the form
+// after that leaves no bookable slot today, so create-mode defaults roll to the
+// next day and start back at the first slot (09:00).
+function isAfterBusinessHours() {
+  const now = new Date();
+  return now.getHours() * 60 + now.getMinutes() >= 18 * 60;
+}
+
+// Default scout date = today, or tomorrow when opened after business hours.
+function defaultScoutDate() {
+  return localDateAfter(isAfterBusinessHours() ? 1 : 0);
+}
+
 // Default start = the nearest selectable slot at or after the current time.
-// Falls back to the first slot when the current time is past business hours.
+// After business hours the date rolls to tomorrow (see defaultScoutDate), so the
+// fallback here is the first slot (09:00) — the start of that next day.
 function defaultStartTime() {
   const options = TIME_OPTIONS.slice(0, -1);
   if (options.length === 0) return "";
+  if (isAfterBusinessHours()) return options[0];
   const now = new Date();
   const nowMinutes = now.getHours() * 60 + now.getMinutes();
   return options.find((tm) => timeToMinutes(tm) >= nowMinutes) ?? options[0];
@@ -579,7 +594,7 @@ function ScoutForm({
   // In edit mode every field is seeded from the existing scout; in create mode
   // office defaults to the user's profile office.
   const [office, setOffice] = useState(scout?.office || userOffice || "");
-  const [scoutDate, setScoutDate] = useState(() => scout?.scout_date || localDateAfter(0));
+  const [scoutDate, setScoutDate] = useState(() => scout?.scout_date || defaultScoutDate());
   const [startTime, setStartTime] = useState(() => scout?.scout_start_time || defaultStartTime());
   const [endTime, setEndTime] = useState(scout?.scout_end_time || "");
   const [duration, setDuration] = useState(scout ? String(scout.duration_minutes) : "");
@@ -695,7 +710,9 @@ function ScoutForm({
         <Binoculars className="size-7 text-[#F05A22]" />
       </div>
       <h1 className="mt-3 text-2xl font-bold text-default-900">
-        {t("scout.greeting", { name: userName || t("scout.greetingThere") })}
+        {isEdit
+          ? t("scout.editTitle")
+          : t("scout.greeting", { name: userName || t("scout.greetingThere") })}
       </h1>
       <p className="mt-1.5 text-sm leading-5 text-default-500">{t("scout.subtitle")}</p>
 
@@ -880,11 +897,21 @@ function ScoutForm({
           </Select.Popover>
         </Select>
 
+        {/* The auto-stop-at-midnight caveat only matters when scouting a day
+            other than today (a future-dated scout still stops at midnight
+            tonight). Mirrors the same note on the active ScoutingCard. */}
+        {scoutDate !== today && (
+          <div className="flex items-start gap-2 rounded-xl bg-[#fff4ef] p-3 text-sm leading-5 text-[#535862] dark:bg-[#3B1202] dark:text-[#fee7de]">
+            <CircleInfo className="mt-0.5 size-4 shrink-0 text-[#F05A22]" />
+            <span>{t("scout.endsAtMidnightNote")}</span>
+          </div>
+        )}
+
         {isEdit ? (
           <div className="mt-2 flex items-center gap-2">
             <Button
               variant="tertiary"
-              className="rounded-full"
+              className="flex-1 rounded-full"
               isDisabled={saving}
               onPress={() => onCancel?.()}
             >
@@ -926,7 +953,7 @@ function ScoutingCard({
   onEdit?: () => void;
 }) {
   const t = useT();
-  const [busy, setBusy] = useState<"cancel" | "found" | null>(null);
+  const [busy, setBusy] = useState<"cancel" | null>(null);
   // The auto-stop-at-midnight caveat only matters when scouting a day other than
   // today (a future-dated scout still stops at midnight tonight).
   const differentDay = Boolean(scout.scout_date) && scout.scout_date !== localDateAfter(0);
@@ -953,17 +980,11 @@ function ScoutingCard({
     return () => clearInterval(id);
   }, []);
 
-  const stop = async (kind: "cancel" | "found") => {
+  const stop = async (kind: "cancel") => {
     setBusy(kind);
     try {
-      await api.stopRoomScout(scout.id, kind === "found" ? "success" : "canceled");
-      if (kind === "found") {
-        toast.success(t("scout.stopFound"), {
-          description: t("scout.stopFoundDesc"),
-        });
-      } else {
-        toast.success(t("scout.stopCancelled"));
-      }
+      await api.stopRoomScout(scout.id, "canceled");
+      toast.success(t("scout.stopCancelled"));
       await onChanged();
     } catch (e: any) {
       toast.danger(t("scout.stopFailed"), { description: e.message });
@@ -1006,7 +1027,7 @@ function ScoutingCard({
         </h1>
         <Button
           size="sm"
-          variant="secondary"
+          variant="ghost"
           className="shrink-0 gap-1.5 rounded-full text-[#F05A22]"
           isDisabled={!!busy}
           onPress={() => onEdit?.()}
@@ -1052,29 +1073,20 @@ function ScoutingCard({
       </dl>
 
       {differentDay && (
-        <div className="mt-4 flex items-start gap-1.5 text-sm leading-5 text-default-500">
+        <div className="mt-4 flex items-start gap-2 rounded-xl bg-[#fff4ef] p-3 text-sm leading-5 text-[#535862] dark:bg-[#3B1202] dark:text-[#fee7de]">
           <CircleInfo className="mt-0.5 size-4 shrink-0 text-[#F05A22]" />
           <span>{t("scout.endsAtMidnightNote")}</span>
         </div>
       )}
 
-      <div className="mt-5 flex items-center gap-2">
+      <div className="mt-5">
         <Button
           variant="tertiary"
-          className="rounded-full"
+          className="w-full rounded-full"
           isPending={busy === "cancel"}
-          isDisabled={busy === "found"}
           onPress={() => stop("cancel")}
         >
           {t("scout.cancelScouting")}
-        </Button>
-        <Button
-          className="flex-1 rounded-full"
-          isPending={busy === "found"}
-          isDisabled={busy === "cancel"}
-          onPress={() => stop("found")}
-        >
-          {t("scout.foundRoom")}
         </Button>
       </div>
     </div>
@@ -1140,7 +1152,10 @@ function ScoutSuccessCard({
   const dismiss = async () => {
     setBusy(true);
     try {
-      await api.acknowledgeRoomScout(scout.id);
+      // Acknowledge every pending success scout, not just the one shown: several
+      // auto-books can pile up unacknowledged while the UI only ever surfaces the
+      // newest, so a single "Great" clears them all instead of revealing the next.
+      await api.acknowledgeAllRoomScouts();
       await onDismiss();
     } catch (e: any) {
       toast.danger(t("scout.acknowledgeFailed"), { description: e.message });

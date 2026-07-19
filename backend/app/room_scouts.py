@@ -882,6 +882,25 @@ async def acknowledge_room_scout(request: Request, scout_id: str):
     return {"ok": True}
 
 
+@router.post("/api/room-scouts/acknowledge-all")
+async def acknowledge_all_room_scouts(request: Request):
+    """Dismiss every pending success card at once ("Great"). Multiple auto-books
+    can pile up unacknowledged; the UI only ever shows the newest, so tapping
+    Great clears them all so the older ones don't resurface behind it."""
+    _token, _auth_user_id, user_profile_id, _email = await _booking_auth_context(request)
+    if not user_profile_id or not settings.supabase_enabled:
+        raise HTTPException(503, "Room Scout requires Supabase.")
+    from .supabase_client import get_supabase
+
+    now = datetime.now(timezone.utc).isoformat()
+    get_supabase().table("room_scouts").update(
+        {"acknowledged_at": now, "updated_at": now}
+    ).eq("user_id", user_profile_id).eq("status", "success").is_(
+        "acknowledged_at", "null"
+    ).execute()
+    return {"ok": True}
+
+
 @router.post("/api/room-scouts/process")
 async def run_room_scouts_now(request: Request):
     _require_auth(request)

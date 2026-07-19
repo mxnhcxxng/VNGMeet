@@ -270,11 +270,12 @@ const en = {
 
   // --- Room Scout ---------------------------------------------------------
   "scout.subtitle":
-    "We'll check for available rooms every 30 minutes and notify you by email when a matching room is found. Room Scout will automatically end at midnight today.",
+    "We'll check for available rooms every minute and book one as soon as it's available.",
   "scout.guideSubtitle":
-    "We'll check for available rooms every 30 minutes and send you an Outlook email when a matching room becomes available.",
+    "We'll check for available rooms every minute and book one as soon as it's available.",
   "scout.greeting": "Hi, {name}",
   "scout.greetingThere": "there",
+  "scout.editTitle": "Edit scout information",
   "scout.dur30": "30 min",
   "scout.dur60": "1 hour",
   "scout.dur90": "1.5 hours",
@@ -325,7 +326,7 @@ const en = {
   "scout.selectCapacity": "Select Capacity",
   "scout.dateRangeNote":
     "Choose a date from today through {date} (14 days ahead).",
-  "scout.endsAtMidnightNote": "This scout ends at midnight on the day it was started.",
+  "scout.endsAtMidnightNote": "Due to technical limitations, Scout Room will automatically stop at midnight if no available room is found.",
   "scout.afterHoursNote":
     "Room scouting can't be started after 18:00. Try again tomorrow",
   "scout.start": "Start Room Scout",
@@ -697,11 +698,12 @@ const vi: Partial<Record<TranslationKey, string>> = {
 
   // --- Room Scout ---------------------------------------------------------
   "scout.subtitle":
-    "Chúng tôi sẽ kiểm tra phòng trống mỗi 30 phút và gửi email cho bạn khi tìm thấy phòng phù hợp. Room Scout sẽ tự động kết thúc lúc 00:00 hôm nay.",
+    "Chúng tôi sẽ kiểm tra phòng trống mỗi phút và đặt phòng ngay khi có phòng phù hợp.",
   "scout.guideSubtitle":
-    "Chúng tôi sẽ kiểm tra phòng trống mỗi 30 phút và gửi email Outlook cho bạn khi có phòng phù hợp.",
+    "Chúng tôi sẽ kiểm tra phòng trống mỗi phút và đặt phòng ngay khi có phòng phù hợp.",
   "scout.greeting": "Xin chào, {name}",
   "scout.greetingThere": "bạn",
+  "scout.editTitle": "Chỉnh sửa thông tin săn phòng",
   "scout.dur30": "30 phút",
   "scout.dur60": "1 giờ",
   "scout.dur90": "1,5 giờ",
@@ -752,7 +754,7 @@ const vi: Partial<Record<TranslationKey, string>> = {
   "scout.selectCapacity": "Chọn sức chứa",
   "scout.dateRangeNote":
     "Chọn ngày từ hôm nay đến hết {date} (14 ngày tới).",
-  "scout.endsAtMidnightNote": "Job sẽ kết thúc lúc 00:00 của ngày bắt đầu Scout.",
+  "scout.endsAtMidnightNote": "Do giới hạn kỹ thuật, Scout Room sẽ tự động dừng lúc 00:00 nếu chưa tìm được phòng trống.",
   "scout.afterHoursNote":
     "Không thể bắt đầu Săn Phòng sau 18:00. Vui lòng thử lại vào ngày mai.",
   "scout.start": "Bắt đầu Room Scout",

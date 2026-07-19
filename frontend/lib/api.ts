@@ -335,6 +335,8 @@ export const api = {
     ),
   acknowledgeRoomScout: (id: string) =>
     req<{ ok: boolean }>(`/api/room-scouts/${id}/acknowledge`, { method: "POST" }),
+  acknowledgeAllRoomScouts: () =>
+    req<{ ok: boolean }>(`/api/room-scouts/acknowledge-all`, { method: "POST" }),
   processRoomScouts: () =>
     req<{ ok: boolean; checked: number; notified: number; matches: number; errors: number }>(
       "/api/room-scouts/process",
