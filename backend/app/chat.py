@@ -94,6 +94,7 @@ Luồng chỉ đường:
 Luồng Săn phòng (Room Scout):
 - Khi user muốn "săn phòng", "theo dõi phòng trống", "báo khi có phòng", hoặc đồng ý bật Săn phòng sau khi bạn gợi ý, hãy thu thập đủ thông tin rồi gọi function create_room_scout để bật.
 - Các trường cần cho create_room_scout (giống form Săn phòng trong app): scout_date (YYYY-MM-DD, từ hôm nay đến tối đa 14 ngày tới), duration_minutes (thời lượng cần), scout_start_time và scout_end_time (khung giờ săn HH:MM, giờ làm việc 09:00-18:00, khung phải dài ít nhất bằng thời lượng), capacity_sizes (nhu cầu sức chứa: small/medium/large, có thể nhiều).
+- Cuối tuần: scout_date VẪN nhận Thứ 7/Chủ nhật NẾU user chủ động yêu cầu săn đúng ngày cuối tuần đó; nhưng KHÔNG tự gợi ý/đề xuất ngày cuối tuần khi bạn chọn ngày giúp user.
 - Xác định thời lượng & khung giờ săn: nếu user nói RÕ giờ bắt đầu và kết thúc (ví dụ "9h-11h", "14:00 đến 16:00") → đặt scout_start_time/scout_end_time đúng khoảng đó và TỰ MAP duration_minutes = số phút từ bắt đầu đến kết thúc, KHÔNG hỏi lại thời lượng. Nếu user CHỈ nói THỜI LƯỢNG (ví dụ "1 tiếng", "90 phút") mà chưa nói khung giờ → HỎI THÊM khung giờ muốn săn (giờ bắt đầu và kết thúc) rồi mới bật.
 - Khung giờ theo buổi: user nói "sáng" → khung auto 09:00-12:00; "chiều" → khung auto 13:00-18:00 (trưa là 12:00-13:00). Với khung theo buổi vẫn cần thời lượng; nếu user chưa nói thời lượng thì hỏi thêm.
 - Nếu scout_date là HÔM NAY: scout_start_time KHÔNG được lấy giờ đã qua — làm tròn tới mốc :00 hoặc :30 gần nhất tính từ thời điểm hiện tại; nếu mốc đó đã qua thì lấy mốc :00/:30 kế tiếp (ví dụ bây giờ 14:12 → 14:30, 14:35 → 15:00). Áp dụng cho cả khung "sáng/chiều" khi rơi vào hôm nay.
@@ -114,7 +115,7 @@ Nguyên tắc phản hồi:
 - Không hỏi số lượng người tham dự. Phân loại nhu cầu phòng: nhỏ (4 người) = small, vừa (5-12 người) = medium, lớn (13+ người) = large. Nếu user tự nói rõ con số hoặc nói nhỏ/vừa/lớn thì quy thành capacity_size rồi truyền đi. Nếu user KHÔNG nói gì về sức chứa/nhu cầu phòng, MẶC ĐỊNH dùng size vừa (medium) — KHÔNG hỏi lại; có thể nói ngắn gọn rằng đang mặc định phòng vừa và user muốn đổi thì cứ báo.
 - NGOẠI LỆ: nếu user đã gọi đích danh một phòng cụ thể (ví dụ "đặt phòng Barcelona", "Tokyo còn trống không"), thì KHÔNG hỏi về nhu cầu phòng/size nữa (hỏi size lúc này vô nghĩa vì user đã chốt phòng). Khi đó truyền tên phòng vào trường location và bỏ qua capacity_size/capacity. Chỉ hỏi size khi user nói chung chung về loại/sức chứa phòng mà chưa chỉ rõ phòng nào.
 - Sức chứa phòng được phân loại theo cột capacity_size (small/medium/large), không dựa trên con số capacity thô. Khi hiển thị sức chứa cho user, LUÔN dùng capacity_size quy đổi sang tiếng Việt: small = "Nhỏ", medium = "Vừa", large = "Lớn"; TUYỆT ĐỐI không hiển thị số người cụ thể (ví dụ "6 người", "12 người").
-- Chỉ hỗ trợ đặt phòng vào ngày làm việc trong tuần (Thứ 2 đến Thứ 6). Nếu user yêu cầu Thứ 7 hoặc Chủ nhật, báo ngắn gọn rằng chỉ đặt được vào ngày làm việc T2-T6 và gợi ý chọn ngày làm việc gần nhất. Khi gợi ý ngày/khung giờ, không trả ra Thứ 7 hoặc Chủ nhật.
+- Ưu tiên ngày làm việc (Thứ 2 đến Thứ 6). Vẫn ĐẶT ĐƯỢC phòng vào Thứ 7/Chủ nhật NẾU user chủ động hỏi/yêu cầu đúng ngày cuối tuần đó — khi đó cứ kiểm tra và đặt bình thường. NHƯNG TUYỆT ĐỐI KHÔNG tự gợi ý/đề xuất ngày Thứ 7 hoặc Chủ nhật: khi bạn tự chọn ngày thay thế hay gợi ý khung giờ, chỉ đưa ra ngày làm việc T2-T6, không bao giờ đưa ngày cuối tuần trừ khi chính user nêu ngày đó.
 - Do giới hạn hệ thống, chỉ đặt được phòng tối đa 15 ngày kể từ hôm nay (tính cả hôm nay là ngày thứ 0, ví dụ hôm nay 16/6 thì ngày xa nhất đặt được là 1/7). Nếu user yêu cầu ngày xa hơn, báo ngắn gọn rằng chỉ đặt được trong vòng 15 ngày tới và gợi ý ngày hợp lệ gần nhất. Không kiểm tra phòng trống hay tạo card đặt phòng cho ngày vượt quá giới hạn này.
 - Không bịa phòng, giờ trống hoặc trạng thái booking nếu chưa có dữ liệu từ API.
 - Nếu API không trả về phòng phù hợp, trước tiên dùng split_suggestions/alternate_suggestions để gợi ý tách phòng hoặc khung giờ khác cùng thời lượng. Sau khi đã đưa các gợi ý đó, LUÔN thêm ở phía cuối một đề xuất dùng thử Room Scout (tên tiếng Việt là "Săn phòng"): nói rằng nếu user vẫn muốn giữ đúng khung giờ đã yêu cầu, có thể vào trang Săn phòng để hệ thống tự theo dõi; khi có phòng được nhả ra trong khung giờ đó, hệ thống sẽ báo cho user (qua email). BẮT BUỘC để tên "Săn phòng" dưới dạng hyperlink markdown trỏ tới đường dẫn /room-scout, ví dụ: [Săn phòng](/room-scout). Room Scout/Săn phòng hỗ trợ ngày từ hôm nay đến 14 ngày tới. Nếu user muốn, bạn có thể tự bật Săn phòng bằng function create_room_scout (xem "Luồng Săn phòng" bên dưới); nếu user chưa muốn thì chỉ gợi ý qua hyperlink [Săn phòng](/room-scout).
@@ -871,13 +872,20 @@ def _alternate_time_suggestions(
     business_end = settings.business_end_hour * 60 // settings.availability_slot_minutes
     today = now.date()
     earliest_end_slot = _earliest_end_slot_today(now)
+    # Chỉ gợi ý giờ thay thế bắt đầu ở mốc :00/:30 → bước theo lưới 30 phút và
+    # căn điểm bắt đầu lên lưới đó.
+    step = max(1, 30 // settings.availability_slot_minutes)
+    grid_start = ((business_start + step - 1) // step) * step
     for day in day_list:
         try:
             candidate_day = date_cls.fromisoformat(day)
         except ValueError:
             continue
+        # Không tự gợi ý ngày cuối tuần (T7/CN); cuối tuần chỉ đặt khi user hỏi thẳng.
+        if candidate_day.weekday() >= 5:
+            continue
         latest_start = business_end - duration
-        for candidate_start in range(business_start, latest_start + 1):
+        for candidate_start in range(grid_start, latest_start + 1, step):
             candidate_end = candidate_start + duration
             # Hôm nay: chỉ gợi ý khung giờ có giờ kết thúc sau thời điểm hiện tại.
             if candidate_day == today and candidate_end < earliest_end_slot:
@@ -945,7 +953,9 @@ def _frame_window_slots(
         now_idx = (now.hour * 60 + now.minute) // settings.availability_slot_minutes
         min_start_idx = max(frame_start_idx, (now_idx // step) * step)
     found: list[dict] = []
-    cand = frame_start_idx
+    # Chỉ gợi ý cửa sổ bắt đầu ở mốc :00/:30 nên căn điểm bắt đầu lên lưới 30 phút
+    # (ví dụ window_start 09:15 → cửa sổ đầu tiên bắt đầu từ 09:30).
+    cand = ((frame_start_idx + step - 1) // step) * step
     while cand + duration_slots <= frame_end_idx:
         cand_end = cand + duration_slots
         if cand >= min_start_idx:
@@ -1309,11 +1319,8 @@ async def _tool_check_room_availability(
                 f"(đến hết ngày {max_booking_day.isoformat()})."
             ),
         }
-    if requested_day.weekday() >= 5:
-        return {
-            "ok": False,
-            "error": "Chỉ hỗ trợ đặt phòng vào ngày làm việc (Thứ 2 đến Thứ 6).",
-        }
+    # Cuối tuần (T7/CN) VẪN đặt được nếu user hỏi thẳng ngày đó; nhưng không bao
+    # giờ tự gợi ý ngày cuối tuần (xem lọc trong _alternate_time_suggestions).
     day_list = [
         (today + timedelta(days=i)).isoformat()
         for i in range(settings.availability_days)
@@ -1512,6 +1519,13 @@ async def _tool_check_room_availability_live(
         "truncated": len(available) > CHAT_MAX_OPTIONS,
         "source": "graph_live",
     }
+
+
+def _scheduled_default_day(today: date_cls) -> date_cls:
+    """Ngày cố định cho scheduled booking: ngày xa nhất trong giới hạn hệ thống
+    (mở đặt vào 00:00 đêm nay). Cho phép rơi vào cuối tuần — trường hợp đó bot sẽ
+    hỏi lại user có thực sự muốn đặt cuối tuần không trước khi tạo phiếu."""
+    return today + timedelta(days=settings.max_booking_advance_days)
 
 
 async def _tool_book_room(
@@ -1755,9 +1769,17 @@ async def _run_chat_tool(
             request, args, graph_token, user_profile_id, auth_user_id
         )
     if name == "schedule_room":
+        # Scheduled booking chỉ được đặt vào đúng ngày mặc định (ngày xa nhất mở
+        # đặt lúc 00:00); user không có quyền đổi ngày nên ép date ở backend, bỏ
+        # qua mọi date do model truyền lên.
+        today = datetime.now(ZoneInfo(settings.timezone)).date()
         return await _tool_book_room(
             request,
-            {**args, "booking_type": "scheduled"},
+            {
+                **args,
+                "date": _scheduled_default_day(today).isoformat(),
+                "booking_type": "scheduled",
+            },
             graph_token,
             user_profile_id,
             auth_user_id,
@@ -1799,6 +1821,7 @@ async def _call_llm_with_tools(
     next_monday = this_monday + timedelta(days=7)
     next_sunday = next_monday + timedelta(days=6)
     max_booking_day = today + timedelta(days=settings.max_booking_advance_days)
+    scheduled_default_day = _scheduled_default_day(today)
     runtime_context = (
         f"\n\nNgữ cảnh thời gian hiện tại:\n"
         f"- Hôm nay là {today.isoformat()} ({weekday_names[now.weekday()]}).\n"
@@ -1807,6 +1830,26 @@ async def _call_llm_with_tools(
         f"- Ngày xa nhất có thể đặt phòng là {max_booking_day.isoformat()} "
         f"(giới hạn hệ thống {settings.max_booking_advance_days} ngày kể từ hôm nay). "
         "Không kiểm tra/đặt phòng cho ngày sau ngày này.\n"
+        f"- Đặt phòng theo lịch (scheduled booking / hẹn giờ đặt phòng): khi yêu cầu "
+        "của user liên quan đến 'hẹn giờ đặt phòng', 'đặt lịch trước', 'đặt phòng "
+        "theo lịch', hoặc 'đặt đêm nay' / 'đặt lúc 00:00' (ý là canh mở đặt lúc nửa "
+        "đêm cho ngày xa nhất chưa mở đặt tức thì) → LUÔN coi đây là scheduled "
+        "booking và dùng function schedule_room (KHÔNG dùng book_room). Scheduled "
+        f"booking CHỈ đặt được vào đúng ngày {scheduled_default_day.isoformat()} "
+        f"({weekday_names[scheduled_default_day.weekday()]}) — ngày xa nhất trong giới "
+        "hạn hệ thống, sẽ tự mở đặt vào 00:00. User KHÔNG được đổi ngày này; nếu user "
+        "yêu cầu ngày khác cho scheduled booking, hãy giải thích ngắn gọn rằng "
+        "scheduled booking chỉ áp dụng cho ngày đó. (Backend luôn ép ngày này, không "
+        "cần bạn tự tính.)"
+        + (
+            f" LƯU Ý: ngày {scheduled_default_day.isoformat()} rơi vào CUỐI TUẦN "
+            f"({weekday_names[scheduled_default_day.weekday()]}); trước khi gọi "
+            "schedule_room hãy HỎI LẠI user xem có thực sự muốn đặt phòng vào cuối "
+            "tuần không, chỉ tạo phiếu khi user xác nhận."
+            if scheduled_default_day.weekday() >= 5
+            else ""
+        )
+        + "\n"
         "- Tuần bắt đầu từ Thứ 2 và kết thúc vào Chủ nhật.\n"
         f"- Tuần này: Thứ 2 {this_monday.isoformat()} đến Chủ nhật {this_sunday.isoformat()}.\n"
         f"- Tuần sau: Thứ 2 {next_monday.isoformat()} đến Chủ nhật {next_sunday.isoformat()}.\n"
