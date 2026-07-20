@@ -56,6 +56,15 @@ def _profile_auth_user_id(claims: dict) -> str | None:
 
 def _upsert_user_profile(claims: dict) -> str | None:
     """Mirror the signed-in user into public.user_profiles."""
+    # Session Zalo (login bằng SĐT): profile đã được tra lúc login và nhét sẵn
+    # `profile_id` vào JWT → dùng THẲNG id đó, bỏ qua toàn bộ bước upsert theo
+    # email. Bước upsert kia không dùng được cho Zalo: session không có email @,
+    # và `auth_user_id` có thể = profile.id (không tồn tại trong auth.users) →
+    # vi phạm khoá ngoại → exception → trả None → 503.
+    pid = claims.get("profile_id")
+    if isinstance(pid, str) and pid.strip():
+        return pid.strip()
+
     user_id = _profile_auth_user_id(claims)
     email = _profile_email(claims)
     if not email:
@@ -286,7 +295,7 @@ def _claims_from_bearer(request: Request) -> dict:
     bearer = request.headers.get("Authorization", "")
     if not bearer.startswith("Bearer "):
         raise HTTPException(401, "Not authenticated")
-    return auth.verify_jwt(bearer[len("Bearer ") :])
+    return auth.verify_bearer(bearer[len("Bearer ") :])
 
 
 def _request_identity(request: Request) -> tuple[str | None, str | None]:
@@ -349,6 +358,61 @@ async def set_token(request: Request, access_token: str = Body(..., embed=True))
     return JSONResponse({"ok": True, "username": _profile_display_name(claims)})
 
 
+def _lookup_profile_by_phone(phone: str) -> dict | None:
+    if not settings.supabase_enabled:
+        return None
+    from .supabase_client import get_supabase
+
+    res = (
+        get_supabase()
+        .table("user_profiles")
+        .select("id, auth_user_id, email, email_username, phone")
+        .eq("phone", phone)
+        .limit(1)
+        .execute()
+    )
+    return res.data[0] if res.data else None
+
+
+@router.post("/api/auth/zalo")
+async def auth_zalo(
+    request: Request,
+    token: str = Body(..., embed=True),
+    access_token: str = Body(..., embed=True),
+):
+    """Mini App: đăng nhập bằng SĐT Zalo.
+
+    Ý tưởng: SĐT → tra `user_profiles` ra user nào → CẤP SESSION CHO USER ĐÓ LUÔN.
+    Không kiểm tra gì thêm lúc login (đọc chat chỉ cần biết user là ai). Việc gửi
+    tin nhắn sau này cần Graph token thì BE tự lấy qua Microsoft refresh_token đã
+    lưu của chính user đó — với điều kiện user đã link Microsoft từ trước.
+    """
+    phone = await auth.resolve_zalo_phone(token, access_token)
+
+    profile = _lookup_profile_by_phone(phone)
+    # 403 = SĐT chưa có trong VNGMeet (user chưa từng được tạo/liên kết) → client
+    # hiện màn "Vui lòng liên kết Microsoft trước".
+    if not profile:
+        raise HTTPException(403, "Số điện thoại chưa được đăng ký trong VNGMeet.")
+
+    email = profile.get("email") or ""
+    session_claims = {
+        # sub = auth.users UUID nếu có → get_graph_token(sub) chạy được khi gửi chat.
+        # Nếu profile chưa có auth_user_id, vẫn auth được để ĐỌC, chỉ là chưa gửi
+        # được tin (chưa link Microsoft) — đúng tinh thần "map ra user là auth luôn".
+        "sub": profile.get("auth_user_id") or str(profile["id"]),
+        "profile_id": str(profile["id"]),
+        "email": email,
+        "preferred_username": email,
+        "name": profile.get("email_username") or email,
+        "phone": phone,
+    }
+    session_jwt = auth.mint_zalo_session(session_claims)
+    return JSONResponse(
+        {"access_token": session_jwt, "username": session_claims["name"]}
+    )
+
+
 @router.post("/api/auth/link")
 async def link_microsoft(
     request: Request,
@@ -359,7 +423,7 @@ async def link_microsoft(
     bearer = request.headers.get("Authorization", "")
     if not bearer.startswith("Bearer "):
         raise HTTPException(401, "Not authenticated")
-    claims = auth.verify_jwt(bearer[len("Bearer ") :])
+    claims = auth.verify_bearer(bearer[len("Bearer ") :])
     if not provider_refresh_token or not provider_refresh_token.strip():
         raise HTTPException(400, "provider_refresh_token rỗng")
     auth_user_id = claims["sub"]

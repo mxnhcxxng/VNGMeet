@@ -173,6 +173,86 @@ def _bearer(request: Request) -> str | None:
 
 
 # --------------------------------------------------------------------------- #
+# Zalo Mini App: phone -> VNGMeet session JWT
+# --------------------------------------------------------------------------- #
+ZALO_SESSION_ISS = "vngmeet-zalo"
+
+
+async def resolve_zalo_phone(zalo_token: str, zalo_access_token: str) -> str:
+    """Đổi token của getPhoneNumber() ra SĐT (chuẩn hoá về dạng VN local).
+
+    Token hết hạn sau 2 phút, dùng 1 lần. secret_key CHỈ ở server.
+    """
+    s = get_settings()
+    if not s.zalo_app_secret_key:
+        raise HTTPException(500, "Server missing ZALO_APP_SECRET_KEY")
+    headers = {
+        "access_token": zalo_access_token.strip(),
+        "code": zalo_token.strip(),
+        "secret_key": s.zalo_app_secret_key,
+    }
+    async with httpx.AsyncClient(timeout=20) as client:
+        resp = await client.get("https://graph.zalo.me/v2.0/me/info", headers=headers)
+    data = resp.json() if resp.content else {}
+    if resp.status_code != 200 or data.get("error") != 0:
+        raise HTTPException(401, f"Zalo token không hợp lệ: {data.get('message')}")
+    number = (data.get("data") or {}).get("number")
+    phone = normalize_vn_phone(number)   # đã có sẵn trong file này
+    if not phone:
+        raise HTTPException(401, "Không lấy được số điện thoại từ Zalo")
+    return phone
+
+
+def mint_zalo_session(claims: dict) -> str:
+    """Ký session JWT của VNGMeet cho Mini App (HS256).
+
+    claims phải chứa ít nhất `sub` (auth.users UUID). Nên kèm email/name/phone
+    để các endpoint downstream (profile, chat) đọc như claims của Supabase.
+    """
+    import jwt
+
+    s = get_settings()
+    if not s.miniapp_session_secret:
+        raise HTTPException(500, "Server missing MINIAPP_SESSION_SECRET")
+    now = int(time.time())
+    payload = {
+        **claims,
+        "iss": ZALO_SESSION_ISS,
+        "aud": "authenticated",              # để qua verify_jwt-style aud check
+        "iat": now,
+        "exp": now + s.miniapp_session_ttl_seconds,
+    }
+    return jwt.encode(payload, s.miniapp_session_secret, algorithm="HS256")
+
+
+def _verify_zalo_session(token: str) -> dict | None:
+    """Trả claims nếu là session JWT do VNGMeet ký, else None (để fallback Supabase)."""
+    import jwt
+
+    s = get_settings()
+    if not s.miniapp_session_secret:
+        return None
+    try:
+        claims = jwt.decode(
+            token,
+            s.miniapp_session_secret,
+            algorithms=["HS256"],
+            audience="authenticated",
+        )
+    except jwt.PyJWTError:
+        return None
+    return claims if claims.get("iss") == ZALO_SESSION_ISS else None
+
+
+def verify_bearer(token: str) -> dict:
+    """Chấp nhận CẢ session JWT của VNGMeet (Zalo) LẪN Supabase JWT."""
+    claims = _verify_zalo_session(token)
+    if claims is not None:
+        return claims
+    return verify_jwt(token)   # Supabase HS256 (đã có sẵn)
+
+
+# --------------------------------------------------------------------------- #
 # Supabase: provider (Graph) refresh-token storage
 # --------------------------------------------------------------------------- #
 def store_refresh_token(user_id: str, refresh_token: str) -> None:
@@ -268,7 +348,7 @@ async def resolve_token(request: Request) -> tuple[str, str | None]:
     """
     bearer = _bearer(request)
     if bearer:
-        claims = verify_jwt(bearer)
+        claims = verify_bearer(bearer)
         user_id = claims["sub"]
         return await get_graph_token(user_id), user_id
 

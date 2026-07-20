@@ -67,6 +67,11 @@ class Settings(BaseSettings):
     llm_api_key: str = ""
     llm_model: str = ""
 
+    # Zalo Mini App
+    zalo_app_secret_key: str = ""          # secret_key của Zalo App (mini.zalo.me)
+    miniapp_session_secret: str = ""       # khoá ký session JWT của VNGMeet cho Mini App
+    miniapp_session_ttl_seconds: int = 30 * 24 * 3600   # 30 ngày
+
     @property
     def public_url(self) -> str:
         """Canonical, browser-reachable URL of the frontend for use in links

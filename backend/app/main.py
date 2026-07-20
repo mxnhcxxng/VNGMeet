@@ -183,7 +183,12 @@ async def _safe_process_room_scouts() -> None:
 app = FastAPI(title="VNG Meet — Meeting Room Availability", lifespan=lifespan)
 
 app.add_middleware(SessionMiddleware, secret_key=settings.session_secret, same_site="lax")
+# Origin tĩnh luôn được phép: Zalo Mini App prod (domain cố định của Zalo) + local
+# dev. Giữ ngoài env để FRONTEND_URL chỉ cần một origin (endpoint AgentBase động).
+_STATIC_CORS_ORIGINS = ["https://h5.zdn.vn", "http://localhost:3000"]
 _cors_origins = [o.strip() for o in settings.frontend_url.split(",") if o.strip()]
+# Gộp với origin tĩnh, khử trùng lặp và giữ nguyên thứ tự.
+_cors_origins = list(dict.fromkeys(_cors_origins + _STATIC_CORS_ORIGINS))
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
