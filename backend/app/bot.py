@@ -543,7 +543,8 @@ def _create_named_thread(link: dict, title: str) -> dict:
     req = _linked_request(link)
     sb = _require_supabase_chat()
     user_profile_id = _current_user_profile_id(req)
-    return _create_thread(sb, user_profile_id, title)
+    # User tự đặt tên qua `/new <tiêu đề>` → giữ nguyên, không để auto-title đè.
+    return _create_thread(sb, user_profile_id, title, title_custom=True)
 
 
 async def _current_thread_title(link: dict) -> str:

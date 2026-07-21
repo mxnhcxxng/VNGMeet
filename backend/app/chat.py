@@ -484,7 +484,10 @@ def _bot_profile_id(sb) -> str:
 def _assert_thread_owner(sb, thread_id: str, user_profile_id: str) -> dict:
     rows = (
         sb.table("thread")
-        .select("id, user_id, title, created_at, updated_at")
+        .select(
+            "id, user_id, title, intent, booking_date, start_time, end_time, "
+            "duration_minutes, title_custom, created_at, updated_at"
+        )
         .eq("id", thread_id)
         .eq("user_id", user_profile_id)
         .limit(1)
@@ -497,13 +500,22 @@ def _assert_thread_owner(sb, thread_id: str, user_profile_id: str) -> dict:
     return rows[0]
 
 
-def _create_thread(sb, user_profile_id: str, content: str) -> dict:
+def _create_thread(sb, user_profile_id: str, content: str, title_custom: bool = False) -> dict:
     title = content.strip().replace("\n", " ")
     if len(title) > 64:
         title = title[:61].rstrip() + "..."
+    # title_custom=True cho tên do user tự đặt (VD lệnh bot `/new <tiêu đề>`) để
+    # auto-title (intent • ngày • giờ) không đè lên. Luồng chat thường tạo thread
+    # với title tạm từ tin nhắn đầu (title_custom=False) và sẽ được auto-title thay.
     rows = (
         sb.table("thread")
-        .insert({"user_id": user_profile_id, "title": title or "Chat mới"})
+        .insert(
+            {
+                "user_id": user_profile_id,
+                "title": title or "Chat mới",
+                "title_custom": title_custom,
+            }
+        )
         .execute()
         .data
         or []
@@ -511,6 +523,147 @@ def _create_thread(sb, user_profile_id: str, content: str) -> dict:
     if not rows:
         raise HTTPException(503, "Could not create chat thread.")
     return rows[0]
+
+
+# --------------------------------------------------------------------------- #
+# Thread intent/info: a compact structured summary of what the thread is about.
+# It lets us load fewer history messages (token saving) while keeping context,
+# and auto-names the thread "<intent> • <ngày> • <giờ/thời lượng>". Derived
+# purely from the tool the agent called this turn (no extra LLM call); tool-less
+# turns fall back to an "info" default only when the thread has no intent yet.
+# --------------------------------------------------------------------------- #
+INTENT_LABELS = {
+    "book": "Đặt phòng",
+    "schedule": "Đặt hẹn giờ",
+    "scout": "Săn phòng",
+    "update": "Đổi lịch",
+    "delete": "Huỷ lịch",
+    "info": "Thông tin",
+}
+# Tool name → intent. When several tools run in one turn, the LAST match wins
+# (e.g. list_bookings then edit_booking → "update").
+TOOL_INTENT = {
+    "check_room_availability": "book",
+    "book_room": "book",
+    "schedule_room": "schedule",
+    "create_room_scout": "scout",
+    "cancel_room_scout": "scout",
+    "edit_booking": "update",
+    "cancel_booking": "delete",
+    "get_room_directions": "info",
+    "list_bookings": "info",
+}
+_THREAD_INFO_FIELDS = ("intent", "booking_date", "start_time", "end_time", "duration_minutes")
+
+
+def _format_duration_hours(minutes: object) -> str | None:
+    try:
+        mins = int(minutes)
+    except (TypeError, ValueError):
+        return None
+    if mins <= 0:
+        return None
+    hours = mins / 60
+    text = f"{hours:.1f}".rstrip("0").rstrip(".")
+    return f"{text}h"
+
+
+def _compose_thread_title(info: dict) -> str | None:
+    intent = info.get("intent")
+    label = INTENT_LABELS.get(intent)
+    if not label:
+        return None
+    parts = [label]
+    booking_date = str(info.get("booking_date") or "").strip()
+    if booking_date:
+        try:
+            parts.append(date_cls.fromisoformat(booking_date).strftime("%d/%m"))
+        except ValueError:
+            pass
+    start = str(info.get("start_time") or "").strip()
+    end = str(info.get("end_time") or "").strip()
+    if start and end:
+        parts.append(f"{start}-{end}")
+    elif start:
+        parts.append(start)
+    else:
+        duration = _format_duration_hours(info.get("duration_minutes"))
+        if duration:
+            parts.append(duration)
+    return " • ".join(parts)
+
+
+def _derive_thread_info_from_tools(tool_results: list[dict], now: datetime) -> dict:
+    """Suy intent + ngày/giờ từ tool bot đã gọi trong lượt này. Lấy tool CUỐI cùng
+    map được intent; đọc date/time từ arguments của chính tool đó. Trả {} nếu
+    không tool nào map được intent."""
+    derived: dict = {}
+    for tr in tool_results or []:
+        intent = TOOL_INTENT.get(tr.get("name") or "")
+        if not intent:
+            continue
+        args = tr.get("arguments") or {}
+        info: dict = {"intent": intent}
+        if intent == "info" and (tr.get("name") == "get_room_directions"):
+            # Chỉ đường: mặc định hôm nay + giờ hiện tại.
+            info["booking_date"] = now.date().isoformat()
+            info["start_time"] = now.strftime("%H:%M")
+        else:
+            booking_date = str(args.get("date") or args.get("scout_date") or "").strip()
+            if booking_date:
+                info["booking_date"] = booking_date
+            start = str(args.get("start_time") or args.get("scout_start_time") or "").strip()
+            end = str(args.get("end_time") or args.get("scout_end_time") or "").strip()
+            if start:
+                info["start_time"] = start
+            if end:
+                info["end_time"] = end
+            duration = args.get("duration_minutes")
+            if duration is not None:
+                info["duration_minutes"] = duration
+        derived = info  # last matching tool wins
+    return derived
+
+
+def _update_thread_info(
+    sb,
+    thread_id: str,
+    current_thread: dict,
+    tool_results: list[dict],
+    now: datetime,
+) -> dict:
+    """Cập nhật cột info + tên thread dựa trên tool đã gọi. Trả về dict info mới
+    (đã merge) để caller đưa title vào response. Không gọi LLM."""
+    derived = _derive_thread_info_from_tools(tool_results, now)
+    if not derived and not current_thread.get("intent"):
+        # Lượt không có tool nào & thread còn trống → mặc định info/hôm nay/giờ nhắn.
+        derived = {
+            "intent": "info",
+            "booking_date": now.date().isoformat(),
+            "start_time": now.strftime("%H:%M"),
+        }
+    merged = {field: current_thread.get(field) for field in _THREAD_INFO_FIELDS}
+    if not derived:
+        return merged
+    # Đổi intent → reset các field thời gian cũ để không lẫn thông tin giữa nhu cầu.
+    if derived.get("intent") and derived["intent"] != current_thread.get("intent"):
+        for field in ("booking_date", "start_time", "end_time", "duration_minutes"):
+            merged[field] = None
+    # Field mới đè field cũ; field trống trong `derived` giữ nguyên (cập nhật tăng dần).
+    for field in _THREAD_INFO_FIELDS:
+        if field in derived and derived[field] not in (None, ""):
+            merged[field] = derived[field]
+    if all(merged.get(field) == current_thread.get(field) for field in _THREAD_INFO_FIELDS):
+        return merged  # không có gì đổi
+    update: dict = {field: merged.get(field) for field in _THREAD_INFO_FIELDS}
+    update["updated_at"] = datetime.now(timezone.utc).isoformat()
+    if not current_thread.get("title_custom"):
+        title = _compose_thread_title(merged)
+        if title:
+            update["title"] = title
+    sb.table("thread").update(update).eq("id", thread_id).execute()
+    merged["title"] = update.get("title") or current_thread.get("title")
+    return merged
 
 
 def _insert_chat_message(
@@ -565,7 +718,7 @@ def _chat_messages_for_llm(sb, thread_id: str, bot_profile_id: str) -> list[dict
         .select("from_user_id, content, created_at")
         .eq("thread_id", thread_id)
         .order("created_at", desc=True)
-        .limit(30)
+        .limit(20)
         .execute()
         .data
         or []
@@ -2048,12 +2201,42 @@ async def _run_chat_tool(
     return {"ok": False, "error": f"Unknown tool: {name}"}
 
 
+def _thread_info_context(thread_info: dict | None) -> str:
+    """Khối tóm tắt yêu cầu của thread, tiêm vào prompt để bù cho lịch sử bị cắt."""
+    if not thread_info:
+        return ""
+    lines: list[str] = []
+    label = INTENT_LABELS.get(thread_info.get("intent"))
+    if label:
+        lines.append(f"Nhu cầu: {label}")
+    booking_date = str(thread_info.get("booking_date") or "").strip()
+    if booking_date:
+        lines.append(f"Ngày: {booking_date}")
+    start = str(thread_info.get("start_time") or "").strip()
+    end = str(thread_info.get("end_time") or "").strip()
+    if start and end:
+        lines.append(f"Giờ: {start}-{end}")
+    elif start:
+        lines.append(f"Giờ: {start}")
+    duration = _format_duration_hours(thread_info.get("duration_minutes"))
+    if duration:
+        lines.append(f"Thời lượng: {duration}")
+    if not lines:
+        return ""
+    return (
+        "\n\nNgữ cảnh yêu cầu hiện tại của đoạn chat (tóm tắt để bù cho phần lịch sử "
+        "cũ đã lược bớt; ưu tiên thông tin user vừa nói nếu khác):\n- "
+        + "\n- ".join(lines)
+    )
+
+
 async def _call_llm_with_tools(
     request: Request,
     history: list[dict],
     graph_token: str,
     user_profile_id: str | None,
     auth_user_id: str | None,
+    thread_info: dict | None = None,
 ) -> tuple[str, list[dict]]:
     now = datetime.now(ZoneInfo(settings.timezone))
     profile = _read_user_profile(user_profile_id) if user_profile_id else None
@@ -2131,7 +2314,15 @@ async def _call_llm_with_tools(
         "mỗi cửa sổ đó."
     )
     messages = [
-        {"role": "system", "content": CHAT_SYSTEM_PROMPT + runtime_context + profile_context},
+        {
+            "role": "system",
+            "content": (
+                CHAT_SYSTEM_PROMPT
+                + runtime_context
+                + profile_context
+                + _thread_info_context(thread_info)
+            ),
+        },
         *history,
     ]
     tool_results: list[dict] = []
@@ -2254,7 +2445,7 @@ def rename_chat_thread(
     now = datetime.now(timezone.utc).isoformat()
     rows = (
         sb.table("thread")
-        .update({"title": title, "updated_at": now})
+        .update({"title": title, "title_custom": True, "updated_at": now})
         .eq("id", thread_id)
         .eq("user_id", user_profile_id)
         .execute()
@@ -2337,31 +2528,32 @@ async def send_chat_message(request: Request, payload: ChatSendRequest):
         sb, thread_id, user_profile_id, bot_profile_id, content
     )
 
+    now = datetime.now(ZoneInfo(settings.timezone))
     direction_room_name = _extract_room_direction_query(content)
     if direction_room_name:
         direction_result = await _tool_get_room_directions(
             {"room_name": direction_room_name}
         )
+        direction_tool_results = [
+            {
+                "name": "get_room_directions",
+                "arguments": {"room_name": direction_room_name},
+                "result": direction_result,
+            }
+        ]
         assistant_msg = _insert_chat_message(
             sb,
             thread_id,
             bot_profile_id,
             user_profile_id,
             await _room_direction_reply(direction_result, content),
-            {
-                "tool_results": [
-                    {
-                        "name": "get_room_directions",
-                        "arguments": {"room_name": direction_room_name},
-                        "result": direction_result,
-                    }
-                ]
-            },
+            {"tool_results": direction_tool_results},
         )
+        info = _update_thread_info(sb, thread_id, thread, direction_tool_results, now)
         return {
             "thread": {
                 "id": thread_id,
-                "title": thread.get("title"),
+                "title": info.get("title") or thread.get("title"),
                 "created_at": thread.get("created_at"),
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             },
@@ -2384,7 +2576,7 @@ async def send_chat_message(request: Request, payload: ChatSendRequest):
 
     history = _chat_messages_for_llm(sb, thread_id, bot_profile_id)
     reply, tool_results = await _call_llm_with_tools(
-        request, history, graph_token, user_profile_id, auth_user_id
+        request, history, graph_token, user_profile_id, auth_user_id, thread
     )
     if not reply:
         reply = "Mình chưa có câu trả lời phù hợp. Bạn cho mình thêm ngày, giờ và số người nhé."
@@ -2396,10 +2588,11 @@ async def send_chat_message(request: Request, payload: ChatSendRequest):
         reply,
         {"tool_results": tool_results} if tool_results else {},
     )
+    info = _update_thread_info(sb, thread_id, thread, tool_results, now)
     return {
         "thread": {
             "id": thread_id,
-            "title": thread.get("title"),
+            "title": info.get("title") or thread.get("title"),
             "created_at": thread.get("created_at"),
             "updated_at": datetime.now(timezone.utc).isoformat(),
         },

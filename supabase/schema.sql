@@ -118,6 +118,15 @@ create table if not exists thread (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references user_profiles(id) on delete cascade,
   title text,
+  -- Tóm tắt yêu cầu của thread để nạp thay cho lịch sử cũ (tiết kiệm token) và
+  -- tự sinh tên thread. intent ∈ book/schedule/scout/update/delete/info.
+  intent text,
+  booking_date date,
+  start_time text,
+  end_time text,
+  duration_minutes integer,
+  -- true khi user tự đổi tên thread → auto-title không đè lên nữa.
+  title_custom boolean not null default false,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
