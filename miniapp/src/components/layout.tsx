@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import * as zmpSdk from "zmp-sdk";
 import { getSystemInfo } from "zmp-sdk";
 import {
   AnimationRoutes,
@@ -21,6 +22,45 @@ import { errText, requestPhoneNumber } from "@/services/phone";
 
 type Phase = "authing" | "denied" | "unlinked" | "error";
 
+// Đọc mã pairing của Zalo Bot từ deep-link (?bot_pair=<code>). Bot điều hướng user
+// mở Mini App kèm mã này để liên kết chat_id ↔ tài khoản VNG.
+function readBotPairCode(): string | null {
+  // 1) Launch params từ deep-link Zalo (zmp-sdk). Đây là đường chính khi mini app
+  //    được mở qua https://zalo.me/s/<app_id>/?bot_pair=<code>.
+  try {
+    const getRouteParams = (zmpSdk as Record<string, unknown>)["getRouteParams"];
+    if (typeof getRouteParams === "function") {
+      const params = (getRouteParams as () => Record<string, string>)();
+      if (params?.bot_pair) return String(params.bot_pair);
+    }
+  } catch {
+    // ignore
+  }
+  // 2) Fallback: query/hash của URL (web/simulator).
+  try {
+    const fromSearch = new URLSearchParams(window.location.search).get("bot_pair");
+    if (fromSearch) return fromSearch;
+    const hash = window.location.hash || "";
+    const qIndex = hash.indexOf("?");
+    if (qIndex >= 0) {
+      return new URLSearchParams(hash.slice(qIndex + 1)).get("bot_pair");
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+function clearBotPairParam(): void {
+  try {
+    const url = new URL(window.location.href);
+    url.searchParams.delete("bot_pair");
+    window.history.replaceState({}, "", url.toString());
+  } catch {
+    // ignore
+  }
+}
+
 // Cổng authen bằng SĐT Zalo. Đặt trong SnackbarProvider để dùng useSnackbar.
 //
 // Luồng:
@@ -35,6 +75,7 @@ function Gate() {
   const [phase, setPhase] = useState<Phase>("authing");
   const [detail, setDetail] = useState(""); // DEBUG: message lỗi thật
   const running = useRef(false);
+  const pairHandled = useRef(false);
 
   const authenticate = useCallback(async () => {
     if (running.current) return;
@@ -83,6 +124,31 @@ function Gate() {
   useEffect(() => {
     if (!token) void authenticate();
   }, [token]);
+
+  // Liên kết Zalo Bot: khi đã có session và deep-link kèm ?bot_pair=<code>, đổi mã
+  // lấy liên kết chat_id ↔ tài khoản VNG (chỉ chạy 1 lần).
+  useEffect(() => {
+    if (!token || pairHandled.current) return;
+    const code = readBotPairCode();
+    if (!code) return;
+    pairHandled.current = true;
+    void (async () => {
+      try {
+        await api.linkBot(code);
+        openSnackbar({
+          text: "Đã liên kết Zalo Bot thành công! Quay lại chat bot để tiếp tục.",
+          type: "success",
+        });
+      } catch {
+        openSnackbar({
+          text: "Liên kết Zalo Bot thất bại. Mã có thể đã hết hạn, thử lại từ bot nhé.",
+          type: "error",
+        });
+      } finally {
+        clearBotPairParam();
+      }
+    })();
+  }, [token, openSnackbar]);
 
   // Gate luôn được render BÊN TRONG ZMPRouter (xem Layout), nên <Page> ở cả 2
   // nhánh đều có context router — không còn lỗi invariant của react-router.

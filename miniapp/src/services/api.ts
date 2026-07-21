@@ -81,4 +81,12 @@ export const api = {
         body: JSON.stringify(payload),
       },
     ),
+
+  // Liên kết tài khoản với Zalo Bot: đổi mã pairing (bot cấp qua deep-link) lấy
+  // liên kết chat_id ↔ tài khoản VNG. Cần session hiện tại (Bearer) của Mini App.
+  linkBot: (code: string) =>
+    request<{ ok: boolean }>("/bot/link", {
+      method: "POST",
+      body: JSON.stringify({ code }),
+    }),
 };

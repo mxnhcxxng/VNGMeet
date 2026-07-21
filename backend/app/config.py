@@ -72,6 +72,24 @@ class Settings(BaseSettings):
     miniapp_session_secret: str = ""       # khoá ký session JWT của VNGMeet cho Mini App
     miniapp_session_ttl_seconds: int = 30 * 24 * 3600   # 30 ngày
 
+    # Zalo Bot Platform (chat bot — sản phẩm KHÁC Mini App, bot.zaloplatforms.com).
+    # Bot nhận tin qua webhook và trả lời bằng chính agent chat của Mini App.
+    zalo_bot_token: str = ""               # Bot Token từ bot.zaloplatforms.com
+    zalo_bot_secret_token: str = ""        # X-Bot-Api-Secret-Token dùng verify webhook
+    bot_pairing_ttl_seconds: int = 600     # hạn mã pairing liên kết tài khoản (10 phút)
+    # Deep-link MỞ MINI APP để user liên kết tài khoản (vd https://zalo.me/s/<app_id>/).
+    # PHẢI trỏ tới Mini App (nơi có phone-auth + handler bot_pair), KHÔNG phải web
+    # frontend. Nếu để trống, tạm fallback về public_url (web) — user sẽ không link được.
+    bot_miniapp_link: str = ""
+
+    @property
+    def zalo_bot_enabled(self) -> bool:
+        return bool(self.zalo_bot_token and self.zalo_bot_secret_token)
+
+    @property
+    def zalo_bot_api_base(self) -> str:
+        return f"https://bot-api.zaloplatforms.com/bot{self.zalo_bot_token}"
+
     @property
     def public_url(self) -> str:
         """Canonical, browser-reachable URL of the frontend for use in links
