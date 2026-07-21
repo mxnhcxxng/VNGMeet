@@ -18,6 +18,7 @@ from .models import (
     ChatFeedbackRequest,
     ChatSendRequest,
     ChatThreadRenameRequest,
+    UpdateBookingRequest,
 )
 from .profiles import (
     _booking_auth_context,
@@ -79,7 +80,7 @@ Luồng xử lý:
 6. Khi người dùng chọn phòng, kiểm tra lại các trường bắt buộc để đặt lịch.
 7. Khi người dùng muốn đặt phòng, gọi function book_room cho đặt tức thì hoặc schedule_room cho scheduled booking để tạo card xác nhận với các thông tin đã điền.
 8. Xử lý kết quả book_room/schedule_room theo trường trả về:
-   - Nếu trả về requires_confirmation=true: KHÔNG nói đã đặt phòng; chỉ nói người dùng kiểm tra card và bấm Đồng ý hoặc Từ chối.
+   - Nếu trả về requires_confirmation=true: KHÔNG nói đã đặt phòng; nói người dùng xác nhận yêu cầu — bấm Đồng ý/Từ chối trên thẻ, hoặc trả lời Y (đồng ý) / N (huỷ).
    - Nếu trả về booked=true (user đã bật chế độ đặt phòng không cần xác nhận): báo luôn kết quả. Nếu pending=true thì nói scheduled booking đã được tạo và sẽ tự đặt khi lịch mở; nếu không thì chỉ cần báo đặt phòng thành công. KHÔNG trả link Outlook/calendar hay bất kỳ link xác nhận nào. Sau đó BẮT BUỘC gọi get_room_directions cho phòng vừa đặt và đính kèm map dưới dạng ẢNH (không phải link).
    - Nếu ok=false: báo thất bại kèm lý do và đề xuất phòng/giờ khác.
 9. Báo kết quả đặt phòng thành công hoặc thất bại sau khi hệ thống nhận action từ card.
@@ -126,7 +127,17 @@ Nguyên tắc phản hồi:
 - Không hỏi thêm về thiết bị phòng họp.
 - Nếu book thất bại, giải thích lý do nếu API có trả về và đề xuất thử phòng/giờ khác.
 - Nếu kết quả function trả về ok=false với lý do token/phiên Microsoft sắp hết hạn (nội dung có các bước "làm mới token" và link Microsoft Graph Explorer — xảy ra khi tạo scheduled booking hoặc bật/cập nhật Săn phòng mà token không còn đủ hạn tới lúc tác vụ chạy), hãy TRUYỀN LẠI NGUYÊN VĂN thông báo đó cho user: giữ đủ các bước đánh số 1-4 và link [Microsoft Graph Explorer], KHÔNG rút gọn, KHÔNG diễn giải lại. KHÔNG đề xuất phòng/giờ khác trong trường hợp này vì lỗi là do token, không phải do phòng.
-- Nếu người dùng muốn đổi lịch hoặc huỷ lịch, hiện app chưa có API đổi/huỷ; hãy xin thông tin và nói ngắn gọn rằng bạn chưa thể thực hiện tự động trong phiên bản này.
+- Khi người dùng muốn XEM/ĐỔI/HUỶ lịch đã đặt, xem "Luồng Đổi/Huỷ lịch" bên dưới.
+
+Luồng Đổi/Huỷ lịch (booking đã đặt):
+- Khi user muốn xem lịch đã đặt, gọi list_bookings và liệt kê ngắn gọn các booking sắp tới (phòng, ngày, giờ, tiêu đề). KHÔNG hiển thị booking_id cho user — id chỉ để bạn dùng nội bộ khi gọi cancel_booking/edit_booking.
+- Khi user muốn HUỶ hoặc ĐỔI một booking, TRƯỚC TIÊN gọi list_bookings để lấy đúng booking_id:
+  • Nếu chỉ có một booking khớp mô tả của user (đúng phòng/ngày/giờ), dùng luôn booking đó.
+  • Nếu có nhiều booking khớp hoặc không chắc user nói booking nào, HỎI LẠI để user chọn (liệt kê các booking khớp kèm phòng/ngày/giờ), KHÔNG tự đoán.
+  • Nếu list_bookings trả về rỗng, báo user hiện không có booking sắp tới nào.
+- HUỶ: sau khi xác định đúng booking, XÁC NHẬN lại với user ("Bạn chắc muốn huỷ [phòng] ngày [ngày] [giờ] chứ?") rồi mới gọi cancel_booking với booking_id. Xử lý kết quả: canceled=true → báo đã huỷ thành công; ok=false → báo lý do.
+- ĐỔI: hỏi/đọc thông tin cần đổi (ngày, giờ, tiêu đề, người tham dự, nội dung), XÁC NHẬN thay đổi với user, rồi gọi edit_booking với booking_id và CHỈ các trường cần đổi. Không đổi được phòng qua edit_booking — nếu user muốn đổi phòng, hướng dẫn huỷ booking cũ rồi đặt phòng mới. Xử lý kết quả: edited=true → báo đã cập nhật kèm thông tin mới; ok=false → báo lý do (ví dụ slot mới không còn trống, giờ không hợp lệ).
+- Nếu kết quả cancel_booking/edit_booking trả về ok=false với lý do token/phiên Microsoft sắp hết hạn (có các bước làm mới token và link Microsoft Graph Explorer), TRUYỀN LẠI NGUYÊN VĂN như quy tắc token ở trên.
 """
 
 
@@ -343,6 +354,76 @@ CHAT_TOOLS = [
                     },
                 },
                 "required": ["outcome"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_bookings",
+            "description": (
+                "Liệt kê các booking (đặt phòng) SẮP TỚI còn hiệu lực của user "
+                "(từ hôm nay trở đi, chưa bị huỷ/thất bại). Dùng khi user muốn xem "
+                "lịch đã đặt, hoặc TRƯỚC KHI đổi/huỷ để xác định đúng booking cần "
+                "thao tác. Mỗi booking trả kèm booking_id — dùng booking_id đó cho "
+                "cancel_booking / edit_booking. Không nhận tham số nào."
+            ),
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "cancel_booking",
+            "description": (
+                "Huỷ một booking đã đặt của user theo booking_id. Instant booking sẽ "
+                "được huỷ THẬT trên lịch (Outlook); scheduled booking đang chờ sẽ bị "
+                "huỷ yêu cầu. Lấy booking_id từ list_bookings. BẮT BUỘC xác nhận lại "
+                "với user đúng booking nào (phòng/ngày/giờ) trước khi gọi."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "booking_id": {
+                        "type": "string",
+                        "description": "ID của booking cần huỷ (lấy từ list_bookings).",
+                    },
+                },
+                "required": ["booking_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "edit_booking",
+            "description": (
+                "Sửa một booking đã đặt của user theo booking_id: đổi ngày, giờ, tiêu "
+                "đề, người tham dự hoặc nội dung. CHỈ truyền các trường cần đổi; trường "
+                "bỏ trống giữ nguyên. Instant booking (đã lên lịch) được cập nhật THẬT "
+                "trên Outlook. Lấy booking_id từ list_bookings. BẮT BUỘC xác nhận thay "
+                "đổi với user trước khi gọi. Không đổi được phòng — chỉ đổi thời gian/"
+                "nội dung; muốn đổi phòng thì huỷ rồi đặt lại."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "booking_id": {
+                        "type": "string",
+                        "description": "ID booking cần sửa (lấy từ list_bookings).",
+                    },
+                    "date": {"type": "string", "description": "Ngày mới YYYY-MM-DD, chỉ truyền nếu đổi."},
+                    "start_time": {"type": "string", "description": "Giờ bắt đầu mới HH:MM, chỉ truyền nếu đổi."},
+                    "end_time": {"type": "string", "description": "Giờ kết thúc mới HH:MM, chỉ truyền nếu đổi."},
+                    "subject": {"type": "string", "description": "Tiêu đề mới, chỉ truyền nếu đổi."},
+                    "attendees": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Danh sách email người tham dự mới (THAY THẾ toàn bộ danh sách cũ), chỉ truyền nếu đổi.",
+                    },
+                    "body": {"type": "string", "description": "Nội dung mô tả mới, chỉ truyền nếu đổi."},
+                },
+                "required": ["booking_id"],
             },
         },
     },
@@ -1753,6 +1834,175 @@ async def _tool_cancel_room_scout(
     }
 
 
+async def _tool_list_bookings(
+    request: Request,
+    graph_token: str,
+    user_profile_id: str | None,
+) -> dict:
+    """List the user's active, upcoming bookings so the model can reference a
+    booking_id for cancel/edit. Only rows from today onward that are still active
+    (not canceled/failed) are returned, keeping the list short and relevant.
+    Ownership is enforced by filtering on user_id server-side."""
+    _ = request
+    if not settings.supabase_enabled:
+        return {"ok": False, "error": "Booking storage chưa được cấu hình."}
+    if not user_profile_id:
+        return {"ok": False, "error": "Không xác định được user."}
+
+    # Self-heal from Outlook before reading, exactly like the /api/bookings grid:
+    # if the user cancelled/moved a meeting directly in Outlook, sync_my_calendar
+    # flips those user_activity rows (e.g. -> "canceled") so the list we show is
+    # accurate right before a cancel/edit. Throttled to once/min per user and
+    # best-effort — a sync failure must never block listing. Unlike the app (which
+    # runs this as a post-response BackgroundTask), the bot has no post-response
+    # hook, so we await it inline; the throttle keeps repeated calls cheap.
+    if graph_token and availability.should_sync_calendar(user_profile_id):
+        try:
+            await availability.sync_my_calendar(graph_token, user_profile_id, None)
+        except Exception as e:  # noqa: BLE001 - listing must not fail on sync
+            log.warning("bot list_bookings calendar sync failed: %s", e)
+
+    from .supabase_client import get_supabase
+
+    today = datetime.now(ZoneInfo(settings.timezone)).date().isoformat()
+    rows = (
+        get_supabase()
+        .table("user_activity")
+        .select(
+            "id, room_name, room_email, date, start_time, end_time, "
+            "booking_type, subject, status"
+        )
+        .eq("user_id", user_profile_id)
+        .gte("date", today)
+        .in_("status", ["ok", "pending", "success"])
+        .order("date", desc=False)
+        .order("start_time", desc=False)
+        .limit(50)
+        .execute()
+        .data
+        or []
+    )
+    bookings = [
+        {
+            "booking_id": r.get("id"),
+            "room_name": r.get("room_name"),
+            "date": r.get("date"),
+            "start_time": r.get("start_time"),
+            "end_time": r.get("end_time"),
+            "subject": r.get("subject"),
+            "booking_type": r.get("booking_type"),
+            "status": r.get("status"),
+        }
+        for r in rows
+    ]
+    return {"ok": True, "count": len(bookings), "bookings": bookings}
+
+
+async def _tool_cancel_booking(
+    request: Request,
+    args: dict,
+    user_profile_id: str | None,
+) -> dict:
+    """Cancel one of the user's bookings via the shared delete_booking endpoint,
+    which handles the real-calendar cancel (instant) vs pending-request cancel
+    (scheduled) and enforces ownership by user_id."""
+    if not settings.supabase_enabled:
+        return {"ok": False, "error": "Booking storage chưa được cấu hình."}
+    if not user_profile_id:
+        return {"ok": False, "error": "Không xác định được user."}
+    booking_id = str(args.get("booking_id") or "").strip()
+    if not booking_id:
+        return {"ok": False, "error": "Thiếu booking_id — hãy gọi list_bookings trước."}
+
+    from .bookings import delete_booking
+
+    try:
+        await delete_booking(request, booking_id)
+    except HTTPException as e:
+        return {"ok": False, "error": str(e.detail)}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": str(e)}
+    return {"ok": True, "canceled": True, "booking_id": booking_id}
+
+
+async def _tool_edit_booking(
+    request: Request,
+    args: dict,
+    user_profile_id: str | None,
+) -> dict:
+    """Edit one of the user's bookings via the shared update_booking endpoint.
+    Only fields the model supplied are changed; the endpoint pushes the change to
+    the real calendar for bookings already placed and enforces ownership."""
+    if not settings.supabase_enabled:
+        return {"ok": False, "error": "Booking storage chưa được cấu hình."}
+    if not user_profile_id:
+        return {"ok": False, "error": "Không xác định được user."}
+    booking_id = str(args.get("booking_id") or "").strip()
+    if not booking_id:
+        return {"ok": False, "error": "Thiếu booking_id — hãy gọi list_bookings trước."}
+
+    def _clean_time(key: str) -> str | None:
+        val = args.get(key)
+        if not isinstance(val, str):
+            return None
+        val = val.strip()
+        return val or None
+
+    # subject: only override when a non-empty string is provided, so we never
+    # accidentally wipe an existing subject to the "Meeting" default.
+    subject = args.get("subject")
+    subject = subject.strip() if isinstance(subject, str) and subject.strip() else None
+
+    attendees = args.get("attendees")
+    attendees = attendees if isinstance(attendees, list) else None
+
+    body = args.get("body")
+    body = body if isinstance(body, str) else None
+
+    payload = UpdateBookingRequest(
+        date=_clean_time("date"),
+        start_time=_clean_time("start_time"),
+        end_time=_clean_time("end_time"),
+        subject=subject,
+        attendees=attendees,
+        body=body,
+    )
+    if not any(
+        [
+            payload.date,
+            payload.start_time,
+            payload.end_time,
+            payload.subject is not None,
+            payload.attendees is not None,
+            payload.body is not None,
+        ]
+    ):
+        return {"ok": False, "error": "Không có thông tin nào để sửa."}
+
+    from .bookings import update_booking
+
+    try:
+        result = await update_booking(request, booking_id, payload)
+    except HTTPException as e:
+        return {"ok": False, "error": str(e.detail)}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": str(e)}
+
+    booking = result.get("booking") or {}
+    return {
+        "ok": True,
+        "edited": True,
+        "booking": {
+            "booking_id": booking.get("id"),
+            "room_name": booking.get("room_name"),
+            "date": booking.get("date"),
+            "start_time": booking.get("start_time"),
+            "end_time": booking.get("end_time"),
+            "subject": booking.get("subject"),
+        },
+    }
+
+
 async def _run_chat_tool(
     request: Request,
     name: str,
@@ -1789,6 +2039,12 @@ async def _run_chat_tool(
         return await _tool_create_room_scout(request, args, user_profile_id)
     if name == "cancel_room_scout":
         return await _tool_cancel_room_scout(request, args, user_profile_id)
+    if name == "list_bookings":
+        return await _tool_list_bookings(request, graph_token, user_profile_id)
+    if name == "cancel_booking":
+        return await _tool_cancel_booking(request, args, user_profile_id)
+    if name == "edit_booking":
+        return await _tool_edit_booking(request, args, user_profile_id)
     return {"ok": False, "error": f"Unknown tool: {name}"}
 
 

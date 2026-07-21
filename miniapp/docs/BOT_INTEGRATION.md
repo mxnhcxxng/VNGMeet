@@ -87,6 +87,8 @@ ZALO_BOT_SECRET_TOKEN=<chuỗi_ngẫu_nhiên_bạn_tự_đặt>
 BOT_MINIAPP_LINK=https://zalo.me/s/<app_id>/
 # (tuỳ chọn) hạn mã pairing, mặc định 600s
 BOT_PAIRING_TTL_SECONDS=600
+# (tuỳ chọn) hạn user xác nhận đặt phòng qua bot (Y/N), mặc định 60s
+BOT_BOOKING_CONFIRM_TTL_SECONDS=60
 ```
 
 ### 3. Đăng ký webhook (chạy 1 lần, thay giá trị của bạn)
@@ -101,8 +103,13 @@ curl -X POST "https://bot-api.zaloplatforms.com/bot<ZALO_BOT_TOKEN>/setWebhook" 
 
 ## Giới hạn đã biết (MVP)
 
-- **Card đặt phòng cần bấm "Đồng ý"** không dùng được trên bot (không có button).
-  Agent vẫn tra phòng/gợi ý được; hoàn tất đặt phòng nên làm trong Mini App.
+- **Xác nhận đặt phòng trên bot (Y/N + timeout)**: Zalo Bot không render button, nên
+  khi agent tạo card `requires_confirmation`, bot lưu pending (`bot_links.pending_booking`)
+  và cho user **trả lời Y (đồng ý) / N (huỷ)** (vẫn đính kèm button OA best-effort).
+  Xác nhận trong **`BOT_BOOKING_CONFIRM_TTL_SECONDS`** (mặc định 60s); hết hạn bot tự
+  push msg timeout. Confirm/reject/expire đều qua endpoint chung
+  `POST /api/chat/bookings/action` (action `accept`/`reject`/`expire`). Trong lúc chờ,
+  input khác Y/N chỉ nhận lời nhắc (đến khi timeout).
 - Chỉ xử lý `message.text.received` (ảnh/sticker/voice bỏ qua).
 - **Graph token cho bot**: deployment hiện dùng Graph token paste (`graph_token_pool`),
   KHÔNG dùng per-user Microsoft OAuth (`provider_tokens` trống). Bot user không có

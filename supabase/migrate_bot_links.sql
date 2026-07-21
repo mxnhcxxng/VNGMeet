@@ -24,6 +24,10 @@ create table if not exists bot_links (
 -- user_profiles.id (user chưa link Microsoft).
 alter table bot_links drop constraint if exists bot_links_auth_user_id_fkey;
 
+-- Pending booking chờ user xác nhận (Y/N) qua bot, có hạn (bot_booking_confirm_ttl_seconds):
+-- { confirmation_id, booking, thread_id, expires_at }. null = không có gì chờ.
+alter table bot_links add column if not exists pending_booking jsonb;
+
 create index if not exists idx_bot_links_auth_user
   on bot_links (auth_user_id);
 

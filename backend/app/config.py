@@ -77,6 +77,7 @@ class Settings(BaseSettings):
     zalo_bot_token: str = ""               # Bot Token từ bot.zaloplatforms.com
     zalo_bot_secret_token: str = ""        # X-Bot-Api-Secret-Token dùng verify webhook
     bot_pairing_ttl_seconds: int = 600     # hạn mã pairing liên kết tài khoản (10 phút)
+    bot_booking_confirm_ttl_seconds: int = 60   # hạn user xác nhận đặt phòng qua bot (Y/N)
     # Deep-link MỞ MINI APP để user liên kết tài khoản (vd https://zalo.me/s/<app_id>/).
     # PHẢI trỏ tới Mini App (nơi có phone-auth + handler bot_pair), KHÔNG phải web
     # frontend. Nếu để trống, tạm fallback về public_url (web) — user sẽ không link được.

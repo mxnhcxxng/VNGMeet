@@ -19,6 +19,8 @@ Auth states per conversation:
 
 from __future__ import annotations
 
+import asyncio
+import asyncio
 import hmac
 import re
 import secrets
@@ -31,9 +33,12 @@ from starlette.requests import Request as StarletteRequest
 
 from . import auth
 from .app_context import log, settings
-from .models import ChatSendRequest
+from .models import BookingRequest, ChatBookingActionRequest, ChatSendRequest
 
 router = APIRouter()
+
+# Strong refs to in-flight booking-timeout tasks so the loop doesn't GC them.
+_BG_TASKS: set = set()
 
 BOT_API_TIMEOUT = 30
 ZALO_MAX_TEXT = 2000
@@ -195,6 +200,45 @@ def _set_current_thread(sb, chat_id: str, thread_id: str | None) -> None:
     ).eq("chat_id", chat_id).execute()
 
 
+def _set_pending_booking(sb, chat_id: str, card: dict, thread_id: str) -> dict:
+    pending = {
+        "confirmation_id": card.get("confirmation_id") or "",
+        "booking": card.get("booking") or {},
+        "thread_id": str(thread_id),
+        "expires_at": (
+            _now() + timedelta(seconds=settings.bot_booking_confirm_ttl_seconds)
+        ).isoformat(),
+    }
+    sb.table("bot_links").update(
+        {"pending_booking": pending, "updated_at": _now_iso()}
+    ).eq("chat_id", chat_id).execute()
+    return pending
+
+
+def _clear_pending_booking(sb, chat_id: str) -> None:
+    sb.table("bot_links").update(
+        {"pending_booking": None, "updated_at": _now_iso()}
+    ).eq("chat_id", chat_id).execute()
+
+
+_YES = {"y", "yes", "co", "có", "ok", "oke", "okay", "đồng ý", "dong y", "xác nhận", "xac nhan", "confirm", "đồng"}
+_NO = {"n", "no", "khong", "không", "huy", "huỷ", "hủy", "cancel", "từ chối", "tu choi"}
+
+
+def _booking_verdict(text: str) -> str | None:
+    t = " ".join((text or "").strip().lower().split())
+    if t in _YES:
+        return "accept"
+    if t in _NO:
+        return "reject"
+    return None
+
+
+def _pending_expired(pending: dict) -> bool:
+    exp = _parse_iso(pending.get("expires_at"))
+    return bool(exp and exp < _now())
+
+
 def _create_pairing(sb, chat_id: str, from_id: str | None) -> str:
     code = secrets.token_urlsafe(9)
     expires = _now() + timedelta(seconds=settings.bot_pairing_ttl_seconds)
@@ -304,7 +348,11 @@ async def _ensure_graph_token(sub: str) -> bool:
         return True
     except Exception:  # noqa: BLE001 — provider_tokens empty / refresh failed
         pass
-    pooled = _pool_graph_token()
+    try:
+        pooled = _pool_graph_token()
+    except Exception as e:  # noqa: BLE001
+        log.warning("bot: pool token lookup failed: %s", e)
+        return False
     if not pooled:
         return False
     token, expires_in = pooled
@@ -362,7 +410,33 @@ def _linked_request(link: dict) -> Request:
     return _synthetic_request(bearer)
 
 
-async def _forward_to_agent(sb, link: dict, text: str) -> tuple[str, list[str]]:
+def _booking_card(messages: list[dict]) -> dict | None:
+    """Extract a booking-confirmation card (book_room/schedule_room →
+    requires_confirmation) so the bot can ask the user to confirm via Y/N."""
+    for message in messages:
+        if message.get("role") != "assistant":
+            continue
+        for tr in (message.get("metadata") or {}).get("tool_results") or []:
+            if tr.get("name") in ("book_room", "schedule_room"):
+                res = tr.get("result") or {}
+                if res.get("requires_confirmation"):
+                    return {
+                        "confirmation_id": res.get("confirmation_id") or "",
+                        "booking": res.get("booking") or {},
+                    }
+    return None
+
+
+def _confirm_buttons(card: dict) -> list[dict]:
+    """OA-style buttons (best-effort; Zalo Bot may ignore). Y/N is the real path."""
+    cid = card.get("confirmation_id") or ""
+    return [
+        {"name": "✅ Đồng ý", "type": "query", "payload": f"book_confirm:{cid}"},
+        {"name": "❌ Từ chối", "type": "query", "payload": f"book_reject:{cid}"},
+    ]
+
+
+async def _forward_to_agent(sb, link: dict, text: str) -> tuple[str, list[str], dict | None]:
     from .chat import send_chat_message
 
     req = _linked_request(link)
@@ -372,11 +446,80 @@ async def _forward_to_agent(sb, link: dict, text: str) -> tuple[str, list[str]]:
     tid = thread.get("id")
     if tid and str(tid) != str(link.get("current_thread_id") or ""):
         _set_current_thread(sb, link["chat_id"], str(tid))
+    messages = result.get("messages") or []
     reply = ""
-    for message in result.get("messages") or []:
+    for message in messages:
         if message.get("role") == "assistant":
             reply = message.get("content") or ""
-    return _prepare_reply(reply)
+    text_out, images = _prepare_reply(reply)
+    return text_out, images, _booking_card(messages)
+
+
+async def _resolve_booking(sb, link: dict, action: str, pending: dict) -> None:
+    """Execute confirm(accept)/reject/expire on a pending booking via the shared
+    chat_booking_action endpoint, then relay its result to the bot chat."""
+    from .chat import chat_booking_action
+
+    chat_id = link["chat_id"]
+    booking = None
+    if action == "accept":
+        # Booking needs a Graph token; this turn didn't go through _auth_state, so
+        # (re)seed from the pool. Keep the pending intact if we can't proceed.
+        sub = (link.get("claims") or {}).get("sub")
+        if not sub or not await _ensure_graph_token(sub):
+            _clear_pending_booking(sb, chat_id)
+            await _send(chat_id, _msg_session_expired())
+            return
+        try:
+            booking = BookingRequest(**(pending.get("booking") or {}))
+        except Exception as e:  # noqa: BLE001
+            _clear_pending_booking(sb, chat_id)
+            log.warning("bot: invalid pending booking payload: %s", e)
+            await _send(chat_id, "Yêu cầu đặt phòng không hợp lệ. Bạn đặt lại giúp nhé.")
+            return
+    _clear_pending_booking(sb, chat_id)  # clear before executing: avoid double-resolve
+    action_req = ChatBookingActionRequest(
+        thread_id=pending.get("thread_id") or str(link.get("current_thread_id") or ""),
+        confirmation_id=pending.get("confirmation_id") or "",
+        action=action,
+        booking=booking,
+    )
+    try:
+        result = await chat_booking_action(_linked_request(link), action_req)
+    except HTTPException as e:
+        if e.status_code == 401:
+            await _send(chat_id, _msg_session_expired())
+            return
+        log.warning("bot booking action (%s) failed: %s", action, e.detail)
+        await _send(chat_id, MSG_GENERIC_ERROR)
+        return
+    content = (result.get("message") or {}).get("content") or ""
+    text_out, images = _prepare_reply(content)
+    prefix = "⏰ " if action == "expire" else ""
+    if text_out:
+        await _send(chat_id, prefix + text_out)
+    for url in images:
+        await _send_photo(chat_id, url)
+
+
+async def _booking_timeout(chat_id: str, confirmation_id: str) -> None:
+    try:
+        await asyncio.sleep(settings.bot_booking_confirm_ttl_seconds)
+        sb = _sb()
+        link = _get_link(sb, chat_id)
+        pending = (link or {}).get("pending_booking")
+        # Only expire if the SAME pending is still there (not already Y/N-resolved).
+        if not pending or pending.get("confirmation_id") != confirmation_id:
+            return
+        await _resolve_booking(sb, link, "expire", pending)
+    except Exception as e:  # noqa: BLE001
+        log.warning("bot booking timeout failed for %s: %s", chat_id, e)
+
+
+def _schedule_booking_timeout(chat_id: str, confirmation_id: str) -> None:
+    task = asyncio.create_task(_booking_timeout(chat_id, confirmation_id))
+    _BG_TASKS.add(task)
+    task.add_done_callback(_BG_TASKS.discard)
 
 
 def _list_threads(link: dict) -> list[dict]:
@@ -439,9 +582,23 @@ def _chunk_text(text: str, limit: int = ZALO_MAX_TEXT) -> list[str]:
     return chunks
 
 
-async def _send(chat_id: str, text: str) -> None:
-    for chunk in _chunk_text(text):
-        await _bot_api("sendMessage", {"chat_id": chat_id, "text": chunk})
+async def _send(chat_id: str, text: str, buttons: list[dict] | None = None) -> None:
+    chunks = _chunk_text(text) or ([""] if buttons else [])
+    if not chunks:
+        return
+    last = len(chunks) - 1
+    for i, chunk in enumerate(chunks):
+        payload = {"chat_id": chat_id, "text": chunk or "\u200b"}
+        # EXPERIMENTAL: attach OA-style buttons (name/type/payload) to the last
+        # chunk. Zalo Bot Platform sendMessage does not document buttons, so this
+        # may be ignored/rejected — log the response so we can see what happens.
+        if buttons and i == last:
+            payload["buttons"] = buttons
+        resp = await _bot_api("sendMessage", payload)
+        if buttons and i == last and resp is not None:
+            log.info(
+                "bot sendMessage(buttons) -> %s %s", resp.status_code, resp.text[:300]
+            )
 
 
 async def _send_photo(chat_id: str, url: str, caption: str | None = None) -> None:
@@ -592,13 +749,23 @@ async def _dispatch_chat(sb, link: dict, chat_id: str, from_id: str | None, text
     await _typing(chat_id)
     link = _get_link(sb, chat_id) or link  # re-read: current_thread_id may have changed
     try:
-        reply, images = await _forward_to_agent(sb, link, text)
+        reply, images, card = await _forward_to_agent(sb, link, text)
     except HTTPException as e:
         if e.status_code == 401:
             await _send(chat_id, _msg_session_expired())
             return
         raise
-    if reply:
+    if card:
+        # Booking cần xác nhận. Bot không render button nên hướng dẫn Y/N + hẹn
+        # timeout; đính kèm button OA (best-effort, có thể bị bỏ qua).
+        link = _get_link(sb, chat_id) or link  # current_thread_id có thể vừa đổi
+        _set_pending_booking(sb, chat_id, card, link.get("current_thread_id") or "")
+        guidance = (reply or "Xác nhận đặt phòng?") + (
+            "\n\n👉 Trả lời Y để xác nhận, N để huỷ (trong vòng 1 phút)."
+        )
+        await _send(chat_id, guidance, buttons=_confirm_buttons(card))
+        _schedule_booking_timeout(chat_id, card.get("confirmation_id") or "")
+    elif reply:
         await _send(chat_id, reply)
     elif not images:
         await _send(chat_id, "Mình chưa có câu trả lời phù hợp, bạn thử lại nhé.")
@@ -638,6 +805,23 @@ async def _handle_update(update: dict) -> None:
 
     cmd, arg = _parse_command(text)
     try:
+        # Pending booking confirmation takes priority: Y/N resolves it; other input
+        # gets a reminder (until it times out). Expired pending is swept lazily.
+        pending = (link or {}).get("pending_booking")
+        if pending and not _pending_expired(pending):
+            verdict = _booking_verdict(text)
+            if verdict:
+                await _resolve_booking(sb, link, verdict, pending)
+            else:
+                await _send(
+                    chat_id,
+                    "Bạn đang có yêu cầu đặt phòng chờ xác nhận. "
+                    "Trả lời Y để đồng ý, N để huỷ (trong vòng 1 phút).",
+                )
+            return
+        if pending:  # expired but timeout task didn't fire (e.g. restart)
+            await _resolve_booking(sb, link, "expire", pending)
+            link = _get_link(sb, chat_id) or link
         if cmd:
             await _dispatch_command(sb, link, chat_id, from_id, cmd, arg)
         else:
