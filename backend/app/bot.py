@@ -299,14 +299,17 @@ def _reauth_link() -> str:
 # --------------------------------------------------------------------------- #
 # Auth state + synthetic request bridge to the chat agent
 # --------------------------------------------------------------------------- #
-def _pool_graph_token() -> tuple[str, int] | None:
-    """Newest active delegated Graph token from graph_token_pool → (token, expires_in).
+def _pool_graph_token(owner_keys: list[str | None]) -> tuple[str, int] | None:
+    """This user's own delegated Graph token from graph_token_pool → (token, expires_in).
 
     This deployment authenticates via pasted Graph tokens (pool), not per-user
-    Microsoft OAuth (provider_tokens is empty). Bot users have no token of their
-    own, so the agent acts with a shared pool token. Returns None if none usable.
+    Microsoft OAuth (provider_tokens is empty). We MUST scope to the acting user's
+    owner_key(s) — a global "newest active" lookup would make one user act with
+    another user's token/identity. owner_key is user_profiles.id (manual/zalo) or
+    auth.users id (supabase), so match both. Returns None if this user has none.
     """
-    if not settings.supabase_enabled:
+    keys = [k for k in dict.fromkeys(owner_keys) if k]
+    if not settings.supabase_enabled or not keys:
         return None
     from .bookings import _decrypt_scheduled_graph_token
 
@@ -315,6 +318,7 @@ def _pool_graph_token() -> tuple[str, int] | None:
     rows = (
         sb.table("graph_token_pool")
         .select("owner_key, token_encrypted, expires_at")
+        .in_("owner_key", keys)
         .eq("status", "active")
         .gt("expires_at", now.isoformat())
         .order("updated_at", desc=True)
@@ -340,16 +344,20 @@ def _pool_graph_token() -> tuple[str, int] | None:
     return token, expires_in
 
 
-async def _ensure_graph_token(sub: str) -> bool:
+async def _ensure_graph_token(sub: str, profile_id: str | None = None) -> bool:
     """Make a valid Graph token available for `sub`, seeding the auth cache from
-    the pool when the per-user provider_tokens path has nothing."""
+    THIS USER's pool token when the per-user provider_tokens path has nothing.
+
+    Scoped to the acting user's owner_key(s) so we never borrow another user's
+    token/identity for bookings.
+    """
     try:
         await auth.get_graph_token(sub)
         return True
     except Exception:  # noqa: BLE001 — provider_tokens empty / refresh failed
         pass
     try:
-        pooled = _pool_graph_token()
+        pooled = _pool_graph_token([profile_id, sub])
     except Exception as e:  # noqa: BLE001
         log.warning("bot: pool token lookup failed: %s", e)
         return False
@@ -368,7 +376,7 @@ async def _auth_state(link: dict | None) -> tuple[str, dict]:
     if not sub:
         return "S0", claims
     try:
-        ok = await _ensure_graph_token(sub)
+        ok = await _ensure_graph_token(sub, claims.get("profile_id"))
     except Exception as e:  # noqa: BLE001
         log.warning("bot graph-token probe failed for %s: %s", sub, e)
         return "S2", claims
@@ -465,8 +473,9 @@ async def _resolve_booking(sb, link: dict, action: str, pending: dict) -> None:
     if action == "accept":
         # Booking needs a Graph token; this turn didn't go through _auth_state, so
         # (re)seed from the pool. Keep the pending intact if we can't proceed.
-        sub = (link.get("claims") or {}).get("sub")
-        if not sub or not await _ensure_graph_token(sub):
+        claims = link.get("claims") or {}
+        sub = claims.get("sub")
+        if not sub or not await _ensure_graph_token(sub, claims.get("profile_id")):
             _clear_pending_booking(sb, chat_id)
             await _send(chat_id, _msg_session_expired())
             return

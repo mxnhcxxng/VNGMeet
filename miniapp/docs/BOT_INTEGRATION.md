@@ -112,11 +112,12 @@ curl -X POST "https://bot-api.zaloplatforms.com/bot<ZALO_BOT_TOKEN>/setWebhook" 
   input khác Y/N chỉ nhận lời nhắc (đến khi timeout).
 - Chỉ xử lý `message.text.received` (ảnh/sticker/voice bỏ qua).
 - **Graph token cho bot**: deployment hiện dùng Graph token paste (`graph_token_pool`),
-  KHÔNG dùng per-user Microsoft OAuth (`provider_tokens` trống). Bot user không có
-  token riêng → `_auth_state` fallback lấy **token active mới nhất từ `graph_token_pool`**
-  và seed vào cache token để `send_chat_message` dùng. Hệ quả: booking qua bot sẽ
-  thực hiện bằng **token của người đã paste** (owner_key trong pool), không phải danh
-  tính bot user. Cần: pool có ít nhất 1 token `status=active` chưa hết hạn +
-  `SCHEDULED_TOKEN_ENCRYPTION_KEY` đúng để giải mã. Nếu pool rỗng → S2.
+  KHÔNG dùng per-user Microsoft OAuth (`provider_tokens` trống). Khi bot user không có
+  token qua provider_tokens, `_ensure_graph_token` lấy token từ `graph_token_pool`
+  **CHỈ của chính user đó** (lọc `owner_key ∈ {profile_id, sub}`) rồi seed cache —
+  KHÔNG mượn token toàn cục để tránh đặt phòng nhầm danh tính người khác. Cần:
+  `SCHEDULED_TOKEN_ENCRYPTION_KEY` đúng để giải mã, và user đó phải có token
+  `status=active` trong pool (tự paste Graph token trên web). Nếu user chưa có token
+  riêng → S2 (không đặt phòng bằng token người khác).
 - Deep-link đọc `bot_pair` từ query URL; nếu Zalo Mini App truyền launch param theo
   cách khác, chỉnh `readBotPairCode()` trong `layout.tsx`.
