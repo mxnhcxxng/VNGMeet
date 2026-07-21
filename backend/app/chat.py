@@ -590,7 +590,7 @@ def _compose_thread_title(info: dict) -> str | None:
         duration = _format_duration_hours(info.get("duration_minutes"))
         if duration:
             parts.append(duration)
-    return " • ".join(parts)
+    return " | ".join(parts)
 
 
 def _derive_thread_info_from_tools(tool_results: list[dict], now: datetime) -> dict:

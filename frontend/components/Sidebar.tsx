@@ -45,7 +45,30 @@ function ChatThreadRow({
   const [draftTitle, setDraftTitle] = useState(thread.title || fallbackTitle);
   const [busy, setBusy] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  // Track the action menu's open state ourselves so the ⋮ button stays visible
+  // and in its hover look while the menu/action-sheet is open, even after the
+  // pointer leaves the row (the popover renders in a portal → row loses hover).
+  const [menuOpen, setMenuOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Fade long titles to transparent on the right (Claude-style) instead of an
+  // ellipsis. When the ⋮ button is hidden the fade reaches the row's edge; once
+  // the button shows (row hover or menu open) the fade finishes ~2.5rem earlier
+  // so the text clears out BEFORE the button instead of bleeding under it.
+  const titleBase =
+    "min-w-0 flex-1 overflow-hidden whitespace-nowrap text-left outline-none";
+  const edgeFade =
+    "[mask-image:linear-gradient(to_right,#000_calc(100%_-_2.5rem),transparent)] " +
+    "[-webkit-mask-image:linear-gradient(to_right,#000_calc(100%_-_2.5rem),transparent)]";
+  const beforeBtnFade =
+    "[mask-image:linear-gradient(to_right,#000_calc(100%_-_3.75rem),transparent_calc(100%_-_2.5rem))] " +
+    "[-webkit-mask-image:linear-gradient(to_right,#000_calc(100%_-_3.75rem),transparent_calc(100%_-_2.5rem))]";
+  const groupHoverBeforeBtnFade =
+    "group-hover/thread:[mask-image:linear-gradient(to_right,#000_calc(100%_-_3.75rem),transparent_calc(100%_-_2.5rem))] " +
+    "group-hover/thread:[-webkit-mask-image:linear-gradient(to_right,#000_calc(100%_-_3.75rem),transparent_calc(100%_-_2.5rem))]";
+  const titleFade = menuOpen
+    ? `${titleBase} ${beforeBtnFade}`
+    : `${titleBase} ${edgeFade} ${groupHoverBeforeBtnFade}`;
 
   useEffect(() => {
     if (!editing) setDraftTitle(thread.title || fallbackTitle);
@@ -101,8 +124,12 @@ function ChatThreadRow({
 
   return (
     <div
-      className={`group/thread flex h-10 w-full items-center rounded-full pl-4 pr-1 text-sm font-medium text-[#18181b] dark:text-[#f7f7f7] transition-colors ${
-        active ? "bg-[var(--default)]" : "hover:bg-[#f5f5f5] dark:hover:bg-[#22262f]"
+      className={`group/thread relative flex h-10 w-full items-center rounded-full pl-4 pr-1 text-sm font-medium text-[#18181b] dark:text-[#f7f7f7] transition-colors ${
+        active
+          ? "bg-[var(--default)]"
+          : menuOpen
+            ? "bg-[#f5f5f5] dark:bg-[#22262f]"
+            : "hover:bg-[#f5f5f5] dark:hover:bg-[#22262f]"
       }`}
       title={thread.title || fallbackTitle}
       onMouseEnter={onPrefetch}
@@ -125,21 +152,25 @@ function ChatThreadRow({
         <button
           type="button"
           onClick={onClick}
-          className="min-w-0 flex-1 truncate text-left outline-none"
+          className={titleFade}
         >
           {thread.title || fallbackTitle}
         </button>
       )}
 
       {!editing && (
-        <Dropdown>
+        <Dropdown onOpenChange={setMenuOpen}>
           <Button
             isIconOnly
             aria-label={t("sidebar.chatMenu")}
             variant="ghost"
             size="sm"
             isDisabled={busy}
-            className="size-8 shrink-0 rounded-full opacity-0 transition-opacity group-hover/thread:opacity-100 group-focus-within/thread:opacity-100 data-[open=true]:opacity-100"
+            className={`absolute right-1 top-1/2 size-8 shrink-0 -translate-y-1/2 rounded-full transition-opacity ${
+              menuOpen
+                ? "pointer-events-auto opacity-100 bg-[#e4e4e7] dark:bg-[#2a2f38]"
+                : "pointer-events-none opacity-0 group-hover/thread:pointer-events-auto group-hover/thread:opacity-100 group-hover/thread:bg-[#e4e4e7] dark:group-hover/thread:bg-[#2a2f38]"
+            }`}
             onClick={(event) => event.stopPropagation()}
           >
             <EllipsisVertical className="outline-none" />
