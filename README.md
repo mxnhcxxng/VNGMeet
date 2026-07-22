@@ -25,7 +25,7 @@ Phòng họp chỉ là nơi để ngồi họp. Nhưng việc tìm được nó 
 | Who | How to Use |
 |---|---|
 | **Starters** — Nhân viên bất kể cấp bậc | Người trực tiếp book phòng họp hàng ngày — tìm slot, xác nhận phòng, gửi invite cho cả team. Dùng VNGMeet để tìm và book nhanh qua một lệnh chat (Book qua chat) hoặc một lượt scan (Book qua Browse Room). |
-| **Team Leads & Quản lý** | Người có lịch họp cố định — thường cần book phòng xa trước hoặc tìm phòng bất chợt. Dùng VNGMeet để tự động book phòng ngay khi slot mở lúc nửa đêm (Scheduled booking), hoặc nhận thông báo có phòng trống nhanh (Room Scouting). |
+| **Team Leads & Quản lý** | Người có lịch họp cố định — thường cần book phòng xa trước hoặc tìm phòng bất chợt. Dùng VNGMeet để tự động book phòng ngay khi slot mở lúc nửa đêm (Scheduled booking), hoặc tự động chớp phòng trống ngay khi có (Room Scouting). |
 
 ---
 
@@ -86,14 +86,14 @@ Với những lịch họp cố định cần book phòng đúng ngày slot book
 
 ### ✅ Use case 3 — "Trinh sát" phòng
 
-Đôi khi phòng họp bị hủy giữa chừng và trả lại — nhưng người thật sự cần thì không biết. VNGMeet giải quyết bằng cách chủ động rà soát mỗi 30 phút và báo ngay cho Starter khi có phòng phù hợp xuất hiện trong ngày.
+Đôi khi phòng họp bị hủy giữa chừng và trả lại — nhưng người thật sự cần thì không biết. VNGMeet giải quyết bằng cách chủ động rà soát mỗi phút và **tự động đặt luôn** phòng phù hợp đầu tiên xuất hiện trong ngày, không cần Starter thao tác thêm.
 
 **User flow:**
 
 1. Starter nhập vào tab "Scout Rooms" khung giờ muốn có phòng, thời lượng họp, số người
-2. VNGMeet tự động check hệ thống mỗi 30 phút
-3. VNGMeet phát hiện phòng thoả mãn → gửi thông báo phòng trống về Outlook ngay
-4. Starter chọn phòng và book — hoặc nhờ VNGMeet book luôn qua chat
+2. VNGMeet tự động check hệ thống mỗi phút
+3. VNGMeet phát hiện phòng thoả mãn → đặt luôn khối giờ trống sớm nhất trong khung
+4. Meeting xuất hiện trên lịch Starter, confirm về Outlook — không cần book thủ công
 
 **Ví dụ thao tác:**
 
@@ -103,11 +103,11 @@ Với những lịch họp cố định cần book phòng đúng ngày slot book
 > - Scout Range: 14:00 – 18:00
 > - Capacity: 4 people
 >
-> **VNGMeet:** Đã bật chế độ tìm phòng trống. Tôi sẽ check phòng trống mỗi 30 phút và thông báo cho bạn ngay khi có phòng trống phù hợp.
+> **VNGMeet:** Đã bật chế độ tìm phòng trống. Tôi sẽ check mỗi phút và tự động đặt ngay khi có phòng trống phù hợp.
 >
-> *(2 tiếng sau — email về Outlook)*
+> *(2 tiếng sau — meeting tự lên lịch, confirm về Outlook)*
 >
-> **VNGMeet:** 📬 Tìm thấy phòng trống phù hợp: Phòng Amsterdam – V2 – F3 – 4 Seats, lúc 14:00 – 15:00 hôm nay. Chat với VNGMeet để book ngay!
+> **VNGMeet:** ✅ Đã đặt phòng trống phù hợp: Phòng Amsterdam – V2 – F3 – 4 Seats, lúc 14:00 – 15:00 hôm nay. Check Outlook để nhận confirm nhé!
 
 ---
 
@@ -160,7 +160,7 @@ Do giới hạn thời gian, hệ thống hiện tại xác thực người dùn
 | `Place.Read.All` | Liệt kê danh sách phòng họp trong tổ chức |
 | `Calendars.Read.Shared` | Đọc trạng thái trống/bận của phòng (free-busy) |
 | `Calendars.ReadWrite` | Đặt phòng, chỉnh sửa, huỷ meeting trên lịch người dùng |
-| `Mail.Send` | Gửi email thông báo khi có phòng trống (Room Scout) |
+| `Mail.Send` | Gửi email thông báo (dự phòng; Room Scout hiện tự động đặt phòng nên không dùng) |
 | `User.Read` | Đọc thông tin cơ bản của người dùng đang đăng nhập |
 
 ---
