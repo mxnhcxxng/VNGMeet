@@ -26,7 +26,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 const SCOPES =
-  "offline_access openid email profile Place.Read.All Calendars.Read.Shared Calendars.ReadWrite Mail.Send User.Read";
+  "offline_access openid email profile Calendars.Read.Shared Calendars.ReadWrite Mail.Send User.Read";
 
 export interface Me {
   authenticated: boolean;

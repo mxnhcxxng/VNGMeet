@@ -35,7 +35,7 @@ import {
   type UserProfileOptions,
 } from "@/lib/api";
 import { Check, Copy } from "@gravity-ui/icons";
-import { supabase } from "@/lib/supabase";
+import { supabase, supabaseEnabled } from "@/lib/supabase";
 import { Sidebar, type View } from "@/components/Sidebar";
 import { TokenExpiryProvider } from "@/components/TokenExpiryProvider";
 import { BrowseRooms } from "@/components/BrowseRooms";
@@ -316,6 +316,11 @@ function buildLoginSteps(t: TFunction): {
 
 function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
   const t = useT();
+  const pathname = usePathname();
+  // The Microsoft OAuth button is admin-only (rooms availability still relies on
+  // a pooled delegated token; regular users use the paste-token flow).
+  const isAdminRoute =
+    pathname === "/admin" || (pathname?.startsWith("/admin/") ?? false);
   const LOGIN_STEPS = buildLoginSteps(t);
   const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);
@@ -427,6 +432,34 @@ function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
                 <Chip color="danger" variant="soft" size="sm">
                   {err}
                 </Chip>
+              )}
+
+              {supabaseEnabled && isAdminRoute && (
+                <>
+                  <div className="flex items-center gap-3 text-xs font-medium text-[#94979c]">
+                    <div className="h-px flex-1 bg-black/10 dark:bg-white/10" />
+                    {t("login.orSignInMicrosoft")}
+                    <div className="h-px flex-1 bg-black/10 dark:bg-white/10" />
+                  </div>
+
+                  <Button
+                    type="button"
+                    size="lg"
+                    fullWidth
+                    variant="secondary"
+                    onPress={() => api.signIn()}
+                  >
+                    <span className="inline-flex items-center justify-center gap-2">
+                      <svg width="18" height="18" viewBox="0 0 21 21" aria-hidden>
+                        <rect x="1" y="1" width="9" height="9" fill="#f25022" />
+                        <rect x="11" y="1" width="9" height="9" fill="#7fba00" />
+                        <rect x="1" y="11" width="9" height="9" fill="#00a4ef" />
+                        <rect x="11" y="11" width="9" height="9" fill="#ffb900" />
+                      </svg>
+                      {t("login.withMicrosoft")}
+                    </span>
+                  </Button>
+                </>
               )}
             </div>
           </form>

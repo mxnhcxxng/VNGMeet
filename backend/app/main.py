@@ -32,30 +32,19 @@ async def lifespan(app: FastAPI):
         from apscheduler.triggers.cron import CronTrigger
 
         scheduler = AsyncIOScheduler(timezone=settings.timezone)
-        if settings.graph_app_enabled:
-            scheduler.add_job(
-                _safe_refresh,
-                CronTrigger(
-                    minute=settings.availability_refresh_minutes,
-                    timezone=settings.timezone,
-                ),
-                id="refresh_availability",
-                max_instances=1,
-                coalesce=True,
-                misfire_grace_time=120,
-            )
-        else:
-            # No app-only creds: refresh the cache every minute with the newest
-            # active delegated token from graph_token_pool, so user requests
-            # never have to refresh Graph themselves.
-            scheduler.add_job(
-                _safe_refresh_from_pool,
-                CronTrigger(minute="*", timezone=settings.timezone),
-                id="refresh_availability_pool",
-                max_instances=1,
-                coalesce=True,
-                misfire_grace_time=55,
-            )
+        # Refresh the cache every minute with the newest active DELEGATED token
+        # from graph_token_pool (needs only Calendars.Read.Shared), so user
+        # requests never have to refresh Graph themselves. There is no app-only
+        # (client-credentials) path: it required a Calendars.Read *application*
+        # permission with admin consent that this app deliberately does not use.
+        scheduler.add_job(
+            _safe_refresh_from_pool,
+            CronTrigger(minute="*", timezone=settings.timezone),
+            id="refresh_availability_pool",
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=55,
+        )
         prep_h, prep_m, prep_s = booking_schedule.shifted_hms(-booking_schedule.PREP_LEAD_SECONDS)
         fire_h, fire_m, fire_s = booking_schedule.shifted_hms(-booking_schedule.FIRE_LEAD_SECONDS)
         cu_h, cu_m, cu_s = booking_schedule.shifted_hms(booking_schedule.CATCHUP_DELAY_SECONDS)
@@ -103,15 +92,11 @@ async def lifespan(app: FastAPI):
             coalesce=True,
             misfire_grace_time=55,
         )
-        if settings.graph_app_enabled:
-            scheduler.add_job(_safe_refresh, "date", run_date=None)
-        else:
-            scheduler.add_job(_safe_refresh_from_pool, "date", run_date=None)
+        scheduler.add_job(_safe_refresh_from_pool, "date", run_date=None)
         scheduler.start()
         log.warning(
-            "Background scheduler started (availability=%s, scheduled_bookings=True, room_scouts=True, cron minute=%s).",
-            "app-only" if settings.graph_app_enabled else "token-pool (*/1)",
-            settings.availability_refresh_minutes,
+            "Background scheduler started "
+            "(availability=token-pool (*/1), scheduled_bookings=True, room_scouts=True)."
         )
     else:
         log.warning(
@@ -127,16 +112,6 @@ async def lifespan(app: FastAPI):
     finally:
         if scheduler:
             scheduler.shutdown(wait=False)
-
-
-async def _safe_refresh() -> None:
-    """Scheduler entry point: never let an exception kill the job thread."""
-    try:
-        from . import availability
-
-        await availability.refresh_availability()
-    except Exception as e:  # noqa: BLE001
-        log.exception("refresh_availability failed: %s", e)
 
 
 async def _safe_refresh_from_pool() -> None:

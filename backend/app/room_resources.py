@@ -818,18 +818,13 @@ async def free_rooms_today(request: Request):
 async def availability_refresh(request: Request):
     """Force an immediate cache refresh into the room_availability table.
 
-    When app-only Graph creds are configured, refreshes server-side with no
-    signed-in user (the same path the background scheduler uses). Otherwise falls
-    back to the requesting user's DELEGATED token via /me/calendar/getSchedule —
-    so the cache can be populated today, before app-only admin consent lands.
+    Refreshes using the requesting user's DELEGATED token via
+    /me/calendar/getSchedule (needs only Calendars.Read.Shared) — the same
+    delegated path the background scheduler uses via the token pool.
     """
     try:
-        if settings.graph_app_enabled:
-            _require_auth(request)
-            summary = await availability.refresh_availability()
-        else:
-            token, _ = await auth.resolve_token(request)
-            summary = await availability.refresh_availability_delegated(token)
+        token, _ = await auth.resolve_token(request)
+        summary = await availability.refresh_availability_delegated(token)
     except RuntimeError as e:
         raise HTTPException(503, str(e))
     except httpx.HTTPStatusError as e:

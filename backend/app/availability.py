@@ -1,9 +1,10 @@
 """Background availability cache.
 
-A scheduled job (every 15 min, aligned to the quarter hour) reads each in-use
-room's free/busy from Microsoft Graph app-only and stores it in the
-`room_availability` Supabase table. The browse grid then reads from that cache
-instead of calling Graph live (see /api/availability in main.py).
+A scheduled job reads each in-use room's free/busy from Microsoft Graph using a
+DELEGATED token borrowed from the graph_token_pool (needs only the
+user-consentable Calendars.Read.Shared — no app-only admin consent) and stores it
+in the `room_availability` Supabase table. The browse grid then reads from that
+cache instead of calling Graph live (see /api/availability in main.py).
 
 Cache layout (room_availability):
   room_id  uuid  -> meeting_room_metadata.id
@@ -133,103 +134,6 @@ def _merge_attendee_ids_with_slots(existing_attendee_ids: list | None, slots: li
     ]
 
 
-async def refresh_availability() -> dict:
-    """Refresh the room_availability cache for all in-use rooms. Returns a summary.
-
-    One getSchedule call per room covers the whole window at 15-min granularity;
-    the returned availabilityView string is sliced into per-day rows of 96 slots.
-    """
-    settings = get_settings()
-    if not settings.supabase_enabled:
-        raise RuntimeError("Supabase not configured; cannot refresh availability.")
-    if not settings.graph_app_enabled:
-        raise RuntimeError(
-            "Graph app-only creds not configured (need real tenant_id + client "
-            "id/secret + Calendars.Read application permission)."
-        )
-
-    from .supabase_client import get_supabase
-
-    tz = ZoneInfo(settings.timezone)
-    today = datetime.now(tz).date()
-    days = settings.availability_days
-    day_list = [today + timedelta(days=i) for i in range(days)]
-
-    rooms = _in_use_rooms()
-    if not rooms:
-        log.warning("refresh_availability: no in_use rooms found")
-        return {"rooms": 0, "rows": 0, "errors": 0}
-    room_ids = [room["id"] for room in rooms]
-
-    start_iso = f"{day_list[0].isoformat()}T00:00:00"
-    end_iso = f"{(today + timedelta(days=days)).isoformat()}T00:00:00"
-
-    token = await graph.get_app_token()
-    sb = get_supabase()
-    existing_meta = _read_existing_slot_meta(sb, room_ids, day_list)
-
-    upserts: list[dict] = []
-    errors = 0
-    now_iso = datetime.now(tz).isoformat()
-    for room in rooms:
-        email = room["email"]
-        try:
-            views = await graph.get_schedule_app(
-                token,
-                email,
-                [email],
-                start_iso,
-                end_iso,
-                settings.timezone,
-                settings.availability_slot_minutes,
-            )
-        except httpx.HTTPStatusError as e:
-            errors += 1
-            log.warning("getSchedule failed for %s: %s %s", email, e.response.status_code, e.response.text[:200])
-            continue
-        except Exception as e:  # noqa: BLE001 - one room must not kill the batch
-            errors += 1
-            log.warning("getSchedule error for %s: %s", email, e)
-            continue
-
-        view = views.get(email, "")
-        for di, day in enumerate(day_list):
-            chunk = view[di * SLOTS_PER_DAY : (di + 1) * SLOTS_PER_DAY]
-            scheduled_day = di == len(day_list) - 1
-            slots = [
-                _av_char_to_status(c, scheduled_day=scheduled_day)
-                for c in chunk
-            ]
-            # Pad if Graph returned a short view (defensive; treat missing as free).
-            if len(slots) < SLOTS_PER_DAY:
-                pad_value = -1 if scheduled_day else 0
-                slots += [pad_value] * (SLOTS_PER_DAY - len(slots))
-            meta = existing_meta.get((room["id"], day.isoformat())) or {}
-            slot_owner_ids = _merge_owner_ids_with_slots(meta.get("owner"), slots)
-            slot_attendee_ids = _merge_attendee_ids_with_slots(meta.get("attendees"), slots)
-            upserts.append(
-                {
-                    "room_id": room["id"],
-                    "date": day.isoformat(),
-                    "slots": slots,
-                    "slot_owner_ids": slot_owner_ids,
-                    "slot_attendee_ids": slot_attendee_ids,
-                    "updated_at": now_iso,
-                }
-            )
-
-    if upserts:
-        sb.table("room_availability").upsert(
-            upserts, on_conflict="room_id,date"
-        ).execute()
-    # Drop rows that have aged out of the window so the table stays bounded.
-    sb.table("room_availability").delete().lt("date", today.isoformat()).execute()
-
-    summary = {"rooms": len(rooms), "rows": len(upserts), "errors": errors}
-    log.info("refresh_availability done: %s", summary)
-    return summary
-
-
 # getSchedule accepts many schedules per call; Graph recommends batching. The
 # delegated /me path queries all in-use rooms at once in groups of this size.
 SCHEDULE_BATCH = 20
@@ -238,12 +142,11 @@ SCHEDULE_BATCH = 20
 async def refresh_availability_delegated(token: str) -> dict:
     """Refresh room_availability using a DELEGATED Graph token (signed-in user).
 
-    Unlike refresh_availability() (app-only, no signed-in user), this hits
-    /me/calendar/getSchedule with the requesting user's token, so it works
-    without app-only admin creds — the user just needs Calendars.Read.Shared to
-    see the rooms' free/busy. Rooms are queried in batches (one getSchedule call
-    per batch) and the returned availabilityView is sliced into per-day rows of
-    96 15-min slots, identical to the app-only path.
+    Hits /me/calendar/getSchedule with the user's token, so it works without any
+    app-only admin creds — the user just needs Calendars.Read.Shared to see the
+    rooms' free/busy. Rooms are queried in batches (one getSchedule call per batch)
+    and the returned availabilityView is sliced into per-day rows of 96 15-min
+    slots. This is the only availability-refresh path.
     """
     settings = get_settings()
     if not settings.supabase_enabled:
