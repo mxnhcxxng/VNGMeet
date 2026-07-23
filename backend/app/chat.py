@@ -2332,7 +2332,7 @@ async def _call_llm_with_tools(
     }
     async with httpx.AsyncClient(timeout=60) as client:
         reasoning_parts: list[str] = []
-        for _ in range(3):
+        for _ in range(10):
             res = await client.post(
                 _chat_completion_url(),
                 headers=headers,
