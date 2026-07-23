@@ -39,3 +39,32 @@ function subscribe(cb: () => void) {
 export function useToken(): string | null {
   return useSyncExternalStore(subscribe, getToken);
 }
+
+// Lấy tên hiển thị từ session JWT (claim email/preferred_username/name/sub).
+// Dùng cho lời chào ở màn Home. Trả null nếu chưa có token / không decode được.
+export function getDisplayName(): string | null {
+  const token = getToken();
+  if (!token) return null;
+  try {
+    const claims = JSON.parse(atob(token.split(".")[1])) as Record<
+      string,
+      unknown
+    >;
+    const raw =
+      (claims.preferred_username as string) ||
+      (claims.username as string) ||
+      (claims.name as string) ||
+      (claims.email as string) ||
+      (claims.sub as string) ||
+      "";
+    // Nếu là email thì chỉ lấy phần trước @ (vd cuongdm4@vng.com.vn → cuongdm4).
+    return raw ? raw.split("@")[0] : null;
+  } catch {
+    return null;
+  }
+}
+
+// Hook: tên hiển thị, tự cập nhật khi token đổi.
+export function useDisplayName(): string | null {
+  return useSyncExternalStore(subscribe, getDisplayName);
+}

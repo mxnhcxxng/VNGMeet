@@ -15,7 +15,7 @@ import {
 } from "zmp-ui";
 import { AppProps } from "zmp-ui/app";
 
-import ChatPage from "@/pages/chat";
+import AppShell from "@/components/app-shell";
 import { setToken, useToken } from "@/services/auth";
 import { api, LinkRequiredError } from "@/services/api";
 import { errText, requestPhoneNumber } from "@/services/phone";
@@ -153,7 +153,7 @@ function Gate() {
   // Gate luôn được render BÊN TRONG ZMPRouter (xem Layout), nên <Page> ở cả 2
   // nhánh đều có context router — không còn lỗi invariant của react-router.
   if (token) {
-    return <ChatPage />;
+    return <AppShell />;
   }
 
   // Chưa có token: đang authen, hoặc rơi vào một trạng thái lỗi cần user xử lý.
