@@ -626,7 +626,7 @@ async def upcoming_booking(request: Request):
         .table("user_activity")
         .select(
             "room_email, room_name, date, start_time, end_time, "
-            "booking_type, method, subject, status"
+            "booking_type, method, subject, status, attendees, body"
         )
         .eq("user_id", user_profile_id)
         .in_("status", ["ok", "success"])
@@ -662,15 +662,36 @@ async def upcoming_booking(request: Request):
             "subject": event_row.get("subject"),
             "location": _format_room_location(meta),
             "image": (meta or {}).get("thumbnail_link"),
+            # Cho màn "Chi tiết lịch họp" của Mini App: office (subtitle), map ảnh
+            # (map_link), danh sách người tham dự và mô tả cuộc họp (body).
+            "office": (meta or {}).get("office"),
+            "map": (meta or {}).get("map_link"),
+            "attendees": event_row.get("attendees") or [],
+            "body": event_row.get("body"),
         }
     }
 
 
 @router.post("/api/bookings")
 async def create_booking(request: Request, payload: BookingRequest):
-    token, auth_user_id, user_profile_id, _auth_email = await _booking_auth_context(
-        request
-    )
+    try:
+        token, auth_user_id, user_profile_id, _auth_email = await _booking_auth_context(
+            request
+        )
+    except HTTPException as e:
+        # get_graph_token() trả 401 khi user CHƯA liên kết Microsoft (không có
+        # refresh token) hoặc refresh thất bại. Với Mini App Zalo, đây KHÔNG phải
+        # session Zalo hết hạn — nếu để nguyên 401, client coi là hết phiên, xoá
+        # session và bắt đăng nhập lại bằng SĐT (loop "đang xác thực..."). Đổi
+        # sang 403 để client hiện đúng thông báo "cần liên kết Microsoft".
+        detail = str(e.detail or "")
+        if e.status_code == 401 and "Microsoft" in detail:
+            raise HTTPException(
+                403,
+                "Tài khoản chưa liên kết Microsoft nên chưa thể đặt phòng. "
+                "Vui lòng liên kết Microsoft rồi thử lại.",
+            )
+        raise
 
     payload = _resolve_booking_room_from_metadata(payload)
     payload.subject = payload.subject.strip() or "Meeting"

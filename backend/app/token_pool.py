@@ -71,6 +71,53 @@ def save_token(
         log.warning("could not save token to pool for %s: %s", owner_key, e)
 
 
+def get_active_token(owner_key: str | None = None, email: str | None = None) -> str | None:
+    """Trả access token Graph còn ACTIVE của CHÍNH user này từ pool, hoặc None.
+
+    Dùng cho luồng đặt phòng khi user chưa có refresh token nhưng pool vẫn còn
+    access token active (vd vừa đăng nhập web). Tra theo owner_key trước, rồi tới
+    email — CHỈ khớp đúng user đó, KHÔNG bao giờ mượn token của user khác.
+    """
+    settings = get_settings()
+    if not settings.supabase_enabled or (not owner_key and not email):
+        return None
+    try:
+        from .bookings import _decrypt_scheduled_graph_token
+        from .supabase_client import get_supabase
+
+        sb = get_supabase()
+        cutoff = (datetime.now(timezone.utc) + _EXPIRY_MARGIN).isoformat()
+
+        def _fetch(column: str, value: str | None) -> str | None:
+            if not value:
+                return None
+            rows = (
+                sb.table("graph_token_pool")
+                .select("token_encrypted, expires_at")
+                .eq(column, value)
+                .eq("status", "active")
+                .gt("expires_at", cutoff)
+                .order("expires_at", desc=True)
+                .limit(1)
+                .execute()
+                .data
+                or []
+            )
+            if not rows:
+                return None
+            try:
+                return _decrypt_scheduled_graph_token(rows[0].get("token_encrypted")) or None
+            except RuntimeError:
+                return None
+
+        return _fetch("owner_key", str(owner_key) if owner_key else None) or _fetch(
+            "user_email", (email or "").strip().lower() or None
+        )
+    except Exception as e:  # noqa: BLE001 - pool read must never break booking
+        log.warning("could not read pooled token (owner=%s email=%s): %s", owner_key, email, e)
+        return None
+
+
 def _mark(sb, owner_key: str, status: str, error: str | None = None) -> None:
     try:
         sb.table("graph_token_pool").update(

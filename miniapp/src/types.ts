@@ -45,4 +45,8 @@ export interface UpcomingEvent {
   subject?: string | null;
   location?: string | null; // vd "Tầng 3 - Toà V1"
   image?: string | null; // thumbnail_link của phòng
+  office?: string | null; // office của phòng (subtitle màn chi tiết, vd "Amsterdam")
+  map?: string | null; // map_link — ảnh sơ đồ chỉ đường tới phòng
+  attendees?: string[] | null; // email người tham dự (FE tự bỏ hậu tố domain)
+  body?: string | null; // mô tả cuộc họp
 }

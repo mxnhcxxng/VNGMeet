@@ -80,6 +80,28 @@ export const api = {
   // app / bấm làm mới.
   freeRoomsToday: () => request<FreeRoomsResponse>("/rooms/free-today"),
 
+  // Đặt phòng (instant). booking_type do backend tự quyết theo ngày, gửi "instant"
+  // cho phòng trống hôm nay/ngày mai. attendees là danh sách username (BE tự thêm
+  // hậu tố domain).
+  book: (payload: {
+    room_email: string;
+    room_name?: string | null;
+    date: string;
+    start_time: string;
+    end_time: string;
+    subject: string;
+    attendees?: string[];
+    body?: string | null;
+  }) =>
+    request<{ ok: boolean }>("/bookings", {
+      method: "POST",
+      body: JSON.stringify({
+        booking_type: "instant",
+        method: "manual",
+        ...payload,
+      }),
+    }),
+
   chatThreads: () => request<{ threads: ChatThread[] }>("/chat/threads"),
 
   chatMessages: (threadId: string) =>

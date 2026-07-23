@@ -2,14 +2,15 @@
 // Ép toàn bộ app dùng Inter, ghi đè font mặc định của ZaUI.
 :root {
   --vm-blue: #0068ff;
-  --vm-blue-dark: #0057d9;
+  --vm-blue-dark: #0068ff;
   --vm-ink: #18181b;
   --vm-muted: #71717a;
   --vm-separator: #e4e4e7;
   --vm-surface: #ffffff;
   --vm-surface-2: #f4f4f5;
   --vm-accent-soft-bg: #eaf2fe;
-  --vm-accent-soft-fg: #1d63ae;
+  // Toàn bộ màu xanh dùng chung 1 tông #0068ff (bỏ tông xanh đậm/nhạt khác).
+  --vm-accent-soft-fg: #0068ff;
 }
 
 html,
@@ -101,7 +102,7 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
   background: linear-gradient(
     180deg,
     var(--vm-blue) 0%,
-    #2a80ff 38%,
+    var(--vm-blue) 38%,
     var(--vm-surface) 100%
   );
   margin-top: calc(-1 * #{$header-h});
@@ -131,9 +132,12 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
   font-size: 15px;
   line-height: 20px;
   color: var(--vm-ink);
+  text-align: center;
 }
+// Trước đây phần "phù hợp nhất với bạn" để màu xám; theo yêu cầu đổi cả câu về
+// màu đen + căn giữa.
 .menu-card__title-muted {
-  color: var(--vm-muted);
+  color: var(--vm-ink);
 }
 .menu-card__sep {
   height: 1px;
@@ -375,6 +379,169 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
   margin-top: 2px;
 }
 
+// --- Chip toà/tầng (secondary) trên card phòng trống + banner modal ---
+.room-chips {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.room-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+  // Màu secondary: nền xám nhạt, chữ trung tính.
+  background: var(--vm-surface-2);
+  color: var(--vm-muted);
+}
+// Chip đặt trên ảnh: nền trắng mờ + blur để đọc rõ trên nền ảnh.
+.room-chip--onmedia {
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--vm-ink);
+  backdrop-filter: blur(4px);
+}
+
+// ===================================================================
+// Booking modal (đặt phòng) — trượt từ PHẢI vào (Figma 317-11817)
+// ===================================================================
+.booking-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  flex-direction: column;
+  background: var(--vm-surface);
+  transform: translateX(100%);
+  transition: transform 0.26s ease;
+  will-change: transform;
+}
+.booking-modal.is-open {
+  transform: translateX(0);
+}
+.booking-modal__scroll {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 16px;
+}
+.booking-modal__banner {
+  position: relative;
+  flex: none;
+  height: 128px;
+  border-radius: 12px;
+  overflow: hidden;
+  background-color: #3f3f46;
+  background-size: cover;
+  background-position: center;
+}
+.booking-modal__banner-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    180deg,
+    rgba(0, 0, 0, 0) 40%,
+    rgba(0, 0, 0, 0.8) 100%
+  );
+}
+.booking-modal__banner-body {
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: #fff;
+}
+.booking-modal__room-name {
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 26px;
+}
+.booking-modal__room-loc {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  line-height: 20px;
+}
+.booking-modal__form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+// Hàng 2 ô giờ (bắt đầu / kết thúc) chia đôi.
+.booking-modal__row {
+  display: flex;
+  gap: 12px;
+}
+.booking-modal__row > * {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.booking-modal__actions {
+  flex: none;
+  display: flex;
+  gap: 8px;
+  padding: 12px 16px;
+  padding-bottom: calc(12px + var(--zaui-safe-area-inset-bottom, 0px));
+}
+
+// --- Màn "Đặt phòng thành công" (Figma 317-32951) ---
+.booking-success {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  // Nền trắng + vệt xanh nhạt loang từ đỉnh.
+  background:
+    linear-gradient(180deg, rgba(0, 104, 255, 0.22) 0%, rgba(0, 104, 255, 0) 30%),
+    var(--vm-surface);
+}
+.booking-success__body {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+  padding: 96px 16px 16px 16px;
+}
+.booking-success__check {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 80px;
+  height: 80px;
+  border-radius: 999px;
+  color: #fff;
+  background: linear-gradient(135deg, #3a8bff 0%, var(--vm-blue) 100%);
+}
+.booking-success__text {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+}
+.booking-success__title {
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 26px;
+  color: var(--vm-ink);
+}
+.booking-success__subtitle {
+  font-size: 16px;
+  line-height: 22px;
+  color: var(--vm-muted);
+}
+
 // ===================================================================
 // Bottom navigation
 // ===================================================================
@@ -430,4 +597,248 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
   font-size: 18px;
   font-weight: 600;
   color: var(--vm-ink);
+}
+
+// ===================================================================
+// Skeleton loading (màn Home)
+// ===================================================================
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: var(--vm-surface-2);
+}
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.6) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  animation: vm-shimmer 1.3s ease-in-out infinite;
+}
+@keyframes vm-shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+// Skeleton cho event card (Lịch sắp tới): giữ nguyên chiều cao card.
+.skeleton--event {
+  background: var(--vm-surface-2);
+}
+.skeleton--event::after {
+  animation: vm-shimmer 1.3s ease-in-out infinite;
+}
+// Dòng chữ giả trong room-card.
+.skeleton--line {
+  height: 12px;
+  border-radius: 6px;
+  margin: 0 auto;
+}
+.skeleton--name {
+  width: 70%;
+  margin-top: 8px;
+}
+.skeleton--time {
+  width: 50%;
+  margin-top: 8px;
+}
+
+// ===================================================================
+// Chi tiết lịch họp (overlay push từ phải sang trái) — Figma 317-9943
+// ===================================================================
+.mtg-detail {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  background: #f9fafb;
+  transform: translateX(100%);
+  transition: transform 0.26s ease;
+  will-change: transform;
+}
+.mtg-detail.is-open {
+  transform: translateX(0);
+}
+.mtg-detail__header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 44px;
+  box-sizing: content-box;
+  padding: var(--zaui-safe-area-inset-top, 0px) 8px 0 12px;
+  background: var(--vm-blue);
+  color: #fff;
+}
+.mtg-detail__back {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: #fff;
+  cursor: pointer;
+}
+.mtg-detail__header-title {
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 24px;
+}
+.mtg-detail__scroll {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: calc(24px + var(--zaui-safe-area-inset-bottom, 0px));
+}
+.mtg-detail__card {
+  background: var(--vm-surface);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.mtg-detail__heading {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.mtg-detail__title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 26px;
+  color: var(--vm-ink);
+}
+.mtg-detail__subtitle {
+  font-size: 16px;
+  line-height: 22px;
+  color: var(--vm-muted);
+}
+.mtg-detail__map {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  border-radius: 12px;
+  overflow: hidden;
+  cursor: pointer;
+}
+.mtg-detail__map img {
+  display: block;
+  width: 100%;
+  height: auto;
+  object-fit: cover;
+}
+.mtg-detail__info {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.mtg-detail__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  line-height: 20px;
+  color: var(--vm-ink);
+}
+// Icon (lịch/giờ/vị trí/người tham dự) tô xanh #0068ff, chữ vẫn màu ink.
+.mtg-detail__row svg {
+  color: var(--vm-blue);
+  flex: none;
+}
+.mtg-detail__row--attendees {
+  align-items: flex-start;
+}
+.mtg-detail__row--attendees svg {
+  flex: none;
+  margin-top: 2px;
+}
+.mtg-detail__attendees {
+  flex: 1 1 auto;
+}
+.mtg-detail__more {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 500;
+  color: var(--vm-ink);
+  cursor: pointer;
+}
+.mtg-detail__desc {
+  gap: 8px;
+}
+.mtg-detail__desc-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 22px;
+  color: var(--vm-ink);
+}
+.mtg-detail__desc-body {
+  margin: 0;
+  font-size: 15px;
+  line-height: 20px;
+  color: var(--vm-muted);
+  white-space: pre-wrap;
+}
+.mtg-detail__desc-empty {
+  margin: 0;
+  font-size: 15px;
+  line-height: 20px;
+  color: var(--vm-muted);
+  font-style: italic;
+}
+
+// ===================================================================
+// Map modal (xem sơ đồ chỉ đường toàn màn hình)
+// ===================================================================
+.map-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #000;
+  overflow: hidden;
+  touch-action: none;
+  transition: opacity 0.2s ease;
+}
+.map-modal__img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  transform-origin: center center;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+.map-modal__close {
+  position: absolute;
+  top: calc(12px + var(--zaui-safe-area-inset-top, 0px));
+  // Đặt bên TRÁI để không đè lên cụm nút "..."/tắt mini app của Zalo ở góc phải.
+  left: 12px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  cursor: pointer;
 }

@@ -319,12 +319,26 @@ async def _booking_auth_context(
     if request.headers.get("Authorization", "").startswith("Bearer "):
         claims = _claims_from_bearer(request)
         auth_user_id = claims["sub"]
-        graph_token = await auth.get_graph_token(auth_user_id)
+        email = _profile_email(claims)
+        try:
+            graph_token = await auth.get_graph_token(auth_user_id)
+        except HTTPException as e:
+            # Chưa có refresh token cho user này (vd profile Zalo có auth_user_id
+            # khác chỗ lưu refresh token). Nếu pool còn giữ access token active
+            # của CHÍNH user (theo id hoặc email) thì dùng tạm để đặt phòng, thay
+            # vì 401 → tránh loop đăng nhập lại ở Mini App.
+            if e.status_code != 401:
+                raise
+            from .token_pool import get_active_token
+
+            graph_token = get_active_token(auth_user_id, email)
+            if not graph_token:
+                raise
         return (
             graph_token,
             auth_user_id,
             _upsert_user_profile(claims),
-            _profile_email(claims),
+            email,
         )
 
     token = auth.get_manual_token(auth.session_id(request))

@@ -40,7 +40,7 @@ def _room_metadata() -> dict[str, dict]:
             .table("meeting_room_metadata")
             .select(
                 "email, office, building, floor, zone, capacity, capacity_size, "
-                "thumbnail_link, direction"
+                "thumbnail_link, direction, map_link"
             )
             .execute()
             .data
@@ -714,6 +714,7 @@ async def free_rooms_today(request: Request):
     profile = _read_user_profile(None, email) or {}
     user_building = str(profile.get("building") or "")
     user_floor = str(profile.get("floor") or "")
+    user_office = str(profile.get("office") or "").strip()
 
     tz = ZoneInfo(settings.timezone)
     now = datetime.now(tz)
@@ -726,8 +727,15 @@ async def free_rooms_today(request: Request):
     else:
         boundary = now.replace(second=0, microsecond=0) + timedelta(minutes=30 - past)
 
-    if boundary.hour >= settings.business_end_hour:
-        # Qua giờ tan làm → ngày hôm sau, bắt đầu từ giờ làm việc.
+    # Giờ đóng cửa hôm nay (vd 18:00).
+    close_dt = now.replace(
+        hour=settings.business_end_hour, minute=0, second=0, microsecond=0
+    )
+    # So sánh nguyên mốc thời gian (boundary) với giờ đóng cửa — dùng datetime chứ
+    # KHÔNG dùng boundary.hour, vì khi làm tròn lên vắt qua nửa đêm (vd 23:47 →
+    # 00:00 hôm sau) thì boundary.hour = 0, so với 18 sẽ sai và hiện nhầm "hôm nay".
+    if boundary >= close_dt:
+        # Đã hết giờ đặt hôm nay → hiện "Phòng trống ngày mai", bắt đầu từ giờ làm việc.
         target_date = now.date() + timedelta(days=1)
         window_start_min = settings.business_start_hour * 60
         is_tomorrow = True
@@ -755,6 +763,12 @@ async def free_rooms_today(request: Request):
         )
         if r.get("id")
     ]
+    # Chỉ gợi ý phòng cùng office với user (giống suggest phòng bên chat). Nếu
+    # profile chưa có office thì không lọc (hiện tất cả) để tránh trả rỗng.
+    if user_office:
+        rooms_list = [
+            r for r in rooms_list if str(r.get("office") or "").strip() == user_office
+        ]
     room_ids = [r["id"] for r in rooms_list]
     # CHỈ đọc bảng room_availability (do background job giữ tươi). KHÔNG gọi
     # _ensure_availability_cache_fresh vì nó cần Graph token của user để refresh
