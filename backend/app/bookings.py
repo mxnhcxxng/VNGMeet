@@ -23,8 +23,16 @@ from .app_context import (
 )
 from .chat import _resolve_booking_room_from_metadata
 from .models import BookingRequest, UpdateBookingRequest
-from .profiles import _booking_auth_context
-from .room_resources import _availability_slot_index, _sync_calendar_after_response
+from .profiles import (
+    _booking_auth_context,
+    _read_user_profile,
+    _request_identity,
+)
+from .room_resources import (
+    _availability_slot_index,
+    _room_metadata,
+    _sync_calendar_after_response,
+)
 
 router = APIRouter()
 
@@ -560,6 +568,102 @@ async def list_my_bookings(request: Request, background_tasks: BackgroundTasks):
 
     rows = query.limit(200).execute().data or []
     return {"bookings": rows}
+
+
+def _format_room_location(meta: dict | None) -> str:
+    """Ghép location hiển thị từ metadata phòng, vd 'Tầng 3 - Toà V1'.
+
+    Ưu tiên floor + building; thiếu thì fallback về zone / office. Trả "" nếu
+    không có gì để hiện (frontend sẽ chỉ ẩn dòng location, không ẩn cả card)."""
+    if not meta:
+        return ""
+    parts: list[str] = []
+    floor = str(meta.get("floor") or "").strip()
+    building = str(meta.get("building") or "").strip()
+    if floor:
+        parts.append(f"Tầng {floor}")
+    if building:
+        parts.append(f"Toà {building}")
+    if parts:
+        return " - ".join(parts)
+    return str(meta.get("zone") or meta.get("office") or "").strip()
+
+
+@router.get("/api/bookings/upcoming")
+async def upcoming_booking(request: Request):
+    """Lịch 'sắp tới' cho màn Home của Mini App: user_activity thành công (đã đặt
+    được phòng) và gần nhất trong tương lai. Trả {"event": null} nếu không có —
+    frontend sẽ ẩn hẳn section 'Lịch sắp tới'.
+
+    - success = status ∈ {"ok", "success"} (instant/scheduled dùng "ok", room
+      scout dùng "success"). Bỏ "pending"/"failed"/"canceled".
+    - "trong tương lai" = còn diễn ra: date ở tương lai, hoặc hôm nay nhưng chưa
+      kết thúc (end_time > giờ hiện tại) nên cuộc họp đang diễn ra vẫn hiện.
+    - Ảnh nền + location lấy từ meeting_room_metadata (thumbnail_link, floor/building).
+    """
+    # Chỉ cần danh tính user (KHÔNG cần Graph token). Trước đây dùng
+    # _booking_auth_context → gọi get_graph_token → 401 "Microsoft not linked"
+    # cho user Zalo chưa có token Microsoft, khiến Mini App xoá session và
+    # authen lại bằng mã SĐT đã dùng ("code has already been used"). Ở đây chỉ
+    # đọc user_profiles theo email trong session JWT.
+    _auth_user_id, email = _request_identity(request)
+    if not settings.supabase_enabled:
+        return {"event": None}
+    profile = _read_user_profile(None, (email or "").strip().lower())
+    user_profile_id = profile.get("id") if profile else None
+    if not user_profile_id:
+        return {"event": None}
+
+    from .supabase_client import get_supabase
+
+    tz = ZoneInfo(settings.timezone)
+    now = datetime.now(tz)
+    today = now.date().isoformat()
+    now_hm = now.strftime("%H:%M")
+
+    rows = (
+        get_supabase()
+        .table("user_activity")
+        .select(
+            "room_email, room_name, date, start_time, end_time, "
+            "booking_type, method, subject, status"
+        )
+        .eq("user_id", user_profile_id)
+        .in_("status", ["ok", "success"])
+        .gte("date", today)
+        .order("date", desc=False)
+        .order("start_time", desc=False)
+        .limit(50)
+        .execute()
+        .data
+        or []
+    )
+
+    # Chọn row sắp tới gần nhất: bỏ những cuộc đã kết thúc trong hôm nay.
+    event_row = None
+    for r in rows:
+        r_date = str(r.get("date") or "")
+        end_hm = str(r.get("end_time") or "")[:5]
+        if r_date > today or (r_date == today and end_hm > now_hm):
+            event_row = r
+            break
+
+    if not event_row:
+        return {"event": None}
+
+    meta = _room_metadata().get((event_row.get("room_email") or "").strip().lower())
+    return {
+        "event": {
+            "room_name": event_row.get("room_name"),
+            "room_email": event_row.get("room_email"),
+            "date": event_row.get("date"),
+            "start_time": str(event_row.get("start_time") or "")[:5],
+            "end_time": str(event_row.get("end_time") or "")[:5],
+            "subject": event_row.get("subject"),
+            "location": _format_room_location(meta),
+            "image": (meta or {}).get("thumbnail_link"),
+        }
+    }
 
 
 @router.post("/api/bookings")

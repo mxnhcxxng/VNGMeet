@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -11,7 +12,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
 
 from . import auth, availability, graph, token_pool
 from .app_context import AVAILABILITY_CACHE_TTL, log, settings
-from .profiles import _request_identity
+from .profiles import _read_user_profile, _request_identity
 
 router = APIRouter()
 _AVAILABILITY_REFRESH_LOCK = None
@@ -620,6 +621,196 @@ async def availability_grid(
         "days": day_list,
         "times": times,
         "rooms": out_rooms,
+    }
+
+
+# --------------------------------------------------------------------------- #
+# "Phòng trống hôm nay" cho màn Home của Mini App
+# --------------------------------------------------------------------------- #
+FREE_DURATIONS_MINUTES = [30, 60, 90, 120, 150, 180]
+
+
+def _numeric_floor(floor: str | None) -> int | None:
+    """Số nguyên đầu tiên trong chuỗi floor (khớp numericFloor ở browse room)."""
+    if not floor:
+        return None
+    m = re.search(r"-?\d+", str(floor))
+    return int(m.group()) if m else None
+
+
+def _location_rank(
+    room_building: str | None,
+    room_floor: str | None,
+    user_building: str | None,
+    user_floor: str | None,
+) -> tuple[int, int, int]:
+    """Độ 'gần user' theo toà + tầng — khớp locationRank ở browse room.
+    Tuple nhỏ hơn = gần user hơn."""
+    rb = (room_building or "").strip().lower()
+    pb = (user_building or "").strip().lower()
+    same_building = bool(rb and pb and rb == pb)
+    uf = _numeric_floor(user_floor)
+    rf = _numeric_floor(room_floor)
+    has_floor = uf is not None and rf is not None
+    same_floor = has_floor and rf == uf
+    if same_building and same_floor:
+        return (0, 0, 0)
+    if not same_building and same_floor:
+        return (1, 0, 0)
+    if same_building and has_floor:
+        return (2, abs(rf - uf), 1 if rf > uf else 0)
+    if not same_building and has_floor:
+        return (3, abs(rf - uf), 1 if rf > uf else 0)
+    return (4, 2**31, 1)
+
+
+def _earliest_free_start(
+    slots: list[int],
+    window_start_min: int,
+    window_end_min: int,
+    duration_min: int,
+    slot_min: int,
+    step_min: int = 30,
+) -> int | None:
+    """Phút bắt đầu (từ 00:00) SỚM NHẤT mà phòng trống liên tục đủ `duration_min`
+    và kết thúc trước `window_end_min`. Ứng viên cách nhau `step_min` (mốc 30p).
+    Slot coi là trống khi giá trị ∈ {0, -1}. None nếu không có khối trống nào."""
+    latest_start = window_end_min - duration_min
+    start = window_start_min
+    while start <= latest_start:
+        s_idx = start // slot_min
+        e_idx = (start + duration_min) // slot_min
+        if all(
+            0 <= k < len(slots) and slots[k] in (0, -1) for k in range(s_idx, e_idx)
+        ):
+            return start
+        start += step_min
+    return None
+
+
+def _hhmm(total_min: int) -> str:
+    return f"{total_min // 60:02d}:{total_min % 60:02d}"
+
+
+@router.get("/api/rooms/free-today")
+async def free_rooms_today(request: Request):
+    """Phòng trống cho màn Home.
+
+    Từ mốc 30/00 phút sắp tới gần nhất đến 18:00, phòng nào còn trống liên tục
+    30p / 1h / ... / 3h thì hiện. Sort theo giờ bắt đầu tăng dần, rồi tới phòng
+    gần user nhất (theo toà + tầng, giống browse room). Qua 18:00 thì tính cho
+    ngày hôm sau (bắt đầu từ giờ làm việc). Mỗi mốc thời lượng tối đa 4 phòng.
+
+    Trả sẵn cả 6 mốc trong 1 response để client đổi tab không phải gọi lại — chỉ
+    đọc bảng room_availability (client gọi khi mở app / bấm làm mới)."""
+    _auth_user_id, email = _request_identity(request)
+    email = (email or "").strip().lower()
+    if not settings.supabase_enabled:
+        raise HTTPException(503, "Availability cache requires Supabase configuration.")
+
+    from .supabase_client import get_supabase
+
+    sb = get_supabase()
+    profile = _read_user_profile(None, email) or {}
+    user_building = str(profile.get("building") or "")
+    user_floor = str(profile.get("floor") or "")
+
+    tz = ZoneInfo(settings.timezone)
+    now = datetime.now(tz)
+    end_min = settings.business_end_hour * 60  # 18:00
+
+    # Mốc 30/00 phút sắp tới gần nhất (làm tròn LÊN).
+    past = now.minute % 30
+    if past == 0 and now.second == 0 and now.microsecond == 0:
+        boundary = now.replace(second=0, microsecond=0)
+    else:
+        boundary = now.replace(second=0, microsecond=0) + timedelta(minutes=30 - past)
+
+    if boundary.hour >= settings.business_end_hour:
+        # Qua giờ tan làm → ngày hôm sau, bắt đầu từ giờ làm việc.
+        target_date = now.date() + timedelta(days=1)
+        window_start_min = settings.business_start_hour * 60
+        is_tomorrow = True
+    else:
+        target_date = now.date()
+        window_start_min = max(
+            boundary.hour * 60 + boundary.minute, settings.business_start_hour * 60
+        )
+        is_tomorrow = False
+
+    day = target_date.isoformat()
+
+    rooms_list = [
+        r
+        for r in (
+            sb.table("meeting_room_metadata")
+            .select(
+                "id, name, email, building, floor, zone, capacity, "
+                "capacity_size, office, thumbnail_link, direction"
+            )
+            .eq("in_use", True)
+            .execute()
+            .data
+            or []
+        )
+        if r.get("id")
+    ]
+    room_ids = [r["id"] for r in rooms_list]
+    # CHỈ đọc bảng room_availability (do background job giữ tươi). KHÔNG gọi
+    # _ensure_availability_cache_fresh vì nó cần Graph token của user để refresh
+    # inline → user Zalo (chưa link Microsoft) sẽ bị 401 → Mini App xoá session
+    # và authen lại bằng mã SĐT đã dùng. Cache trống thì trả danh sách rỗng.
+    cache = _read_availability_cache(sb, room_ids, [day])
+    slot_min = settings.availability_slot_minutes
+
+    by_duration: dict[str, list[dict]] = {}
+    for duration in FREE_DURATIONS_MINUTES:
+        entries: list[dict] = []
+        for r in rooms_list:
+            row = cache.get((r["id"], day))
+            slots = (row or {}).get("slots") or []
+            if len(slots) < availability.SLOTS_PER_DAY:
+                continue
+            start_min = _earliest_free_start(
+                slots, window_start_min, end_min, duration, slot_min
+            )
+            if start_min is None:
+                continue
+            entries.append(
+                {
+                    "room": r,
+                    "start_min": start_min,
+                    "loc": _location_rank(
+                        r.get("building"), r.get("floor"), user_building, user_floor
+                    ),
+                }
+            )
+        # Sort: giờ bắt đầu ↑ → gần user nhất → tên phòng.
+        entries.sort(
+            key=lambda e: (
+                e["start_min"],
+                e["loc"],
+                (e["room"].get("name") or "").lower(),
+            )
+        )
+        by_duration[str(duration)] = [
+            {
+                "name": e["room"].get("name"),
+                "email": e["room"].get("email"),
+                "building": e["room"].get("building"),
+                "floor": e["room"].get("floor"),
+                "image": e["room"].get("thumbnail_link"),
+                "start_time": _hhmm(e["start_min"]),
+                "end_time": _hhmm(e["start_min"] + duration),
+            }
+            for e in entries[:4]
+        ]
+
+    return {
+        "day": day,
+        "isTomorrow": is_tomorrow,
+        "durations": FREE_DURATIONS_MINUTES,
+        "byDuration": by_duration,
     }
 
 

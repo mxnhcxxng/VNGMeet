@@ -1,7 +1,12 @@
 import { API_BASE } from "@/config";
 import { clearToken, getToken } from "@/services/auth";
 import type { PhoneGrant } from "@/services/phone";
-import type { ChatMessage, ChatThread } from "@/types";
+import type {
+  ChatMessage,
+  ChatThread,
+  FreeRoomsResponse,
+  UpcomingEvent,
+} from "@/types";
 
 // Ném ra khi backend trả 401 → session token đã bị xoá, Layout sẽ tự authen lại
 // bằng SĐT Zalo.
@@ -65,6 +70,15 @@ export const api = {
     if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
     return res.json();
   },
+
+  // Lịch sắp tới cho Home: booking thành công & gần nhất trong tương lai.
+  // { event: null } khi không có → frontend ẩn section.
+  upcomingBooking: () =>
+    request<{ event: UpcomingEvent | null }>("/bookings/upcoming"),
+
+  // Phòng trống hôm nay (đủ 6 mốc thời lượng trong 1 lần gọi). Chỉ gọi khi mở
+  // app / bấm làm mới.
+  freeRoomsToday: () => request<FreeRoomsResponse>("/rooms/free-today"),
 
   chatThreads: () => request<{ threads: ChatThread[] }>("/chat/threads"),
 

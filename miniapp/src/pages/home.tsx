@@ -1,103 +1,253 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+
 import Magnifier from "@gravity-ui/icons/Magnifier";
 import Binoculars from "@gravity-ui/icons/Binoculars";
 import MapPin from "@gravity-ui/icons/MapPin";
+import Comment from "@gravity-ui/icons/Comment";
 import Calendar from "@gravity-ui/icons/Calendar";
 import Clock from "@gravity-ui/icons/Clock";
+import ArrowsRotateRight from "@gravity-ui/icons/ArrowsRotateRight";
 
 import favicon from "@/static/favicon-white.png";
 import { useDisplayName } from "@/services/auth";
-import { availableRooms, upcomingEvent } from "@/services/mock";
+import { api, AuthError } from "@/services/api";
+import type { FreeRoom, FreeRoomsResponse, UpcomingEvent } from "@/types";
 
-// Màn Home theo Figma (node 286-9472). Icon dùng bộ @gravity-ui/icons y hệt
-// bản web, font Inter (khai báo ở index.html + app.scss). Dữ liệu đang mock.
+// "2026-07-24" -> "24/07"
+function formatDate(iso: string): string {
+  const [, m, d] = iso.split("-");
+  return d && m ? `${d}/${m}` : iso;
+}
+
+// 30 -> "0.5h", 60 -> "1h", 90 -> "1.5h", ...
+function durationLabel(minutes: number): string {
+  return `${minutes / 60}h`;
+}
+
+const DEFAULT_DURATION = 60; // tab "1h" chọn sẵn (khớp Figma)
+
+// Màn Home theo Figma (node 286-9472). Icon dùng bộ @gravity-ui/icons y hệt bản
+// web, font Inter. "Lịch sắp tới" + "Phòng trống" lấy từ BE.
 export default function HomePage() {
   const name = useDisplayName() ?? "bạn";
+  const [scrolled, setScrolled] = useState(false);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+
+  const [event, setEvent] = useState<UpcomingEvent | null>(null);
+  const [freeRooms, setFreeRooms] = useState<FreeRoomsResponse | null>(null);
+  const [duration, setDuration] = useState(DEFAULT_DURATION);
+  const [refreshing, setRefreshing] = useState(false);
 
   const actions = [
     { key: "find", label: "Tìm phòng", Icon: Magnifier },
     { key: "scout", label: "Săn phòng", Icon: Binoculars },
     { key: "direction", label: "Chỉ đường", Icon: MapPin },
+    { key: "chatbot", label: "Chatbot", Icon: Comment },
   ];
+
+  // Chỉ gọi availability khi mở app hoặc bấm "Làm mới".
+  const loadFreeRooms = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      const data = await api.freeRoomsToday();
+      setFreeRooms(data);
+    } catch (e) {
+      if (!(e instanceof AuthError)) setFreeRooms(null);
+    } finally {
+      setRefreshing(false);
+    }
+  }, []);
+
+  // Lịch sắp tới + phòng trống: nạp 1 lần khi vào app.
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      try {
+        const { event } = await api.upcomingBooking();
+        if (alive) setEvent(event);
+      } catch (e) {
+        if (!(e instanceof AuthError) && alive) setEvent(null);
+      }
+    })();
+    void loadFreeRooms();
+    return () => {
+      alive = false;
+    };
+  }, [loadFreeRooms]);
+
+  // Header sticky: cuộn qua đầu trang thì thêm nền xanh.
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      ([entry]) => setScrolled(!entry.isIntersecting),
+      { threshold: 0 },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+
+  const durations = freeRooms?.durations ?? [30, 60, 90, 120, 150, 180];
+  const rooms: FreeRoom[] = freeRooms?.byDuration[String(duration)] ?? [];
+  // Luôn render đúng 4 ô để chiều cao panel không đổi khi đổi tab / khi trống.
+  const cells: (FreeRoom | null)[] = Array.from(
+    { length: 4 },
+    (_, i) => rooms[i] ?? null,
+  );
+  const roomsTitle = freeRooms?.isTomorrow
+    ? "Phòng trống ngày mai"
+    : "Phòng trống hôm nay";
 
   return (
     <div className="home">
+      <div ref={sentinelRef} className="home__sentinel" />
+
+      <header className={`home__topbar${scrolled ? " is-scrolled" : ""}`}>
+        <img className="home__favicon" src={favicon} alt="zMeeting" />
+        <span className="home__appname">zMeeting</span>
+      </header>
+
       <div className="home__hero">
-        <div className="home__topbar">
-          <img className="home__favicon" src={favicon} alt="zMeeting" />
-          <span className="home__appname">zMeeting</span>
-        </div>
+        <div className="home__hero-body">
+          <div className="home__greeting">Xin chào, {name}</div>
 
-        <div className="home__greeting">Xin chào, {name}</div>
-
-        <div className="menu-card">
-          <div className="menu-card__title">
-            Chọn một nhu cầu{" "}
-            <span className="menu-card__title-muted">
-              phù hợp nhất với bạn
-            </span>
-          </div>
-          <div className="menu-card__sep" />
-          <div className="menu-card__actions">
-            {actions.map(({ key, label, Icon }) => (
-              <button key={key} className="menu-action" type="button">
-                <span className="menu-action__icon">
-                  <Icon width={24} height={24} />
-                </span>
-                <span className="menu-action__label">{label}</span>
-              </button>
-            ))}
+          <div className="menu-card">
+            <div className="menu-card__title">
+              Chọn một nhu cầu{" "}
+              <span className="menu-card__title-muted">
+                phù hợp nhất với bạn
+              </span>
+            </div>
+            <div className="menu-card__sep" />
+            <div className="menu-card__actions">
+              {actions.map(({ key, label, Icon }) => (
+                <button key={key} className="menu-action" type="button">
+                  <span className="menu-action__icon">
+                    <Icon width={24} height={24} />
+                  </span>
+                  <span className="menu-action__label">{label}</span>
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </div>
 
-      <section className="home-section">
-        <div className="home-section__title">Lịch sắp tới</div>
-        <div
-          className="event-card"
-          style={{ backgroundImage: `url(${upcomingEvent.image})` }}
-        >
-          <div className="event-card__overlay" />
-          <div className="event-card__body">
-            <div className="event-card__title">{upcomingEvent.room}</div>
-            <div className="event-card__row">
-              <Calendar width={16} height={16} />
-              <span>{upcomingEvent.date}</span>
-            </div>
-            <div className="event-card__row">
-              <Clock width={16} height={16} />
-              <span>{upcomingEvent.time}</span>
-            </div>
-            <div className="event-card__row">
-              <MapPin width={16} height={16} />
-              <span>{upcomingEvent.location}</span>
-            </div>
-            <button className="event-card__cta" type="button">
-              Xem chi tiết
-            </button>
-          </div>
-        </div>
-      </section>
-
-      <section className="home-section">
-        <div className="home-section__title">Phòng trống hôm nay</div>
-        <div className="room-grid">
-          {availableRooms.map((room) => (
-            <div key={room.id} className="room-card">
-              <div
-                className="room-card__media"
-                style={{ backgroundImage: `url(${room.image})` }}
-              >
-                <span className="room-card__badge">
-                  <Clock width={14} height={14} />
-                  {room.duration}
+      {event && (
+        <section className="home-section">
+          <div className="home-section__title">Lịch sắp tới</div>
+          <div
+            className="event-card"
+            style={
+              event.image
+                ? { backgroundImage: `url(${event.image})` }
+                : undefined
+            }
+          >
+            <div className="event-card__overlay" />
+            <div className="event-card__body">
+              <div className="event-card__title">
+                {event.room_name || event.subject || "Cuộc họp"}
+              </div>
+              <div className="event-card__row">
+                <Calendar width={16} height={16} />
+                <span>{formatDate(event.date)}</span>
+              </div>
+              <div className="event-card__row">
+                <Clock width={16} height={16} />
+                <span>
+                  {event.start_time} - {event.end_time}
                 </span>
               </div>
-              <div className="room-card__info">
-                <div className="room-card__name">{room.name}</div>
-                <div className="room-card__time">{room.time}</div>
-              </div>
+              {event.location && (
+                <div className="event-card__row">
+                  <MapPin width={16} height={16} />
+                  <span>{event.location}</span>
+                </div>
+              )}
+              <button className="event-card__cta" type="button">
+                Xem chi tiết
+              </button>
             </div>
+          </div>
+        </section>
+      )}
+
+      <section className="home-section">
+        <div className="home-section__header">
+          <div className="home-section__title">{roomsTitle}</div>
+          <button
+            className="home-section__refresh"
+            type="button"
+            onClick={() => void loadFreeRooms()}
+            disabled={refreshing}
+          >
+            <span>Làm mới</span>
+            <ArrowsRotateRight
+              width={16}
+              height={16}
+              className={refreshing ? "is-spinning" : undefined}
+            />
+          </button>
+        </div>
+
+        <div className="duration-tabs">
+          {durations.map((m) => (
+            <button
+              key={m}
+              type="button"
+              className={`duration-tab${m === duration ? " is-active" : ""}`}
+              onClick={() => setDuration(m)}
+            >
+              {durationLabel(m)}
+            </button>
           ))}
+        </div>
+
+        <div className="room-panel">
+          <div className="room-grid">
+            {cells.map((room, i) =>
+              room ? (
+                <div key={room.email || i} className="room-card">
+                  <div
+                    className="room-card__media"
+                    style={
+                      room.image
+                        ? { backgroundImage: `url(${room.image})` }
+                        : undefined
+                    }
+                  >
+                    <span className="room-card__badge">
+                      <Clock width={14} height={14} />
+                      {durationLabel(duration)}
+                    </span>
+                  </div>
+                  <div className="room-card__info">
+                    <div className="room-card__name">{room.name}</div>
+                    <div className="room-card__time">
+                      {room.start_time} - {room.end_time}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                // Ô giữ chỗ (ẩn) để chiều cao panel không đổi.
+                <div key={`ghost-${i}`} className="room-card room-card--ghost">
+                  <div className="room-card__media" />
+                  <div className="room-card__info">
+                    <div className="room-card__name">{" "}</div>
+                    <div className="room-card__time">{" "}</div>
+                  </div>
+                </div>
+              ),
+            )}
+          </div>
+          {rooms.length === 0 && (
+            <div className="room-panel__empty">
+              {refreshing
+                ? "Đang tải phòng trống..."
+                : "Không có phòng trống phù hợp"}
+            </div>
+          )}
         </div>
       </section>
     </div>
