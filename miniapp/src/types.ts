@@ -35,6 +35,23 @@ export interface FreeRoomsResponse {
   byDuration: Record<string, FreeRoom[]>;
 }
 
+// Trạng thái một lượt đặt phòng trong lịch sử.
+export type BookingStatus = "success" | "pending" | "cancelled";
+
+// Một dòng trong tab "Lịch sử đặt phòng" (Figma 346-1292). Hiện là mock (chưa
+// nối BE) nhưng đã đúng shape để sau này map thẳng từ API lịch sử booking.
+export interface BookingHistoryItem {
+  id: string;
+  title: string; // vd "Cuộc họp của cuongdm4"
+  status: BookingStatus;
+  office?: string | null; // vd "Amsterdam"
+  date: string; // ISO yyyy-mm-dd
+  start_time: string; // HH:MM
+  end_time: string; // HH:MM
+  location?: string | null; // vd "Tầng 3 - Toà V1"
+  image?: string | null; // thumbnail_link của phòng
+}
+
 // Lịch "sắp tới" cho màn Home — khớp GET /api/bookings/upcoming của backend.
 export interface UpcomingEvent {
   room_name?: string | null;

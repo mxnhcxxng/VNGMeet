@@ -600,6 +600,144 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
 }
 
 // ===================================================================
+// Tab Lịch sử đặt phòng (Figma 346-1292)
+// ===================================================================
+.history {
+  min-height: 100%;
+  background: #f9fafb;
+  // Chừa chỗ cho bottom-nav (~64px + safe area) + 40px lề dưới (khớp Figma).
+  padding-bottom: calc(64px + 40px + var(--zaui-safe-area-inset-bottom, 0px));
+}
+
+// Header xanh cố định trên đỉnh, canh giữa dọc → thẳng hàng với cụm nút
+// "..."/tắt mini app của Zalo. padding-top = safe area (status bar/notch).
+.history__header {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  height: 44px;
+  box-sizing: content-box;
+  padding: var(--zaui-safe-area-inset-top, 0px) 12px 0 12px;
+  background: var(--vm-blue);
+}
+.history__header-title {
+  color: #fff;
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 24px;
+}
+
+// Danh sách thẻ: các thẻ trắng tràn hết bề ngang, cách nhau 12px trên nền xám.
+.history__list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 12px;
+}
+
+.history-card {
+  display: flex;
+  align-items: stretch;
+  min-height: 158px;
+  background: var(--vm-surface);
+  overflow: hidden;
+}
+// Ảnh phòng bên trái: rộng 100px, cao hết thẻ, bo góc phải (khớp Figma).
+.history-card__media {
+  flex: none;
+  width: 100px;
+  align-self: stretch;
+  border-radius: 0 8px 8px 0;
+  background-size: cover;
+  background-position: center;
+  // Placeholder khi mock chưa có ảnh: gradient xanh-xám nhẹ.
+  background-color: #c7d2dd;
+  background-image: linear-gradient(135deg, #a8bccd 0%, #6f8aa3 100%);
+}
+.history-card__body {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+}
+.history-card__title {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 24px;
+  color: #344054;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.history-card__info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.history-card__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  line-height: 18px;
+  color: #344054;
+}
+.history-card__row svg {
+  flex: none;
+  color: var(--vm-blue);
+}
+
+// --- Chip trạng thái ---
+.history-chip {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+}
+.history-chip--success {
+  background: rgba(23, 201, 100, 0.15);
+  color: #2b7744;
+}
+.history-chip--pending {
+  background: rgba(245, 158, 11, 0.15);
+  color: #b45309;
+}
+.history-chip--cancelled {
+  background: rgba(240, 68, 56, 0.15);
+  color: #b42318;
+}
+
+// --- Empty state ---
+.history__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 64px 24px;
+  color: var(--vm-muted);
+  text-align: center;
+}
+.history__empty svg {
+  color: var(--vm-blue);
+  opacity: 0.8;
+}
+.history__empty-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--vm-ink);
+}
+
+// ===================================================================
 // Skeleton loading (màn Home)
 // ===================================================================
 .skeleton {
