@@ -478,6 +478,26 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
   flex-direction: column;
   gap: 16px;
 }
+// Chú thích booking hẹn giờ (scheduled): dòng mô tả tự đặt lúc 00:00.
+.booking-modal__sched-note {
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--vm-muted);
+}
+// Chú thích "1 lịch hẹn giờ / tối đa 3 tiếng" — có icon info accent.
+.booking-modal__sched-info {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--vm-muted);
+}
+.booking-modal__sched-info svg {
+  flex: none;
+  margin-top: 1px;
+  color: var(--vm-blue);
+}
 // Hàng 2 ô giờ (bắt đầu / kết thúc) chia đôi.
 .booking-modal__row {
   display: flex;
@@ -511,7 +531,9 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
   flex-direction: column;
   align-items: center;
   gap: 24px;
-  padding: 96px 16px 16px 16px;
+  // Cộng safe-area top (notch/dynamic island) vào offset 96px — màn success
+  // không có header nên phải tự chừa vùng an toàn phía trên.
+  padding: calc(96px + var(--zaui-safe-area-inset-top, 0px)) 16px 16px 16px;
 }
 .booking-success__check {
   display: flex;
@@ -978,5 +1000,369 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.16);
   color: #fff;
+  cursor: pointer;
+}
+
+// ===================================================================
+// Màn "Tìm phòng" — lưới lịch phòng (Figma 380-2214)
+// ===================================================================
+.fr {
+  position: fixed;
+  inset: 0;
+  z-index: 65; // trên home, dưới booking-modal (70)
+  display: flex;
+  flex-direction: column;
+  background: #f9fafb;
+  transform: translateX(100%);
+  transition: transform 0.26s ease;
+  will-change: transform;
+
+  // Kích thước cột lưới (dùng chung cho hàng tiêu đề + hàng giờ).
+  --fr-time-col: 56px;
+  --fr-room-col: 104px;
+  --fr-row-h: 44px;
+  --fr-head-h: 52px;
+}
+.fr.is-open {
+  transform: translateX(0);
+}
+// Tắt double-tap-to-zoom + độ trễ 300ms cho TOÀN màn Tìm phòng → mỗi tap rơi
+// đúng ô, không bị webview gộp 2 tap nhanh thành cử chỉ zoom. `manipulation` vẫn
+// cho cuộn/pan nên lưới & dải ngày vẫn kéo được bình thường.
+.fr,
+.fr * {
+  touch-action: manipulation;
+}
+
+// --- Dải chọn ngày ---
+.fr__days {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 6px;
+  background: var(--vm-surface);
+  border-bottom: 1px solid var(--vm-separator);
+}
+.fr__day-nav {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 44px;
+  border: none;
+  background: none;
+  color: var(--vm-muted);
+  cursor: pointer;
+}
+.fr__day-nav:disabled {
+  opacity: 0.3;
+}
+.fr__day-strip {
+  flex: 1 1 auto;
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  scroll-behavior: smooth;
+  // Chặn hiệu ứng "spring"/rubber-band khi cuộn hết cỡ (none = tắt cả bounce).
+  overscroll-behavior: none;
+  -webkit-overflow-scrolling: auto;
+}
+.fr__day-strip::-webkit-scrollbar {
+  display: none;
+}
+.fr__day {
+  flex: 0 0 40px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 4px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--vm-ink);
+  cursor: pointer;
+}
+.fr__day-wd {
+  font-size: 10px;
+  line-height: 14px;
+}
+.fr__day-num {
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 22px;
+}
+.fr__day.is-weekend {
+  color: #ef4444;
+}
+.fr__day.is-active {
+  background: var(--vm-blue);
+  color: #fff;
+}
+// Chấm xanh lá ở ngày user có lịch (giống web). Luôn chiếm chỗ để cao đều.
+.fr__day-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: transparent;
+}
+.fr__day-dot.is-on {
+  background: #16b364;
+}
+
+// --- Vùng lưới ---
+.fr__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.fr__grid-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  background: var(--vm-surface);
+  // Chặn hiệu ứng "spring"/rubber-band khi cuộn hết cỡ, cả 2 chiều.
+  overscroll-behavior: none;
+  -webkit-overflow-scrolling: auto;
+}
+.fr__grid {
+  display: grid;
+  // grid-template-columns đặt inline theo số phòng.
+  width: max-content;
+  min-width: 100%;
+}
+
+// Ô góc trên-trái ("Giờ") — sticky cả hai chiều.
+.fr__corner {
+  position: sticky;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--fr-head-h);
+  background: var(--vm-surface);
+  border-right: 1px solid var(--vm-separator);
+  border-bottom: 1px solid var(--vm-separator);
+  font-size: 12px;
+  font-weight: 700;
+  color: #344054;
+}
+// Tiêu đề phòng — sticky theo chiều dọc.
+.fr__rhead {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  height: var(--fr-head-h);
+  padding: 4px 6px;
+  background: var(--vm-surface);
+  border-right: 1px solid var(--vm-separator);
+  border-bottom: 1px solid var(--vm-separator);
+  text-align: center;
+}
+// Dòng 1: tim (ưa thích) + cờ + tên phòng — cỡ chữ khớp web (12px semibold).
+.fr__rhead-top {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  max-width: 100%;
+}
+.fr__rhead-heart {
+  flex: none;
+  color: var(--vm-blue); // web dùng cam; miniapp dùng accent 0068FF
+}
+.fr__rhead-flag {
+  flex: none;
+  font-size: 12px;
+  line-height: 15px;
+}
+.fr__rhead-name {
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 15px;
+  color: #344054;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+// Dòng 2: sức chứa "Vừa (5–12 👤)" — 10px, muted (khớp web).
+.fr__rhead-cap {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  font-size: 10px;
+  line-height: 12px;
+  color: var(--vm-muted);
+}
+// Nhãn giờ — sticky theo chiều ngang.
+.fr__time {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--fr-row-h);
+  background: var(--vm-surface);
+  border-right: 1px solid var(--vm-separator);
+  border-bottom: 1px solid var(--vm-separator);
+  font-size: 12px;
+  font-weight: 600;
+  color: #344054;
+}
+
+// --- Ô lịch ---
+.fr__cell {
+  height: var(--fr-row-h);
+  padding: 0;
+  border: none;
+  border-right: 1px solid var(--vm-separator);
+  border-bottom: 1px solid var(--vm-separator);
+  background: var(--vm-surface);
+}
+.fr__cell--free {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.12s ease, box-shadow 0.12s ease;
+}
+.fr__cell--free:active {
+  background: var(--vm-accent-soft-bg);
+}
+// Vùng chọn (có thể gồm nhiều ô liền nhau theo chiều dọc): tô nền accent-soft +
+// viền accent hai bên; ô đầu thêm viền trên, ô cuối thêm viền dưới → trông như 1
+// khối liền. Dùng box-shadow inset để không đội chiều cao ô.
+.fr__cell--free.is-selected {
+  background: var(--vm-accent-soft-bg);
+  box-shadow:
+    inset 2px 0 0 0 var(--vm-blue),
+    inset -2px 0 0 0 var(--vm-blue);
+}
+.fr__cell--free.is-selected.is-sel-first {
+  box-shadow:
+    inset 2px 0 0 0 var(--vm-blue),
+    inset -2px 0 0 0 var(--vm-blue),
+    inset 0 2px 0 0 var(--vm-blue);
+}
+.fr__cell--free.is-selected.is-sel-last {
+  box-shadow:
+    inset 2px 0 0 0 var(--vm-blue),
+    inset -2px 0 0 0 var(--vm-blue),
+    inset 0 -2px 0 0 var(--vm-blue);
+}
+.fr__cell--free.is-selected.is-sel-first.is-sel-last {
+  box-shadow:
+    inset 2px 0 0 0 var(--vm-blue),
+    inset -2px 0 0 0 var(--vm-blue),
+    inset 0 2px 0 0 var(--vm-blue),
+    inset 0 -2px 0 0 var(--vm-blue);
+}
+// Ngoài khung giờ làm việc (0–9h, 18–23h) — tô xám, không đặt được (giống web).
+.fr__cell--off {
+  background: var(--vm-surface-2);
+}
+// Bận / người khác đặt (đỏ nhạt).
+.fr__cell--busy {
+  background: #fef3f2;
+}
+// Của bạn / được mời (xanh lá nhạt).
+.fr__cell--mine {
+  background: #ecfdf3;
+}
+// Đang chờ phòng phản hồi (vàng nhạt).
+.fr__cell--pending {
+  background: #fffaeb;
+}
+
+// --- Trạng thái tải / lỗi / rỗng ---
+.fr__state {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px;
+  color: var(--vm-muted);
+  font-size: 14px;
+  text-align: center;
+}
+.fr__retry {
+  padding: 8px 20px;
+  border: 1px solid var(--vm-blue);
+  border-radius: 999px;
+  background: none;
+  color: var(--vm-blue);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+// --- Nút đặt phòng (đáy) ---
+.fr__actions {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 16px calc(24px + var(--zaui-safe-area-inset-bottom, 0px));
+  background: var(--vm-surface);
+  border-top: 1px solid var(--vm-separator);
+}
+// State đã chọn: cụm phòng + cụm giờ, căn giữa, cách nhau 24px (Figma 381-32278).
+.fr__actions-info {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  width: 100%;
+}
+.fr__info-item {
+  flex: 0 0 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.fr__info-icon {
+  flex: none;
+  color: var(--vm-blue); // globe/clock tô accent 0068FF
+}
+.fr__info-text {
+  min-width: 0;
+  font-size: 14px;
+  line-height: 18px;
+  color: #344054;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+// State chưa chọn: dòng gợi ý căn giữa.
+.fr__actions-hint {
+  font-size: 14px;
+  line-height: 18px;
+  color: #344054;
+  text-align: center;
+}
+.fr__book-btn {
+  height: 48px;
+  border: none;
+  border-radius: 100px;
+  background: var(--vm-blue);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 500;
   cursor: pointer;
 }

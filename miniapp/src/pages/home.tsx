@@ -12,6 +12,7 @@ import ArrowsRotateRight from "@gravity-ui/icons/ArrowsRotateRight";
 import favicon from "@/static/favicon-white.png";
 import MeetingDetail from "@/components/meeting-detail";
 import BookingModal from "@/components/booking-modal";
+import FindRoom from "@/pages/find-room";
 import { useDisplayName } from "@/services/auth";
 import { api, AuthError } from "@/services/api";
 import type { FreeRoom, FreeRoomsResponse, UpcomingEvent } from "@/types";
@@ -61,11 +62,18 @@ export default function HomePage() {
   const [roomsLoaded, setRoomsLoaded] = useState(false);
   // Mở màn "Chi tiết lịch họp" (overlay push từ phải).
   const [detailOpen, setDetailOpen] = useState(false);
+  // Mở màn "Tìm phòng" (overlay push từ phải).
+  const [findOpen, setFindOpen] = useState(false);
   // Phòng đang chọn để đặt (mở BookingModal).
   const [selectedRoom, setSelectedRoom] = useState<FreeRoom | null>(null);
 
   const actions = [
-    { key: "find", label: "Tìm phòng", Icon: Magnifier, onClick: undefined },
+    {
+      key: "find",
+      label: "Tìm phòng",
+      Icon: Magnifier,
+      onClick: () => setFindOpen(true),
+    },
     { key: "scout", label: "Săn phòng", Icon: Binoculars, onClick: undefined },
     { key: "direction", label: "Chỉ đường", Icon: MapPin, onClick: undefined },
     { key: "chatbot", label: "Chatbot", Icon: Comment, onClick: openChatbot },
@@ -330,6 +338,8 @@ export default function HomePage() {
       {detailOpen && event && (
         <MeetingDetail event={event} onClose={() => setDetailOpen(false)} />
       )}
+
+      {findOpen && <FindRoom onClose={() => setFindOpen(false)} />}
 
       {selectedRoom && freeRooms && (
         <BookingModal

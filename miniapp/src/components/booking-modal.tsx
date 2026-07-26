@@ -4,17 +4,28 @@ import { Button, Input, useSnackbar } from "zmp-ui";
 import ChevronLeft from "@gravity-ui/icons/ChevronLeft";
 import MapPin from "@gravity-ui/icons/MapPin";
 import Check from "@gravity-ui/icons/Check";
+import CircleInfo from "@gravity-ui/icons/CircleInfo";
 
 import { api, AuthError, LinkRequiredError } from "@/services/api";
 import { useSwipeBack } from "@/hooks/use-swipe-back";
 import { useDisplayName } from "@/services/auth";
 import type { FreeRoom } from "@/types";
 
+// Chú thích cho booking hẹn giờ (scheduled) — copy nguyên văn từ bản web
+// (frontend/lib/i18n.ts: booking.scheduleInfo1 / scheduleInfo2).
+const SCHEDULE_INFO_1 =
+  "Hệ thống sẽ tự động đặt vào lúc 12:00 đêm. Tuy nhiên, do nhu cầu sử dụng cao và số lượng phòng có hạn nên kết quả đặt phòng sẽ không được đảm bảo.";
+const SCHEDULE_INFO_2 =
+  "Để đảm bảo tính công bằng, mỗi người chỉ được có 1 lịch hẹn giờ đặt phòng đang chờ xử lý tại một thời điểm, với thời lượng đặt tối đa 3 tiếng.";
+
 type Props = {
   room: FreeRoom;
   date: string; // ISO yyyy-mm-dd của ngày đang đặt (freeRooms.day)
   onClose: () => void;
   onBooked?: () => void;
+  // true = ngày ngoài cửa sổ Graph → đặt hẹn giờ (scheduled), backend tự đặt lúc
+  // 00:00 ngày mục tiêu. Đổi tiêu đề/chú thích/màn thành công cho phù hợp.
+  schedule?: boolean;
 };
 
 function roomLocation(room: FreeRoom): string {
@@ -28,7 +39,13 @@ function roomLocation(room: FreeRoom): string {
 // swipe-back. Trường giờ (bắt đầu/kết thúc) bị disabled. Dùng ZaUI Input +
 // Input.TextArea. Đặt thành công → hiện màn "Đặt phòng thành công" (317-32951),
 // màn này KHÔNG có nút back nên KHÔNG swipe-back được.
-export default function BookingModal({ room, date, onClose, onBooked }: Props) {
+export default function BookingModal({
+  room,
+  date,
+  onClose,
+  onBooked,
+  schedule = false,
+}: Props) {
   const displayName = useDisplayName();
   const { openSnackbar } = useSnackbar();
 
@@ -45,10 +62,11 @@ export default function BookingModal({ room, date, onClose, onBooked }: Props) {
     return () => cancelAnimationFrame(id);
   }, []);
 
-  // Tự điền tiêu đề "Cuộc họp của <tên>".
+  // Tự điền tiêu đề. Hẹn giờ → "Cuộc họp đã lên lịch của <tên>".
   useEffect(() => {
-    setSubject(displayName ? `Cuộc họp của ${displayName}` : "Cuộc họp");
-  }, [displayName]);
+    const prefix = schedule ? "Cuộc họp đã lên lịch" : "Cuộc họp";
+    setSubject(displayName ? `${prefix} của ${displayName}` : prefix);
+  }, [displayName, schedule]);
 
   function handleClose() {
     if (loading) return;
@@ -114,7 +132,15 @@ export default function BookingModal({ room, date, onClose, onBooked }: Props) {
     <div
       className={`booking-modal${entered && !leaving ? " is-open" : ""}`}
       role="dialog"
-      aria-label={booked ? "Đặt phòng thành công" : "Đặt phòng họp"}
+      aria-label={
+        booked
+          ? schedule
+            ? "Đã tạo lịch hẹn giờ"
+            : "Đặt phòng thành công"
+          : schedule
+            ? "Hẹn giờ đặt phòng"
+            : "Đặt phòng họp"
+      }
       {...(booked ? {} : swipeBack)}
     >
       {booked ? (
@@ -125,9 +151,13 @@ export default function BookingModal({ room, date, onClose, onBooked }: Props) {
               <Check width={40} height={40} />
             </div>
             <div className="booking-success__text">
-              <div className="booking-success__title">Đặt phòng thành công</div>
+              <div className="booking-success__title">
+                {schedule ? "Đã tạo lịch hẹn giờ" : "Đặt phòng thành công"}
+              </div>
               <div className="booking-success__subtitle">
-                Vui lòng kiểm tra lại lịch trong Outlook
+                {schedule
+                  ? "Hệ thống sẽ tự động đặt vào 12:00 đêm. Vui lòng kiểm tra lại lịch trong Outlook sau đó."
+                  : "Vui lòng kiểm tra lại lịch trong Outlook"}
               </div>
             </div>
           </div>
@@ -149,7 +179,9 @@ export default function BookingModal({ room, date, onClose, onBooked }: Props) {
             >
               <ChevronLeft width={24} height={24} />
             </button>
-            <span className="mtg-detail__header-title">Đặt phòng họp</span>
+            <span className="mtg-detail__header-title">
+              {schedule ? "Hẹn giờ đặt phòng" : "Đặt phòng họp"}
+            </span>
           </header>
 
           <div className="booking-modal__scroll">
@@ -172,6 +204,10 @@ export default function BookingModal({ room, date, onClose, onBooked }: Props) {
                 )}
               </div>
             </div>
+
+            {schedule && (
+              <div className="booking-modal__sched-note">{SCHEDULE_INFO_1}</div>
+            )}
 
             <div className="booking-modal__form">
               <Input
@@ -210,6 +246,13 @@ export default function BookingModal({ room, date, onClose, onBooked }: Props) {
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
               />
+
+              {schedule && (
+                <div className="booking-modal__sched-info">
+                  <CircleInfo width={16} height={16} />
+                  <span>{SCHEDULE_INFO_2}</span>
+                </div>
+              )}
             </div>
           </div>
 

@@ -5,6 +5,8 @@ import type {
   ChatMessage,
   ChatThread,
   FreeRoomsResponse,
+  MeResponse,
+  ScheduleResponse,
   UpcomingEvent,
 } from "@/types";
 
@@ -71,6 +73,10 @@ export const api = {
     return res.json();
   },
 
+  // Hồ sơ người dùng (office, phòng ưa thích...) — dùng để lọc phòng theo toà và
+  // đánh dấu phòng ưa thích ở màn "Tìm phòng". Dùng chung /api/auth/me với web.
+  me: () => request<MeResponse>("/auth/me"),
+
   // Lịch sắp tới cho Home: booking thành công & gần nhất trong tương lai.
   // { event: null } khi không có → frontend ẩn section.
   upcomingBooking: () =>
@@ -79,6 +85,16 @@ export const api = {
   // Phòng trống hôm nay (đủ 6 mốc thời lượng trong 1 lần gọi). Chỉ gọi khi mở
   // app / bấm làm mới.
   freeRoomsToday: () => request<FreeRoomsResponse>("/rooms/free-today"),
+
+  // Lưới lịch phòng cho màn "Tìm phòng" — dùng CHUNG endpoint với web
+  // (/api/availability, đọc từ cache Supabase). API_BASE đã có sẵn "/api".
+  // days = số ngày muốn xem tính từ hôm nay; emails rỗng = mọi phòng đang dùng.
+  availability: (days: number, emails?: string) =>
+    request<ScheduleResponse>(
+      `/availability?days=${days}${
+        emails ? `&emails=${encodeURIComponent(emails)}` : ""
+      }`,
+    ),
 
   // Đặt phòng (instant). booking_type do backend tự quyết theo ngày, gửi "instant"
   // cho phòng trống hôm nay/ngày mai. attendees là danh sách username (BE tự thêm
