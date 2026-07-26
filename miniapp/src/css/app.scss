@@ -651,6 +651,28 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
   line-height: 24px;
 }
 
+// Tab lọc theo thời gian (Tất cả / Sắp tới / Đã qua) — dải trắng dưới header.
+.history__tabs {
+  display: flex;
+  gap: 8px;
+  padding: 12px;
+  background: var(--vm-surface);
+}
+.history-tab {
+  padding: 6px 16px;
+  border: none;
+  border-radius: 999px;
+  background: var(--vm-surface-2);
+  color: var(--vm-ink);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.history-tab.is-active {
+  background: var(--vm-accent-soft-bg);
+  color: var(--vm-accent-soft-fg);
+}
+
 // Danh sách thẻ: các thẻ trắng tràn hết bề ngang, cách nhau 12px trên nền xám.
 .history__list {
   display: flex;
@@ -733,9 +755,13 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
   background: rgba(245, 158, 11, 0.15);
   color: #b45309;
 }
-.history-chip--cancelled {
+.history-chip--failed {
   background: rgba(240, 68, 56, 0.15);
   color: #b42318;
+}
+.history-chip--canceled {
+  background: rgba(113, 113, 122, 0.15);
+  color: #52525b;
 }
 
 // --- Empty state ---
@@ -1134,6 +1160,49 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
   // grid-template-columns đặt inline theo số phòng.
   width: max-content;
   min-width: 100%;
+  position: relative; // mốc cho thanh "now" định vị tuyệt đối
+}
+
+// --- Thanh "now" (mốc giờ hiện tại) ---
+.fr__now {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 1; // trên ô lịch, dưới header (header z ≥ 2 → che khi trùng)
+  display: flex;
+  align-items: center;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+// Ô nhãn giờ (sticky trái). Không nền vuông nữa — viên tự có viền trắng.
+.fr__now-gutter {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  box-sizing: border-box;
+  flex: none;
+  width: var(--fr-time-col);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 6px;
+}
+.fr__now-pill {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--vm-blue);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  white-space: nowrap;
+  // Viền trắng phía ngoài, bám theo bo góc của viên (thay cho nền vuông).
+  box-shadow: 0 0 0 2px #fff;
+}
+.fr__now-line {
+  flex: 1 1 auto;
+  height: 2px;
+  background: var(--vm-blue);
 }
 
 // Ô góc trên-trái ("Giờ") — sticky cả hai chiều.

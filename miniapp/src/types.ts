@@ -35,21 +35,34 @@ export interface FreeRoomsResponse {
   byDuration: Record<string, FreeRoom[]>;
 }
 
-// Trạng thái một lượt đặt phòng trong lịch sử.
-export type BookingStatus = "success" | "pending" | "cancelled";
+// Trạng thái một lượt đặt phòng — khớp status của backend (user_activity).
+export type BookingStatus =
+  | "success"
+  | "ok"
+  | "pending"
+  | "failed"
+  | "canceled";
 
-// Một dòng trong tab "Lịch sử đặt phòng" (Figma 346-1292). Hiện là mock (chưa
-// nối BE) nhưng đã đúng shape để sau này map thẳng từ API lịch sử booking.
+// Một dòng trong tab "Lịch sử đặt phòng" (Figma 346-1292) — khớp item trả về từ
+// GET /api/bookings (đã được backend bổ sung location/image/office/map).
 export interface BookingHistoryItem {
   id: string;
-  title: string; // vd "Cuộc họp của cuongdm4"
-  status: BookingStatus;
-  office?: string | null; // vd "Amsterdam"
+  room_email?: string | null;
+  room_name?: string | null; // vd "Amsterdam"
   date: string; // ISO yyyy-mm-dd
-  start_time: string; // HH:MM
-  end_time: string; // HH:MM
+  start_time: string; // HH:MM(:SS)
+  end_time: string; // HH:MM(:SS)
+  booking_type?: "instant" | "scheduled" | "scout";
+  method?: "manual" | "chatbot";
+  subject?: string | null; // tiêu đề cuộc họp (vd "Cuộc họp của cuongdm4")
+  attendees?: string[] | null;
+  body?: string | null;
+  status: BookingStatus;
+  // backend enrich thêm để dựng card + màn chi tiết:
   location?: string | null; // vd "Tầng 3 - Toà V1"
   image?: string | null; // thumbnail_link của phòng
+  office?: string | null; // vd "Campus" (subtitle màn chi tiết)
+  map?: string | null; // map_link — ảnh sơ đồ chỉ đường
 }
 
 // --- Lưới lịch phòng (màn "Tìm phòng") — khớp GET /api/availability của backend,

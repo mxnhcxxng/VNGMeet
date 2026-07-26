@@ -2,6 +2,7 @@ import { API_BASE } from "@/config";
 import { clearToken, getToken } from "@/services/auth";
 import type { PhoneGrant } from "@/services/phone";
 import type {
+  BookingHistoryItem,
   ChatMessage,
   ChatThread,
   FreeRoomsResponse,
@@ -81,6 +82,11 @@ export const api = {
   // { event: null } khi không có → frontend ẩn section.
   upcomingBooking: () =>
     request<{ event: UpcomingEvent | null }>("/bookings/upcoming"),
+
+  // Lịch sử đặt phòng của chính user (backend suy owner từ token) — dùng chung
+  // GET /api/bookings với web; backend đã bổ sung location/image/office/map.
+  bookingHistory: () =>
+    request<{ bookings: BookingHistoryItem[] }>("/bookings"),
 
   // Phòng trống hôm nay (đủ 6 mốc thời lượng trong 1 lần gọi). Chỉ gọi khi mở
   // app / bấm làm mới.

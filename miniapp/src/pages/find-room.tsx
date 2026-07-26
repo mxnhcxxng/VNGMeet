@@ -16,8 +16,10 @@ import type { FreeRoom, ScheduleResponse, ScheduleRoom } from "@/types";
 // Số ngày nạp về — khớp RANGE_DAYS của web (today .. today+15, tới ~10/8).
 const DAYS = 16;
 // Chiều cao 1 hàng giờ (px) — phải KHỚP --fr-row-h trong app.scss (dùng cho
-// auto-scroll về khung giờ làm việc).
+// auto-scroll về khung giờ làm việc + định vị thanh "now").
 const ROW_H = 44;
+// Chiều cao hàng tiêu đề phòng (px) — phải KHỚP --fr-head-h trong app.scss.
+const HEAD_H = 52;
 // Booking hẹn giờ (scheduled) tối đa 3 tiếng — backend chặn quá mốc này, nên
 // giới hạn luôn khi kéo chọn ở ngày scheduled (khớp web).
 const SCHED_MAX_MINUTES = 3 * 60;
@@ -282,6 +284,13 @@ export default function FindRoom({ onClose }: Props) {
     return Array.from({ length: count }, (_, i) => minutesToLabel(i * slotMinutes));
   }, [slotMinutes]);
 
+  // Thanh "now": chỉ hiện khi đang xem hôm nay. Vị trí = tiêu đề + số phút từ
+  // 0h quy ra pixel (mỗi slot cao ROW_H). Cập nhật theo `now` (mỗi phút).
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+  const showNow = !!data && data.days[dayIndex] === localIso(now);
+  const nowLabel = minutesToLabel(nowMinutes);
+  const nowTop = HEAD_H + (nowMinutes / slotMinutes) * ROW_H;
+
   // Phòng: lọc theo office của user, rồi xếp theo sort thông minh (port từ web).
   const rooms = useMemo(() => {
     if (!data) return [];
@@ -335,16 +344,18 @@ export default function FindRoom({ onClose }: Props) {
   // grid-template-columns: cột giờ cố định + N cột phòng.
   const gridCols = `var(--fr-time-col) repeat(${rooms.length}, var(--fr-room-col))`;
 
-  // Auto-scroll về đầu khung giờ làm việc (1 hàng trước slot đầu) khi mở lần đầu.
+  // Auto-scroll khi mở lần đầu (khớp web): trước 13h neo ở ~9h, từ 13h trở đi neo
+  // ở ~13h. Cuộn tới 1 hàng trước mốc neo để có chút ngữ cảnh phía trên.
   useEffect(() => {
     if (loading || didAutoScroll.current || !data || rooms.length === 0) return;
     const el = gridWrapRef.current;
     if (!el) return;
-    const firstBusiness = data.times[0];
-    const idx = firstBusiness ? allTimes.indexOf(firstBusiness) : -1;
-    if (idx > 0) el.scrollTop = Math.max(0, (idx - 1) * ROW_H);
+    const cur = now.getHours() * 60 + now.getMinutes();
+    const anchorMinutes = cur < 13 * 60 ? 9 * 60 : 13 * 60;
+    const anchorBlock = Math.floor(anchorMinutes / slotMinutes);
+    el.scrollTop = Math.max(0, (anchorBlock - 1) * ROW_H);
     didAutoScroll.current = true;
-  }, [loading, data, rooms.length, allTimes]);
+  }, [loading, data, rooms.length, slotMinutes, now]);
 
   // Bấm 1 ô trống (business index bi): chọn từng ô, nối/bỏ theo mép khoảng chọn.
   // Không còn guard delay — double-tap đã tắt bằng touch-action ở toàn màn.
@@ -535,6 +546,16 @@ export default function FindRoom({ onClose }: Props) {
                   />
                 );
               })}
+
+              {/* Thanh "now" — nhãn giờ sticky trái + đường ngang xuyên các cột */}
+              {showNow && (
+                <div className="fr__now" style={{ top: nowTop }} aria-hidden>
+                  <div className="fr__now-gutter">
+                    <span className="fr__now-pill">{nowLabel}</span>
+                  </div>
+                  <span className="fr__now-line" />
+                </div>
+              )}
             </div>
           </div>
         )}

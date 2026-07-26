@@ -522,7 +522,19 @@ async def list_my_bookings(request: Request, background_tasks: BackgroundTasks):
     auth token via `_booking_auth_context` — the client never supplies it — so a
     user can only ever read their own rows and cannot peek at someone else's data.
     """
-    token, _auth_user_id, user_profile_id, _email = await _booking_auth_context(request)
+    # Đọc lịch sử chỉ cần DANH TÍNH, không bắt buộc Graph token. Trước đây dùng
+    # _booking_auth_context → get_graph_token → 401 cho user Zalo chưa liên kết
+    # Microsoft, khiến Mini App tưởng hết phiên và đăng nhập lại (loop). Vẫn thử
+    # lấy token để self-heal (best-effort); không có thì bỏ qua, vẫn trả lịch sử.
+    token: str | None = None
+    try:
+        token, _auth_user_id, user_profile_id, _email = await _booking_auth_context(
+            request
+        )
+    except HTTPException:
+        _auth_user_id, _email = _request_identity(request)
+        profile = _read_user_profile(None, (_email or "").strip().lower())
+        user_profile_id = profile.get("id") if profile else None
     if not user_profile_id or not settings.supabase_enabled:
         return {"bookings": []}
 
@@ -567,6 +579,17 @@ async def list_my_bookings(request: Request, background_tasks: BackgroundTasks):
         query = query.order("created_at", desc=True)
 
     rows = query.limit(200).execute().data or []
+
+    # Bổ sung metadata phòng (ảnh / vị trí / office / map) cho mỗi dòng để Mini App
+    # dựng card lịch sử + màn "Chi tiết lịch họp" mà không phải gọi thêm API. Web
+    # bỏ qua các field thừa này nên không ảnh hưởng.
+    meta_by_email = _room_metadata()
+    for r in rows:
+        meta = meta_by_email.get((r.get("room_email") or "").strip().lower())
+        r["location"] = _format_room_location(meta)
+        r["image"] = (meta or {}).get("thumbnail_link")
+        r["office"] = (meta or {}).get("office")
+        r["map"] = (meta or {}).get("map_link")
     return {"bookings": rows}
 
 
