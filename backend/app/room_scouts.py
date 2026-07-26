@@ -16,11 +16,11 @@ from pydantic import BaseModel, Field
 from . import auth, availability, graph
 from .app_context import log, settings
 from .bookings import (
-    _decrypt_scheduled_graph_token,
     _encrypt_scheduled_graph_token,
     _log_user_booking_activity,
     _mark_room_availability_owner,
     _release_room_availability_owner,
+    resolve_background_graph_token,
 )
 from .chat import _effective_capacity_size
 from .models import BookingRequest
@@ -313,10 +313,11 @@ def _room_scout_email_body(scout: dict, rooms: list[dict], day: str, start_time:
 
 
 async def _room_scout_graph_token(row: dict) -> str:
-    auth_user_id = str(row.get("auth_user_id") or "").strip()
-    if auth_user_id:
-        return await auth.get_graph_token(auth_user_id)
-    return _decrypt_scheduled_graph_token(row.get("graph_access_token"))
+    return await resolve_background_graph_token(
+        row.get("auth_user_id"),
+        row.get("graph_access_token"),
+        user_profile_id=row.get("user_id"),
+    )
 
 
 def _scout_subject(email: str) -> str:

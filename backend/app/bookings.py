@@ -130,6 +130,82 @@ def _decrypt_scheduled_graph_token(value: object) -> str:
         raise RuntimeError("could not decrypt scheduled Graph token") from e
 
 
+def _pooled_email_for(
+    user_profile_id: str | None, auth_user_id: str | None
+) -> str | None:
+    """Best-effort email của user để fallback token pool khớp theo email khi pool
+    row được key bằng id khác với id ta đang có. Không bao giờ khớp user khác."""
+    if not settings.supabase_enabled:
+        return None
+    try:
+        from .supabase_client import get_supabase
+
+        sb = get_supabase()
+        for column, value in (("id", user_profile_id), ("auth_user_id", auth_user_id)):
+            if not value:
+                continue
+            rows = (
+                sb.table("user_profiles")
+                .select("email")
+                .eq(column, value)
+                .limit(1)
+                .execute()
+                .data
+                or []
+            )
+            if rows and rows[0].get("email"):
+                return rows[0]["email"]
+    except Exception as e:  # noqa: BLE001 - fallback lookup must never break the job
+        log.warning("could not look up email for pool fallback: %s", e)
+    return None
+
+
+async def resolve_background_graph_token(
+    auth_user_id: str | None,
+    stored_encrypted: object,
+    *,
+    user_profile_id: str | None = None,
+) -> str:
+    """Graph token cho tác vụ chạy nền (scheduled booking / room scout).
+
+    Cùng fallback với luồng đặt phòng trực tiếp (``_booking_auth_context``):
+      1) OAuth refresh qua ``get_graph_token(auth_user_id)``.
+      2) Gặp 401 (user CHƯA link Microsoft — vd profile Zalo đăng nhập bằng SĐT rồi
+         paste Graph token) → dùng token pool ACTIVE của CHÍNH user này
+         (auth_user_id → profile id → email). KHÔNG BAO GIỜ mượn token user khác.
+      3) Token đã lưu trên row lúc tạo tác vụ (paste token, có thể đã hết hạn).
+
+    Ném lại 401/RuntimeError khi không còn token nào dùng được — để job đánh dấu
+    booking/scout đó lỗi thay vì âm thầm bỏ qua.
+    """
+    auth_user_id = str(auth_user_id or "").strip()
+    user_profile_id = str(user_profile_id or "").strip() or None
+    if auth_user_id:
+        try:
+            return await auth.get_graph_token(auth_user_id)
+        except HTTPException as e:
+            if e.status_code != 401:
+                raise
+            from .token_pool import get_active_token
+
+            email = _pooled_email_for(user_profile_id, auth_user_id)
+            pooled = (
+                get_active_token(auth_user_id, None)
+                or (get_active_token(user_profile_id, None) if user_profile_id else None)
+                or get_active_token(None, email)
+            )
+            if pooled:
+                return pooled
+            stored = _decrypt_scheduled_graph_token(stored_encrypted)
+            if stored:
+                return stored
+            raise
+    stored = _decrypt_scheduled_graph_token(stored_encrypted)
+    if not stored:
+        raise RuntimeError("missing graph access token")
+    return stored
+
+
 def _update_pending_scheduled_graph_token(
     graph_access_token: str,
     *,
@@ -1140,10 +1216,11 @@ async def prepare_scheduled_bookings() -> int:
         try:
             payload = _activity_to_booking_request(row)
             item["payload"] = payload
-            if item["auth_user_id"]:
-                token = await auth.get_graph_token(item["auth_user_id"])
-            else:
-                token = _decrypt_scheduled_graph_token(row.get("graph_access_token"))
+            token = await resolve_background_graph_token(
+                item["auth_user_id"],
+                row.get("graph_access_token"),
+                user_profile_id=item["user_profile_id"],
+            )
             if not token:
                 raise RuntimeError("missing graph access token")
             item["token"] = token
@@ -1387,12 +1464,13 @@ async def process_scheduled_bookings() -> dict:
         )
 
         try:
-            if not auth_user_id:
-                token = _decrypt_scheduled_graph_token(row.get("graph_access_token"))
-                if not token:
-                    raise RuntimeError("missing graph access token")
-            else:
-                token = await auth.get_graph_token(auth_user_id)
+            token = await resolve_background_graph_token(
+                auth_user_id,
+                row.get("graph_access_token"),
+                user_profile_id=user_profile_id,
+            )
+            if not token:
+                raise RuntimeError("missing graph access token")
             start_iso = f"{payload.date}T{payload.start_time}:00"
             end_iso = f"{payload.date}T{payload.end_time}:00"
             ev = await graph.create_event(
