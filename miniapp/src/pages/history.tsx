@@ -7,25 +7,29 @@ import ClockArrowRotateLeft from "@gravity-ui/icons/ClockArrowRotateLeft";
 
 import MeetingDetail from "@/components/meeting-detail";
 import { api, AuthError } from "@/services/api";
+import { useT } from "@/services/settings";
+import type { TranslationKey } from "@/services/i18n";
 import type { BookingHistoryItem, BookingStatus, UpcomingEvent } from "@/types";
 
-// Nhãn + class màu chip trạng thái — khớp label & màu bản web (frontend
+// Key dịch nhãn + class màu chip trạng thái — khớp màu bản web (frontend
 // BookingHistory: success=xanh lá, ok/pending=vàng, failed=đỏ, canceled=xám).
-const STATUS_META: Record<BookingStatus, { label: string; className: string }> =
-  {
-    success: { label: "Thành công", className: "history-chip--success" },
-    ok: { label: "Chờ phản hồi", className: "history-chip--pending" },
-    pending: { label: "Đang chờ", className: "history-chip--pending" },
-    failed: { label: "Thất bại", className: "history-chip--failed" },
-    canceled: { label: "Đã hủy", className: "history-chip--canceled" },
-  };
+const STATUS_META: Record<
+  BookingStatus,
+  { labelKey: TranslationKey; className: string }
+> = {
+  success: { labelKey: "status.success", className: "history-chip--success" },
+  ok: { labelKey: "status.awaiting", className: "history-chip--pending" },
+  pending: { labelKey: "status.pending", className: "history-chip--pending" },
+  failed: { labelKey: "status.failed", className: "history-chip--failed" },
+  canceled: { labelKey: "status.canceled", className: "history-chip--canceled" },
+};
 
 // Bộ lọc theo thời gian (Figma 346-1292): tất cả / sắp tới / đã qua.
 type TabKey = "all" | "upcoming" | "past";
-const TABS: { key: TabKey; label: string }[] = [
-  { key: "all", label: "Tất cả" },
-  { key: "upcoming", label: "Sắp tới" },
-  { key: "past", label: "Đã qua" },
+const TABS: { key: TabKey; labelKey: TranslationKey }[] = [
+  { key: "all", labelKey: "history.all" },
+  { key: "upcoming", labelKey: "history.upcoming" },
+  { key: "past", labelKey: "history.past" },
 ];
 
 // "2026-07-22" -> "22/7" (khớp Figma: bỏ số 0 ở đầu, 1 dấu gạch).
@@ -67,6 +71,7 @@ function toEvent(item: BookingHistoryItem): UpcomingEvent {
 // Tab "Lịch sử đặt phòng" (Figma 346-1292): header xanh + tab lọc + danh sách
 // thẻ lịch sử (nối BE qua GET /api/bookings). Bấm 1 thẻ → màn chi tiết lịch họp.
 export default function HistoryPage() {
+  const t = useT();
   const [items, setItems] = useState<BookingHistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -97,7 +102,7 @@ export default function HistoryPage() {
   return (
     <div className="history">
       <header className="history__header">
-        <span className="history__header-title">Lịch sử đặt phòng</span>
+        <span className="history__header-title">{t("history.title")}</span>
       </header>
 
       <div className="history__tabs">
@@ -108,7 +113,7 @@ export default function HistoryPage() {
             className={`history-tab${tab === tabItem.key ? " is-active" : ""}`}
             onClick={() => setTab(tabItem.key)}
           >
-            {tabItem.label}
+            {t(tabItem.labelKey)}
           </button>
         ))}
       </div>
@@ -129,16 +134,16 @@ export default function HistoryPage() {
       ) : error ? (
         <div className="history__empty">
           <ClockArrowRotateLeft width={40} height={40} />
-          <div className="history__empty-title">Không tải được lịch sử</div>
+          <div className="history__empty-title">{t("history.loadFailed")}</div>
           <button className="fr__retry" type="button" onClick={() => void load()}>
-            Thử lại
+            {t("common.retry")}
           </button>
         </div>
       ) : filtered.length === 0 ? (
         <div className="history__empty">
           <ClockArrowRotateLeft width={40} height={40} />
-          <div className="history__empty-title">Chưa có lịch sử</div>
-          <div>Các phòng bạn đã đặt sẽ hiển thị ở đây.</div>
+          <div className="history__empty-title">{t("history.empty")}</div>
+          <div>{t("history.emptyHint")}</div>
         </div>
       ) : (
         <div className="history__list">
@@ -162,10 +167,10 @@ export default function HistoryPage() {
                 />
                 <div className="history-card__body">
                   <div className="history-card__title">
-                    {item.subject || "Cuộc họp"}
+                    {item.subject || t("common.meeting")}
                   </div>
                   <span className={`history-chip ${status.className}`}>
-                    {status.label}
+                    {t(status.labelKey)}
                   </span>
                   <div className="history-card__info">
                     {item.room_name && (

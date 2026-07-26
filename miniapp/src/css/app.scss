@@ -1435,3 +1435,239 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
   font-weight: 500;
   cursor: pointer;
 }
+
+// ===================================================================
+// Tab Tài khoản = màn Cài đặt (giao diện + ngôn ngữ)
+// ===================================================================
+.settings {
+  min-height: 100%;
+  background: var(--vm-page, #f9fafb);
+  padding-bottom: calc(64px + 40px + var(--zaui-safe-area-inset-bottom, 0px));
+}
+.settings__header {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  height: 44px;
+  box-sizing: content-box;
+  padding: var(--zaui-safe-area-inset-top, 0px) 12px 0 12px;
+  background: var(--vm-blue);
+}
+.settings__header-title {
+  color: #fff;
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 24px;
+}
+.settings__scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+}
+
+// --- Hồ sơ ---
+.settings__profile {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px;
+  border-radius: 12px;
+  background: var(--vm-surface);
+}
+.settings__avatar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 999px;
+  background: var(--vm-accent-soft-bg);
+  color: var(--vm-accent-soft-fg);
+}
+.settings__profile-info {
+  min-width: 0;
+}
+.settings__name {
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 22px;
+  color: var(--vm-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.settings__email {
+  font-size: 14px;
+  line-height: 18px;
+  color: var(--vm-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+// --- Section chung ---
+.settings__section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 12px;
+  background: var(--vm-surface);
+}
+.settings__section-title {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 20px;
+  color: var(--vm-ink);
+}
+.settings__section-desc {
+  margin-top: 2px;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--vm-muted);
+}
+
+// --- Giao diện: 3 thẻ (Hệ thống / Sáng / Tối) ---
+.settings__theme-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.settings__theme-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 8px;
+  border: 1.5px solid var(--vm-separator);
+  border-radius: 12px;
+  background: var(--vm-surface-2);
+  color: var(--vm-ink);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.settings__theme-card:disabled {
+  opacity: 0.6;
+}
+.settings__theme-card.is-active {
+  border-color: var(--vm-blue);
+  background: var(--vm-accent-soft-bg);
+  color: var(--vm-accent-soft-fg);
+}
+.settings__theme-label {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 16px;
+  text-align: center;
+}
+
+// --- Ngôn ngữ: danh sách chọn ---
+.settings__lang-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.settings__lang-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1.5px solid var(--vm-separator);
+  border-radius: 12px;
+  background: var(--vm-surface-2);
+  color: var(--vm-ink);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.settings__lang-row:disabled {
+  opacity: 0.6;
+}
+.settings__lang-row.is-active {
+  border-color: var(--vm-blue);
+  background: var(--vm-accent-soft-bg);
+}
+.settings__lang-flag {
+  font-size: 20px;
+  line-height: 1;
+}
+.settings__lang-label {
+  flex: 1 1 auto;
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 20px;
+}
+.settings__lang-check {
+  flex: none;
+  color: var(--vm-blue);
+}
+.settings__lang-globe {
+  flex: none;
+  color: var(--vm-muted);
+}
+
+// ===================================================================
+// Dark mode — ZaUI đặt thuộc tính [zaui-theme="dark"] trên <body> (do
+// SettingsProvider điều khiển). Ghi đè biến màu + vài mặt phẳng/chữ hardcode.
+// ===================================================================
+body[zaui-theme="dark"] {
+  --vm-ink: #f5f5f7;
+  --vm-muted: #9a9aa2;
+  --vm-separator: #2a2c33;
+  --vm-surface: #16171b;
+  --vm-surface-2: #202127;
+  --vm-accent-soft-bg: rgba(0, 104, 255, 0.22);
+  --vm-accent-soft-fg: #6ba7ff;
+  --vm-page: #0e0f12;
+
+  // Nền trang (đang hardcode #f9fafb) → gần đen.
+  .history,
+  .mtg-detail,
+  .fr {
+    background: var(--vm-page);
+  }
+  .section-container {
+    background: var(--vm-surface);
+  }
+
+  // Chữ tối trên thẻ trắng (hardcode #344054) → sáng lại.
+  .history-card__title,
+  .fr__corner,
+  .fr__rhead-name,
+  .fr__time,
+  .fr__info-text {
+    color: var(--vm-ink);
+  }
+  .history-card__row,
+  .fr__actions-hint {
+    color: var(--vm-muted);
+  }
+
+  // Ô lưới trạng thái (đang là màu pastel sáng) → nền tối có ám màu.
+  .fr__cell--busy {
+    background: rgba(240, 68, 56, 0.16);
+  }
+  .fr__cell--mine {
+    background: rgba(22, 179, 100, 0.16);
+  }
+  .fr__cell--pending {
+    background: rgba(245, 158, 11, 0.16);
+  }
+
+  // Chip trạng thái lịch sử: giữ nền ám, làm chữ sáng cho dễ đọc.
+  .history-chip--success {
+    color: #4ade80;
+  }
+  .history-chip--pending {
+    color: #fbbf24;
+  }
+  .history-chip--failed {
+    color: #f87171;
+  }
+  .history-chip--canceled {
+    color: #a1a1aa;
+  }
+}

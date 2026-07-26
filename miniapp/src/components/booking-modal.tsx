@@ -9,14 +9,9 @@ import CircleInfo from "@gravity-ui/icons/CircleInfo";
 import { api, AuthError, LinkRequiredError } from "@/services/api";
 import { useSwipeBack } from "@/hooks/use-swipe-back";
 import { useDisplayName } from "@/services/auth";
+import { useT } from "@/services/settings";
+import type { TFunction } from "@/services/i18n";
 import type { FreeRoom } from "@/types";
-
-// Chú thích cho booking hẹn giờ (scheduled) — copy nguyên văn từ bản web
-// (frontend/lib/i18n.ts: booking.scheduleInfo1 / scheduleInfo2).
-const SCHEDULE_INFO_1 =
-  "Hệ thống sẽ tự động đặt vào lúc 12:00 đêm. Tuy nhiên, do nhu cầu sử dụng cao và số lượng phòng có hạn nên kết quả đặt phòng sẽ không được đảm bảo.";
-const SCHEDULE_INFO_2 =
-  "Để đảm bảo tính công bằng, mỗi người chỉ được có 1 lịch hẹn giờ đặt phòng đang chờ xử lý tại một thời điểm, với thời lượng đặt tối đa 3 tiếng.";
 
 type Props = {
   room: FreeRoom;
@@ -28,10 +23,10 @@ type Props = {
   schedule?: boolean;
 };
 
-function roomLocation(room: FreeRoom): string {
+function roomLocation(room: FreeRoom, t: TFunction): string {
   const parts: string[] = [];
-  if (room.floor) parts.push(`Tầng ${room.floor}`);
-  if (room.building) parts.push(`Toà ${room.building}`);
+  if (room.floor) parts.push(t("common.floor", { floor: room.floor }));
+  if (room.building) parts.push(t("common.building", { building: room.building }));
   return parts.join(" - ");
 }
 
@@ -48,6 +43,7 @@ export default function BookingModal({
 }: Props) {
   const displayName = useDisplayName();
   const { openSnackbar } = useSnackbar();
+  const t = useT();
 
   const [entered, setEntered] = useState(false);
   const [leaving, setLeaving] = useState(false);
@@ -64,9 +60,22 @@ export default function BookingModal({
 
   // Tự điền tiêu đề. Hẹn giờ → "Cuộc họp đã lên lịch của <tên>".
   useEffect(() => {
-    const prefix = schedule ? "Cuộc họp đã lên lịch" : "Cuộc họp";
-    setSubject(displayName ? `${prefix} của ${displayName}` : prefix);
-  }, [displayName, schedule]);
+    if (displayName) {
+      setSubject(
+        t(schedule ? "booking.subjectScheduled" : "booking.subjectInstant", {
+          name: displayName,
+        }),
+      );
+    } else {
+      setSubject(
+        t(
+          schedule
+            ? "booking.subjectScheduledNoName"
+            : "booking.subjectInstantNoName",
+        ),
+      );
+    }
+  }, [displayName, schedule, t]);
 
   function handleClose() {
     if (loading) return;
@@ -78,15 +87,15 @@ export default function BookingModal({
   // success (không có nút back).
   const swipeBack = useSwipeBack(handleClose, !booked && !loading);
 
-  const location = roomLocation(room);
+  const location = roomLocation(room, t);
 
   async function submit() {
     if (!subject.trim()) {
-      openSnackbar({ text: "Vui lòng nhập tiêu đề cuộc họp.", type: "warning" });
+      openSnackbar({ text: t("booking.titleRequired"), type: "warning" });
       return;
     }
     if (!room.email) {
-      openSnackbar({ text: "Phòng không hợp lệ.", type: "error" });
+      openSnackbar({ text: t("booking.invalidRoom"), type: "error" });
       return;
     }
     setLoading(true);
@@ -110,19 +119,13 @@ export default function BookingModal({
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       if (e instanceof AuthError) {
-        openSnackbar({
-          text: "Phiên đã hết hạn, đang xác thực lại...",
-          type: "warning",
-        });
+        openSnackbar({ text: t("booking.sessionReauth"), type: "warning" });
       } else if (e instanceof LinkRequiredError || msg.startsWith("403")) {
         // 403 = chưa liên kết Microsoft (backend đã đổi từ 401 sang 403 để không
         // làm miniapp xoá session Zalo + đăng nhập lại).
-        openSnackbar({
-          text: "Tài khoản chưa liên kết Microsoft nên chưa thể đặt phòng. Vui lòng liên kết Microsoft rồi thử lại.",
-          type: "error",
-        });
+        openSnackbar({ text: t("booking.notLinked"), type: "error" });
       } else {
-        openSnackbar({ text: "Đặt phòng thất bại, thử lại nhé.", type: "error" });
+        openSnackbar({ text: t("booking.failed"), type: "error" });
       }
       setLoading(false);
     }
@@ -135,11 +138,11 @@ export default function BookingModal({
       aria-label={
         booked
           ? schedule
-            ? "Đã tạo lịch hẹn giờ"
-            : "Đặt phòng thành công"
+            ? t("booking.successScheduledTitle")
+            : t("booking.successInstantTitle")
           : schedule
-            ? "Hẹn giờ đặt phòng"
-            : "Đặt phòng họp"
+            ? t("booking.scheduledHeader")
+            : t("booking.instantHeader")
       }
       {...(booked ? {} : swipeBack)}
     >
@@ -152,18 +155,20 @@ export default function BookingModal({
             </div>
             <div className="booking-success__text">
               <div className="booking-success__title">
-                {schedule ? "Đã tạo lịch hẹn giờ" : "Đặt phòng thành công"}
+                {schedule
+                  ? t("booking.successScheduledTitle")
+                  : t("booking.successInstantTitle")}
               </div>
               <div className="booking-success__subtitle">
                 {schedule
-                  ? "Hệ thống sẽ tự động đặt vào 12:00 đêm. Vui lòng kiểm tra lại lịch trong Outlook sau đó."
-                  : "Vui lòng kiểm tra lại lịch trong Outlook"}
+                  ? t("booking.successScheduledSub")
+                  : t("booking.successInstantSub")}
               </div>
             </div>
           </div>
           <div className="booking-modal__actions">
             <Button fullWidth onClick={handleClose}>
-              Trở về màn hình chính
+              {t("booking.backHome")}
             </Button>
           </div>
         </div>
@@ -174,13 +179,13 @@ export default function BookingModal({
             <button
               className="mtg-detail__back"
               type="button"
-              aria-label="Quay lại"
+              aria-label={t("common.back")}
               onClick={handleClose}
             >
               <ChevronLeft width={24} height={24} />
             </button>
             <span className="mtg-detail__header-title">
-              {schedule ? "Hẹn giờ đặt phòng" : "Đặt phòng họp"}
+              {schedule ? t("booking.scheduledHeader") : t("booking.instantHeader")}
             </span>
           </header>
 
@@ -206,26 +211,28 @@ export default function BookingModal({
             </div>
 
             {schedule && (
-              <div className="booking-modal__sched-note">{SCHEDULE_INFO_1}</div>
+              <div className="booking-modal__sched-note">
+                {t("booking.scheduleInfo1")}
+              </div>
             )}
 
             <div className="booking-modal__form">
               <Input
-                label="Tiêu đề cuộc họp"
-                placeholder="Nhập tiêu đề cuộc họp"
+                label={t("booking.meetingTitle")}
+                placeholder={t("booking.meetingTitlePlaceholder")}
                 value={subject}
                 onChange={(e) => setSubject(e.target.value)}
               />
 
               <div className="booking-modal__row">
                 <Input
-                  label="Giờ bắt đầu"
+                  label={t("booking.startTime")}
                   value={room.start_time}
                   disabled
                   readOnly
                 />
                 <Input
-                  label="Giờ kết thúc"
+                  label={t("booking.endTime")}
                   value={room.end_time}
                   disabled
                   readOnly
@@ -233,15 +240,15 @@ export default function BookingModal({
               </div>
 
               <Input
-                label="Domain người tham dự"
-                placeholder="VD: cuongdm4, huyennn, anhdt11"
+                label={t("booking.attendees")}
+                placeholder={t("booking.attendeesPlaceholder")}
                 value={attendees}
                 onChange={(e) => setAttendees(e.target.value)}
               />
 
               <Input.TextArea
-                label="Mô tả"
-                placeholder="Mô tả cuộc họp"
+                label={t("booking.description")}
+                placeholder={t("booking.descriptionPlaceholder")}
                 rows={5}
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
@@ -250,7 +257,7 @@ export default function BookingModal({
               {schedule && (
                 <div className="booking-modal__sched-info">
                   <CircleInfo width={16} height={16} />
-                  <span>{SCHEDULE_INFO_2}</span>
+                  <span>{t("booking.scheduleInfo2")}</span>
                 </div>
               )}
             </div>
@@ -258,7 +265,7 @@ export default function BookingModal({
 
           <div className="booking-modal__actions">
             <Button fullWidth onClick={() => void submit()} loading={loading}>
-              Đặt phòng
+              {t("booking.book")}
             </Button>
           </div>
         </>

@@ -9,6 +9,7 @@ import type {
   MeResponse,
   ScheduleResponse,
   UpcomingEvent,
+  UserProfile,
 } from "@/types";
 
 // Ném ra khi backend trả 401 → session token đã bị xoá, Layout sẽ tự authen lại
@@ -77,6 +78,23 @@ export const api = {
   // Hồ sơ người dùng (office, phòng ưa thích...) — dùng để lọc phòng theo toà và
   // đánh dấu phòng ưa thích ở màn "Tìm phòng". Dùng chung /api/auth/me với web.
   me: () => request<MeResponse>("/auth/me"),
+
+  // Cập nhật hồ sơ user — dùng CHUNG PATCH /api/users/me/profile với web. Backend
+  // BẮT BUỘC office hợp lệ, nên payload phải kèm đầy đủ office/floor/building/
+  // preferred_rooms hiện tại; theme/language là phần muốn đổi. Trả hồ sơ mới.
+  updateProfile: (payload: {
+    office: string;
+    floor?: string;
+    building?: string;
+    preferred_rooms?: string[];
+    book_without_confirmation?: boolean;
+    theme?: string;
+    language?: string;
+  }) =>
+    request<{ ok: boolean; profile: UserProfile; profileComplete: boolean }>(
+      "/users/me/profile",
+      { method: "PATCH", body: JSON.stringify(payload) },
+    ),
 
   // Lịch sắp tới cho Home: booking thành công & gần nhất trong tương lai.
   // { event: null } khi không có → frontend ẩn section.

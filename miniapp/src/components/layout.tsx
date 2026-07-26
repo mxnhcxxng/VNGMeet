@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as zmpSdk from "zmp-sdk";
-import { getSystemInfo } from "zmp-sdk";
 import {
   AnimationRoutes,
   App,
@@ -19,6 +18,7 @@ import AppShell from "@/components/app-shell";
 import { setToken, useToken } from "@/services/auth";
 import { api, LinkRequiredError } from "@/services/api";
 import { errText, requestPhoneNumber } from "@/services/phone";
+import { SettingsProvider, useSettings } from "@/services/settings";
 
 type Phase = "authing" | "denied" | "unlinked" | "error";
 
@@ -72,6 +72,7 @@ function clearBotPairParam(): void {
 function Gate() {
   const token = useToken();
   const { openSnackbar } = useSnackbar();
+  const { t } = useSettings();
   const [phase, setPhase] = useState<Phase>("authing");
   const [detail, setDetail] = useState(""); // DEBUG: message lỗi thật
   const running = useRef(false);
@@ -99,7 +100,7 @@ function Gate() {
         }
         setToken(access_token); // → token có giá trị → render app
         if (username) {
-          openSnackbar({ text: `Xin chào ${username}!`, type: "success" });
+          openSnackbar({ text: t("gate.hello", { name: username }), type: "success" });
         }
       } catch (e) {
         // 403 = SĐT chưa liên kết Microsoft (phương án B yêu cầu link trước).
@@ -136,12 +137,12 @@ function Gate() {
       try {
         await api.linkBot(code);
         openSnackbar({
-          text: "Đã liên kết Zalo Bot thành công! Quay lại chat bot để tiếp tục.",
+          text: t("gate.botLinked"),
           type: "success",
         });
       } catch {
         openSnackbar({
-          text: "Liên kết Zalo Bot thất bại. Mã có thể đã hết hạn, thử lại từ bot nhé.",
+          text: t("gate.botLinkFailed"),
           type: "error",
         });
       } finally {
@@ -158,11 +159,9 @@ function Gate() {
 
   // Chưa có token: đang authen, hoặc rơi vào một trạng thái lỗi cần user xử lý.
   const message: Record<Exclude<Phase, "authing">, string> = {
-    denied: "VNGMeet cần số điện thoại của bạn để đăng nhập.",
-    unlinked:
-      "Số điện thoại này chưa được đăng ký trong VNGMeet. " +
-      "Vui lòng liên kết tài khoản Microsoft trước rồi thử lại.",
-    error: "Không kết nối được máy chủ. Vui lòng thử lại.",
+    denied: t("gate.denied"),
+    unlinked: t("gate.unlinked"),
+    error: t("gate.error"),
   };
 
   return (
@@ -170,7 +169,7 @@ function Gate() {
       <Box textAlign="center" className="space-y-4">
         <Text.Title size="large">VNGMeet</Text.Title>
         {phase === "authing" ? (
-          <Text className="text-gray-500">Đang xác thực...</Text>
+          <Text className="text-gray-500">{t("gate.authing")}</Text>
         ) : (
           <>
             <Text className="text-gray-500">{message[phase]}</Text>
@@ -180,9 +179,7 @@ function Gate() {
               </Text>
             )}
             <Button fullWidth onClick={() => void authenticate()}>
-              {phase === "denied"
-                ? "Cho phép chia sẻ số điện thoại"
-                : "Thử lại"}
+              {phase === "denied" ? t("gate.allowPhone") : t("common.retry")}
             </Button>
           </>
         )}
@@ -191,9 +188,14 @@ function Gate() {
   );
 }
 
-const Layout = () => {
+// Bọc <App> để lấy theme đã "giải" (light/dark) từ SettingsProvider làm theme
+// khởi tạo cho ZaUI. SettingsProvider tự set thuộc tính zaui-theme trên <body>
+// mỗi khi đổi theme nên việc chuyển sáng/tối vẫn "sống" dù <App> chỉ đọc prop
+// theme lúc mount.
+function ThemedApp() {
+  const { resolvedTheme } = useSettings();
   return (
-    <App theme={getSystemInfo().zaloTheme as AppProps["theme"]}>
+    <App theme={resolvedTheme as AppProps["theme"]}>
       <SnackbarProvider>
         <ZMPRouter>
           <AnimationRoutes>
@@ -202,6 +204,14 @@ const Layout = () => {
         </ZMPRouter>
       </SnackbarProvider>
     </App>
+  );
+}
+
+const Layout = () => {
+  return (
+    <SettingsProvider>
+      <ThemedApp />
+    </SettingsProvider>
   );
 };
 export default Layout;

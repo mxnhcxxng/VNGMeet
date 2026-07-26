@@ -8,6 +8,7 @@ import Persons from "@gravity-ui/icons/Persons";
 
 import MapModal from "@/components/map-modal";
 import { useSwipeBack } from "@/hooks/use-swipe-back";
+import { useT } from "@/services/settings";
 import type { UpcomingEvent } from "@/types";
 
 // "2026-07-24" -> "24/07"
@@ -36,6 +37,7 @@ type Props = {
 // Màn "Chi tiết lịch họp": push từ phải sang trái (slide-in RTL). Gồm map, thông
 // tin cơ bản (ngày/giờ/vị trí/người tham dự) và mô tả cuộc họp. Khớp Figma 317-9943.
 export default function MeetingDetail({ event, onClose }: Props) {
+  const t = useT();
   const [entered, setEntered] = useState(false);
   const [leaving, setLeaving] = useState(false);
   const [showAllAttendees, setShowAllAttendees] = useState(false);
@@ -55,7 +57,7 @@ export default function MeetingDetail({ event, onClose }: Props) {
   // Vuốt từ mép trái để back về màn home (đóng overlay). Tắt khi map modal đang mở.
   const swipeBack = useSwipeBack(handleClose, !mapOpen);
 
-  const title = event.subject || event.room_name || "Cuộc họp";
+  const title = event.subject || event.room_name || t("common.meeting");
   const attendees = (event.attendees ?? [])
     .map(stripAttendeeDomain)
     .filter(Boolean);
@@ -70,19 +72,19 @@ export default function MeetingDetail({ event, onClose }: Props) {
     <div
       className={`mtg-detail${entered && !leaving ? " is-open" : ""}`}
       role="dialog"
-      aria-label="Chi tiết lịch họp"
+      aria-label={t("detail.title")}
       {...swipeBack}
     >
       <header className="mtg-detail__header">
         <button
           className="mtg-detail__back"
           type="button"
-          aria-label="Quay lại"
+          aria-label={t("common.back")}
           onClick={handleClose}
         >
           <ChevronLeft width={24} height={24} />
         </button>
-        <span className="mtg-detail__header-title">Chi tiết lịch họp</span>
+        <span className="mtg-detail__header-title">{t("detail.title")}</span>
       </header>
 
       <div className="mtg-detail__scroll">
@@ -98,10 +100,10 @@ export default function MeetingDetail({ event, onClose }: Props) {
             <button
               className="mtg-detail__map"
               type="button"
-              aria-label="Xem sơ đồ chỉ đường"
+              aria-label={t("detail.viewMap")}
               onClick={() => setMapOpen(true)}
             >
-              <img src={event.map} alt="Sơ đồ chỉ đường" />
+              <img src={event.map} alt={t("detail.mapAlt")} />
             </button>
           )}
 
@@ -135,7 +137,7 @@ export default function MeetingDetail({ event, onClose }: Props) {
                         className="mtg-detail__more"
                         onClick={() => setShowAllAttendees(true)}
                       >
-                        +{extraCount} others
+                        {t("detail.others", { count: extraCount })}
                       </button>
                     </>
                   )}
@@ -146,11 +148,11 @@ export default function MeetingDetail({ event, onClose }: Props) {
         </section>
 
         <section className="mtg-detail__card mtg-detail__desc">
-          <h2 className="mtg-detail__desc-title">Mô tả cuộc họp</h2>
+          <h2 className="mtg-detail__desc-title">{t("detail.descTitle")}</h2>
           {description ? (
             <p className="mtg-detail__desc-body">{description}</p>
           ) : (
-            <p className="mtg-detail__desc-empty">Không có mô tả cuộc họp</p>
+            <p className="mtg-detail__desc-empty">{t("detail.descEmpty")}</p>
           )}
         </section>
       </div>

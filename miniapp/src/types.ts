@@ -105,13 +105,24 @@ export interface ScheduleResponse {
   rooms: ScheduleRoom[];
 }
 
-// Hồ sơ người dùng — khớp field trong GET /api/auth/me (profile). Chỉ khai báo
-// các field màn "Tìm phòng" cần: office (lọc phòng theo toà) + phòng ưa thích.
+// Chế độ giao diện + ngôn ngữ — khớp giá trị hợp lệ của backend (theme:
+// system|light|dark, language: en|vi). Dùng chung với bản web.
+export type ThemeMode = "system" | "light" | "dark";
+export type Language = "en" | "vi";
+
+// Hồ sơ người dùng — khớp field trong GET /api/auth/me (profile). Ngoài các field
+// màn "Tìm phòng" cần (office + phòng ưa thích), bổ sung theme/language để đồng bộ
+// cài đặt giao diện/ngôn ngữ với bản web.
 export interface UserProfile {
+  email?: string | null;
+  email_username?: string | null;
   office?: string | null;
   building?: string | null;
   floor?: string | null;
   preferred_rooms?: string[] | null; // danh sách email phòng ưa thích
+  book_without_confirmation?: boolean | null;
+  theme?: ThemeMode | null;
+  language?: Language | null;
 }
 
 export interface MeResponse {

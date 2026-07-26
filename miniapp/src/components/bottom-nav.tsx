@@ -2,12 +2,15 @@ import House from "@gravity-ui/icons/House";
 import ClockArrowRotateLeft from "@gravity-ui/icons/ClockArrowRotateLeft";
 import Person from "@gravity-ui/icons/Person";
 
+import { useT } from "@/services/settings";
+import type { TranslationKey } from "@/services/i18n";
+
 export type TabKey = "home" | "history" | "account";
 
-const TABS: { key: TabKey; label: string; Icon: typeof House }[] = [
-  { key: "home", label: "Trang chủ", Icon: House },
-  { key: "history", label: "Lịch sử", Icon: ClockArrowRotateLeft },
-  { key: "account", label: "Tài khoản", Icon: Person },
+const TABS: { key: TabKey; labelKey: TranslationKey; Icon: typeof House }[] = [
+  { key: "home", labelKey: "nav.home", Icon: House },
+  { key: "history", labelKey: "nav.history", Icon: ClockArrowRotateLeft },
+  { key: "account", labelKey: "nav.account", Icon: Person },
 ];
 
 // Thanh điều hướng dưới cùng, icon @gravity-ui/icons y hệt bản web.
@@ -18,9 +21,10 @@ export default function BottomNav({
   active: TabKey;
   onChange: (tab: TabKey) => void;
 }) {
+  const t = useT();
   return (
     <nav className="bottom-nav">
-      {TABS.map(({ key, label, Icon }) => (
+      {TABS.map(({ key, labelKey, Icon }) => (
         <button
           key={key}
           type="button"
@@ -28,7 +32,7 @@ export default function BottomNav({
           onClick={() => onChange(key)}
         >
           <Icon width={24} height={24} />
-          <span className="bottom-nav__label">{label}</span>
+          <span className="bottom-nav__label">{t(labelKey)}</span>
         </button>
       ))}
     </nav>

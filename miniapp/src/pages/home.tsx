@@ -15,6 +15,7 @@ import BookingModal from "@/components/booking-modal";
 import FindRoom from "@/pages/find-room";
 import { useDisplayName } from "@/services/auth";
 import { api, AuthError } from "@/services/api";
+import { useT } from "@/services/settings";
 import type { FreeRoom, FreeRoomsResponse, UpcomingEvent } from "@/types";
 
 // Chatbot Zalo OA — bấm nút "Chatbot" mở cửa sổ chat với OA này.
@@ -49,7 +50,8 @@ const DEFAULT_DURATION = 60; // tab "1h" chọn sẵn (khớp Figma)
 // Màn Home theo Figma (node 286-9472). Icon dùng bộ @gravity-ui/icons y hệt bản
 // web, font Inter. "Lịch sắp tới" + "Phòng trống" lấy từ BE.
 export default function HomePage() {
-  const name = useDisplayName() ?? "bạn";
+  const t = useT();
+  const name = useDisplayName() ?? t("common.you");
   const [scrolled, setScrolled] = useState(false);
   const sentinelRef = useRef<HTMLDivElement>(null);
 
@@ -70,13 +72,13 @@ export default function HomePage() {
   const actions = [
     {
       key: "find",
-      label: "Tìm phòng",
+      label: t("action.find"),
       Icon: Magnifier,
       onClick: () => setFindOpen(true),
     },
-    { key: "scout", label: "Săn phòng", Icon: Binoculars, onClick: undefined },
-    { key: "direction", label: "Chỉ đường", Icon: MapPin, onClick: undefined },
-    { key: "chatbot", label: "Chatbot", Icon: Comment, onClick: openChatbot },
+    { key: "scout", label: t("action.scout"), Icon: Binoculars, onClick: undefined },
+    { key: "direction", label: t("action.direction"), Icon: MapPin, onClick: undefined },
+    { key: "chatbot", label: t("action.chatbot"), Icon: Comment, onClick: openChatbot },
   ];
 
   // Chỉ gọi availability khi mở app hoặc bấm "Làm mới".
@@ -132,8 +134,8 @@ export default function HomePage() {
     (_, i) => rooms[i] ?? null,
   );
   const roomsTitle = freeRooms?.isTomorrow
-    ? "Phòng trống ngày mai"
-    : "Phòng trống hôm nay";
+    ? t("home.freeTomorrow")
+    : t("home.freeToday");
 
   return (
     <div className="home">
@@ -146,13 +148,13 @@ export default function HomePage() {
 
       <div className="home__hero">
         <div className="home__hero-body">
-          <div className="home__greeting">Xin chào, {name}</div>
+          <div className="home__greeting">{t("home.greeting", { name })}</div>
 
           <div className="menu-card">
             <div className="menu-card__title">
-              Chọn một nhu cầu{" "}
+              {t("home.menuTitle")}{" "}
               <span className="menu-card__title-muted">
-                phù hợp nhất với bạn
+                {t("home.menuTitleMuted")}
               </span>
             </div>
             <div className="menu-card__sep" />
@@ -177,14 +179,14 @@ export default function HomePage() {
 
       {eventLoading && (
         <section className="home-section">
-          <div className="home-section__title">Lịch sắp tới</div>
+          <div className="home-section__title">{t("home.upcoming")}</div>
           <div className="event-card skeleton skeleton--event" />
         </section>
       )}
 
       {!eventLoading && event && (
         <section className="home-section">
-          <div className="home-section__title">Lịch sắp tới</div>
+          <div className="home-section__title">{t("home.upcoming")}</div>
           <div
             className="event-card"
             style={
@@ -196,7 +198,7 @@ export default function HomePage() {
             <div className="event-card__overlay" />
             <div className="event-card__body">
               <div className="event-card__title">
-                {event.room_name || event.subject || "Cuộc họp"}
+                {event.room_name || event.subject || t("common.meeting")}
               </div>
               <div className="event-card__row">
                 <Calendar width={16} height={16} />
@@ -219,7 +221,7 @@ export default function HomePage() {
                 type="button"
                 onClick={() => setDetailOpen(true)}
               >
-                Xem chi tiết
+                {t("home.viewDetail")}
               </button>
             </div>
           </div>
@@ -235,7 +237,7 @@ export default function HomePage() {
             onClick={() => void loadFreeRooms()}
             disabled={refreshing}
           >
-            <span>Làm mới</span>
+            <span>{t("common.refresh")}</span>
             <ArrowsRotateRight
               width={16}
               height={16}
@@ -299,7 +301,7 @@ export default function HomePage() {
                         )}
                         {room.floor && (
                           <span className="room-chip room-chip--onmedia">
-                            Tầng {room.floor}
+                            {t("common.floor", { floor: room.floor })}
                           </span>
                         )}
                       </div>
@@ -326,9 +328,7 @@ export default function HomePage() {
           </div>
           {rooms.length === 0 && (
             <div className="room-panel__empty">
-              {refreshing
-                ? "Đang tải phòng trống..."
-                : "Không có phòng trống phù hợp"}
+              {refreshing ? t("home.loadingRooms") : t("home.noRooms")}
             </div>
           )}
         </div>

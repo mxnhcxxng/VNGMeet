@@ -2,6 +2,8 @@ import type * as React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import ChevronLeft from "@gravity-ui/icons/ChevronLeft";
 
+import { useT } from "@/services/settings";
+
 // Modal xem ảnh map toàn màn hình: pinch/double-tap để phóng to - thu nhỏ,
 // kéo để pan khi đang zoom, vuốt xuống (khi ở 1x) hoặc bấm X để đóng.
 type Props = {
@@ -21,6 +23,7 @@ function distance(t1: React.Touch, t2: React.Touch): number {
 }
 
 export default function MapModal({ src, onClose }: Props) {
+  const t = useT();
   const [scale, setScale] = useState(1);
   const [tx, setTx] = useState(0);
   const [ty, setTy] = useState(0);
@@ -186,7 +189,7 @@ export default function MapModal({ src, onClose }: Props) {
       <button
         className="map-modal__close"
         type="button"
-        aria-label="Quay lại"
+        aria-label={t("common.back")}
         onClick={close}
       >
         <ChevronLeft width={22} height={22} />
@@ -195,7 +198,7 @@ export default function MapModal({ src, onClose }: Props) {
       <img
         className="map-modal__img"
         src={src}
-        alt="Sơ đồ chỉ đường"
+        alt={t("detail.mapAlt")}
         draggable={false}
         style={{
           transform: `translate3d(${tx}px, ${ty + dragY}px, 0) scale(${scale})`,

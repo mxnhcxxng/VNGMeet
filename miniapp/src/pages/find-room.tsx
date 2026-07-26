@@ -11,6 +11,8 @@ import BookingModal from "@/components/booking-modal";
 import { useSwipeBack } from "@/hooks/use-swipe-back";
 import { api, AuthError } from "@/services/api";
 import { roomFlag } from "@/services/room-flags";
+import { useT } from "@/services/settings";
+import type { TFunction, TranslationKey } from "@/services/i18n";
 import type { FreeRoom, ScheduleResponse, ScheduleRoom } from "@/types";
 
 // Số ngày nạp về — khớp RANGE_DAYS của web (today .. today+15, tới ~10/8).
@@ -29,14 +31,12 @@ function isScheduleStatus(status: number): boolean {
   return status >= 3;
 }
 
-// Nhãn thứ trong tuần theo index getDay() (0 = CN).
-const VI_WEEKDAYS = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"] as const;
-
 function isoToDate(iso: string): Date {
   return new Date(`${iso}T00:00:00`);
 }
-function weekdayLabel(iso: string): string {
-  return VI_WEEKDAYS[isoToDate(iso).getDay()];
+// Nhãn thứ trong tuần theo index getDay() (0 = CN) — dịch theo ngôn ngữ hiện tại.
+function weekdayLabel(iso: string, t: TFunction): string {
+  return t(`weekday.${isoToDate(iso).getDay()}` as TranslationKey);
 }
 function dayNumber(iso: string): string {
   return String(isoToDate(iso).getDate());
@@ -81,10 +81,11 @@ function cellKind(status: number): CellKind {
 
 // Cỡ sức chứa (khớp web): capacity số → nhóm; hoặc dùng capacity_size sẵn có.
 type CapSize = "small" | "medium" | "large";
-const CAP_LABEL: Record<CapSize, { label: string; range: string }> = {
-  small: { label: "Nhỏ", range: "≤4" },
-  medium: { label: "Vừa", range: "5–12" },
-  large: { label: "Lớn", range: "13+" },
+// Khoảng số người (không đổi theo ngôn ngữ); nhãn "Nhỏ/Vừa/Lớn" dịch qua cap.*.
+const CAP_RANGE: Record<CapSize, string> = {
+  small: "≤4",
+  medium: "5–12",
+  large: "13+",
 };
 function capacitySize(room: ScheduleRoom): CapSize | null {
   if (typeof room.capacity === "number") {
@@ -163,6 +164,7 @@ type Selection = { roomEmail: string; lo: number; hi: number };
 // Chọn ô trống: bấm ô nào dính ô đó; bấm ô trống ngay sát trên/dưới để nối thêm
 // (từng ô một), bấm lại ô ở mép để bỏ bớt → nút "Đặt phòng" đặt cả khoảng.
 export default function FindRoom({ onClose }: Props) {
+  const t = useT();
   const [entered, setEntered] = useState(false);
   const [leaving, setLeaving] = useState(false);
 
@@ -420,19 +422,19 @@ export default function FindRoom({ onClose }: Props) {
     <div
       className={`fr${entered && !leaving ? " is-open" : ""}`}
       role="dialog"
-      aria-label="Tìm phòng"
+      aria-label={t("find.title")}
       {...swipeBack}
     >
       <header className="mtg-detail__header">
         <button
           className="mtg-detail__back"
           type="button"
-          aria-label="Quay lại"
+          aria-label={t("common.back")}
           onClick={handleClose}
         >
           <ChevronLeft width={24} height={24} />
         </button>
-        <span className="mtg-detail__header-title">Tìm phòng</span>
+        <span className="mtg-detail__header-title">{t("find.title")}</span>
       </header>
 
       {/* Dải chọn ngày (T2 27 · T3 28 ...) — cuộn ngang, chevron chuyển ngày,
@@ -441,7 +443,7 @@ export default function FindRoom({ onClose }: Props) {
         <button
           className="fr__day-nav"
           type="button"
-          aria-label="Ngày trước"
+          aria-label={t("find.prevDay")}
           disabled={dayIndex <= 0}
           onClick={() => selectDay(Math.max(0, dayIndex - 1))}
         >
@@ -458,7 +460,7 @@ export default function FindRoom({ onClose }: Props) {
               }`}
               onClick={() => selectDay(i)}
             >
-              <span className="fr__day-wd">{weekdayLabel(iso)}</span>
+              <span className="fr__day-wd">{weekdayLabel(iso, t)}</span>
               <span className="fr__day-num">{dayNumber(iso)}</span>
               <span
                 className={`fr__day-dot${bookedDates.has(iso) ? " is-on" : ""}`}
@@ -469,7 +471,7 @@ export default function FindRoom({ onClose }: Props) {
         <button
           className="fr__day-nav"
           type="button"
-          aria-label="Ngày sau"
+          aria-label={t("find.nextDay")}
           disabled={!data || dayIndex >= data.days.length - 1}
           onClick={() =>
             data && selectDay(Math.min(data.days.length - 1, dayIndex + 1))
@@ -482,21 +484,21 @@ export default function FindRoom({ onClose }: Props) {
       {/* Lưới lịch phòng */}
       <div className="fr__body">
         {loading ? (
-          <div className="fr__state">Đang tải lịch phòng...</div>
+          <div className="fr__state">{t("find.loading")}</div>
         ) : error ? (
           <div className="fr__state">
-            Không tải được lịch phòng.
+            {t("find.loadFailed")}
             <button className="fr__retry" type="button" onClick={() => void load()}>
-              Thử lại
+              {t("common.retry")}
             </button>
           </div>
         ) : rooms.length === 0 ? (
-          <div className="fr__state">Không có phòng phù hợp.</div>
+          <div className="fr__state">{t("find.noRooms")}</div>
         ) : (
           <div className="fr__grid-wrap" ref={gridWrapRef}>
             <div className="fr__grid" style={{ gridTemplateColumns: gridCols }}>
               {/* Hàng tiêu đề: góc "Giờ" + tên phòng (tim + cờ + sức chứa) */}
-              <div className="fr__corner">Giờ</div>
+              <div className="fr__corner">{t("find.hour")}</div>
               {rooms.map((r) => {
                 const fav = r.email
                   ? favorites.has(r.email.toLowerCase())
@@ -519,7 +521,7 @@ export default function FindRoom({ onClose }: Props) {
                     {cap && (
                       <div className="fr__rhead-cap">
                         <span>
-                          {CAP_LABEL[cap].label} ({CAP_LABEL[cap].range}
+                          {t(`cap.${cap}` as TranslationKey)} ({CAP_RANGE[cap]}
                         </span>
                         <PersonFill width={10} height={10} />
                         <span>)</span>
@@ -576,12 +578,10 @@ export default function FindRoom({ onClose }: Props) {
             </div>
           </div>
         ) : (
-          <div className="fr__actions-hint">
-            Vui lòng chọn khung giờ trống để đặt phòng
-          </div>
+          <div className="fr__actions-hint">{t("find.hint")}</div>
         )}
         <button className="fr__book-btn" type="button" onClick={openBooking}>
-          Tiếp tục
+          {t("common.continue")}
         </button>
       </div>
 
