@@ -16,6 +16,7 @@ import SwipeViews from "@/components/swipe-views";
 import BookingModal from "@/components/booking-modal";
 import FindRoom from "@/pages/find-room";
 import RoomScout from "@/pages/room-scout";
+import Directions from "@/pages/directions";
 import { useDisplayName } from "@/services/auth";
 import { api, AuthError } from "@/services/api";
 import { roomFlag } from "@/services/room-flags";
@@ -101,6 +102,8 @@ export default function HomePage() {
   const [findOpen, setFindOpen] = useState(false);
   // Mở màn "Săn phòng" (overlay push từ phải).
   const [scoutOpen, setScoutOpen] = useState(false);
+  // Mở màn "Chỉ đường" (overlay push từ phải).
+  const [dirOpen, setDirOpen] = useState(false);
   // Phòng đang chọn để đặt (mở BookingModal).
   const [selectedRoom, setSelectedRoom] = useState<FreeRoom | null>(null);
 
@@ -117,7 +120,12 @@ export default function HomePage() {
       Icon: Binoculars,
       onClick: () => setScoutOpen(true),
     },
-    { key: "direction", label: t("action.direction"), Icon: MapPin, onClick: undefined },
+    {
+      key: "direction",
+      label: t("action.direction"),
+      Icon: MapPin,
+      onClick: () => setDirOpen(true),
+    },
     { key: "chatbot", label: t("action.chatbot"), Icon: Comment, onClick: openChatbot },
   ];
 
@@ -405,12 +413,18 @@ export default function HomePage() {
       </section>
 
       {detailOpen && event && (
-        <MeetingDetail event={event} onClose={() => setDetailOpen(false)} />
+        <MeetingDetail
+          event={event}
+          status="success"
+          onClose={() => setDetailOpen(false)}
+        />
       )}
 
       {findOpen && <FindRoom onClose={() => setFindOpen(false)} />}
 
       {scoutOpen && <RoomScout onClose={() => setScoutOpen(false)} />}
+
+      {dirOpen && <Directions onClose={() => setDirOpen(false)} />}
 
       {selectedRoom && freeRooms && (
         <BookingModal

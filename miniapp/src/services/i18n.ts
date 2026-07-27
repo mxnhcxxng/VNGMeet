@@ -20,7 +20,7 @@ const en = {
   "common.meeting": "Meeting",
   "common.you": "you",
   "common.floor": "Floor {floor}",
-  "common.building": "Bldg {building}",
+  "common.building": "Building {building}",
 
   // --- Auth gate (layout) -------------------------------------------------
   "gate.authing": "Authenticating…",
@@ -130,6 +130,16 @@ const en = {
   "detail.others": "+{count} others",
   "detail.descTitle": "Meeting description",
   "detail.descEmpty": "No meeting description",
+
+  // --- Directions (Chỉ đường) ---------------------------------------------
+  "dir.title": "Directions",
+  "dir.detailTitle": "Meeting room details",
+  "dir.loading": "Loading rooms…",
+  "dir.loadFailed": "Couldn't load the room list.",
+  "dir.empty": "No rooms in this area.",
+  "dir.viewDirections": "View directions",
+  "dir.directionsTitle": "How to get there",
+  "dir.directionsEmpty": "No directions available for this room yet.",
 
   // --- Account / Settings -------------------------------------------------
   "settings.title": "Account",
@@ -333,6 +343,16 @@ const vi: Partial<Record<TranslationKey, string>> = {
   "detail.others": "+{count} người khác",
   "detail.descTitle": "Mô tả cuộc họp",
   "detail.descEmpty": "Không có mô tả cuộc họp",
+
+  // --- Directions (Chỉ đường) ---------------------------------------------
+  "dir.title": "Chỉ đường",
+  "dir.detailTitle": "Chi tiết phòng họp",
+  "dir.loading": "Đang tải phòng…",
+  "dir.loadFailed": "Không tải được danh sách phòng.",
+  "dir.empty": "Khu vực này chưa có phòng.",
+  "dir.viewDirections": "Xem chỉ đường",
+  "dir.directionsTitle": "Hướng dẫn đường đi",
+  "dir.directionsEmpty": "Phòng này chưa có chỉ đường.",
 
   // --- Account / Settings -------------------------------------------------
   "settings.title": "Tài khoản",

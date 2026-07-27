@@ -237,6 +237,7 @@ export default function HistoryPage() {
       {selected && (
         <MeetingDetail
           event={toEvent(selected)}
+          status={selected.status}
           onClose={() => setSelected(null)}
         />
       )}

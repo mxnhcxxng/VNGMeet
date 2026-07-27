@@ -37,6 +37,23 @@ export interface FreeRoomsResponse {
   byDuration: Record<string, FreeRoom[]>;
 }
 
+// Một phòng trong màn "Chỉ đường" — khớp item trả về từ GET /api/rooms/directory
+// (đọc thẳng meeting_room_metadata). office = "Campus" | "TNR" | "Sala"; FE chia
+// tab theo office (bỏ Sala vì không có chỉ đường). direction = mô tả đường đi,
+// map = ảnh sơ đồ (mở phóng to được).
+export interface DirectoryRoom {
+  name: string;
+  email?: string | null;
+  building?: string | null;
+  floor?: string | null;
+  capacity?: number | null;
+  capacity_size?: CapacitySize | null;
+  office?: string | null;
+  image?: string | null; // thumbnail_link
+  direction?: string | null; // chỉ đường (nhiều đoạn, ngăn bằng xuống dòng)
+  map?: string | null; // map_link — ảnh sơ đồ chỉ đường
+}
+
 // Trạng thái một lượt đặt phòng — khớp status của backend (user_activity).
 export type BookingStatus =
   | "success"

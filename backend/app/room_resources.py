@@ -830,6 +830,51 @@ async def free_rooms_today(request: Request):
     }
 
 
+@router.get("/api/rooms/directory")
+async def rooms_directory(request: Request):
+    """Danh sách phòng cho màn "Chỉ đường" của Mini App.
+
+    Đọc thẳng meeting_room_metadata (KHÔNG cần Graph token, giống free-today) nên
+    user Zalo chưa link Microsoft vẫn xem được. Trả kèm chỉ đường (direction) và
+    ảnh sơ đồ (map_link) để dựng màn chi tiết. Client tự nhóm theo office (Campus /
+    TNR — Sala không có chỉ đường nên client bỏ tab đó) rồi theo chữ cái đầu."""
+    _request_identity(request)
+    if not settings.supabase_enabled:
+        raise HTTPException(503, "Room directory requires Supabase configuration.")
+
+    from .supabase_client import get_supabase
+
+    sb = get_supabase()
+    rows = (
+        sb.table("meeting_room_metadata")
+        .select(
+            "name, email, building, floor, zone, capacity, capacity_size, "
+            "office, thumbnail_link, direction, map_link"
+        )
+        .eq("in_use", True)
+        .execute()
+        .data
+        or []
+    )
+    rooms = [
+        {
+            "name": r.get("name"),
+            "email": r.get("email"),
+            "building": r.get("building"),
+            "floor": r.get("floor"),
+            "capacity": r.get("capacity"),
+            "capacity_size": r.get("capacity_size"),
+            "office": r.get("office"),
+            "image": r.get("thumbnail_link"),
+            "direction": r.get("direction"),
+            "map": r.get("map_link"),
+        }
+        for r in rows
+        if r.get("name")
+    ]
+    return {"rooms": rooms}
+
+
 @router.post("/api/availability/refresh")
 async def availability_refresh(request: Request):
     """Force an immediate cache refresh into the room_availability table.

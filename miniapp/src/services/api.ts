@@ -5,6 +5,7 @@ import type {
   BookingHistoryItem,
   ChatMessage,
   ChatThread,
+  DirectoryRoom,
   FreeRoomsResponse,
   MeResponse,
   RoomScout,
@@ -112,6 +113,10 @@ export const api = {
   // Phòng trống hôm nay (đủ 6 mốc thời lượng trong 1 lần gọi). Chỉ gọi khi mở
   // app / bấm làm mới.
   freeRoomsToday: () => request<FreeRoomsResponse>("/rooms/free-today"),
+
+  // Danh sách phòng cho màn "Chỉ đường" — đọc thẳng meeting_room_metadata (không
+  // cần Graph token). Kèm chỉ đường + ảnh sơ đồ để dựng màn chi tiết.
+  roomsDirectory: () => request<{ rooms: DirectoryRoom[] }>("/rooms/directory"),
 
   // Lưới lịch phòng cho màn "Tìm phòng" — dùng CHUNG endpoint với web
   // (/api/availability, đọc từ cache Supabase). API_BASE đã có sẵn "/api".

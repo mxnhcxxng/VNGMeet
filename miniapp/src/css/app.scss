@@ -973,6 +973,18 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
   flex-direction: column;
   gap: 12px;
 }
+// Khối trên của card: (tiêu đề + chip) rồi tới ảnh sơ đồ. Khớp Figma 317-9943.
+.mtg-detail__head {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.mtg-detail__heading {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
 .mtg-detail__title {
   margin: 0;
   font-size: 20px;
@@ -1097,6 +1109,228 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
   background: rgba(255, 255, 255, 0.16);
   color: #fff;
   cursor: pointer;
+}
+
+// ===================================================================
+// Chỉ đường — danh sách phòng (Figma 392-12167) + chi tiết (392-12499)
+// ===================================================================
+.dir {
+  position: fixed;
+  inset: 0;
+  z-index: 65; // như find-room (mở từ home, không mở đồng thời)
+  display: flex;
+  flex-direction: column;
+  background: #f9fafb;
+  transform: translateX(100%);
+  transition: transform 0.26s ease;
+  will-change: transform;
+}
+.dir.is-open {
+  transform: translateX(0);
+}
+
+// Tab office (Campus / TNR) — dải trắng dưới header, dùng lại tông pill của
+// history-tab. Sala không có tab (không có chỉ đường).
+.dir__tabs {
+  flex: none;
+  display: flex;
+  gap: 8px;
+  padding: 12px;
+  background: var(--vm-surface);
+}
+.dir-tab {
+  padding: 6px 16px;
+  border: none;
+  border-radius: 999px;
+  background: var(--vm-surface-2);
+  color: var(--vm-ink);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.dir-tab.is-active {
+  background: var(--vm-accent-soft-bg);
+  color: var(--vm-accent-soft-fg);
+}
+
+.dir__body {
+  position: relative; // mốc offsetTop cho quick-select A-Z
+  flex: 1 1 auto;
+  overflow-y: auto;
+  touch-action: pan-y;
+  padding-bottom: calc(24px + var(--zaui-safe-area-inset-bottom, 0px));
+}
+.dir__state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 48px 24px;
+  color: var(--vm-muted);
+  text-align: center;
+}
+.dir__retry {
+  padding: 8px 20px;
+  border: none;
+  border-radius: 999px;
+  background: var(--vm-blue);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+// Nhóm chữ cái đầu (A, B, ...).
+.dir__group-letter {
+  padding: 12px 16px 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--vm-muted);
+}
+.dir__list {
+  display: flex;
+  flex-direction: column;
+  background: var(--vm-surface);
+}
+
+// 1 dòng phòng: ảnh + (tên kèm cờ + vị trí) + nút chỉ đường (compass).
+.dir-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  // Lề phải rộng hơn để nút chỉ đường không nằm dưới thanh quick-select A-Z.
+  padding: 12px 28px 12px 16px;
+  cursor: pointer;
+}
+.dir-row + .dir-row {
+  border-top: 1px solid var(--vm-separator);
+}
+.dir-row__media {
+  flex: none;
+  width: 48px;
+  height: 48px;
+  border-radius: 10px;
+  background-size: cover;
+  background-position: center;
+  // Placeholder khi phòng chưa có ảnh (giống history-card__media).
+  background-color: #c7d2dd;
+  background-image: linear-gradient(135deg, #a8bccd 0%, #6f8aa3 100%);
+}
+.dir-row__info {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.dir-row__name {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 22px;
+  color: var(--vm-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dir-row__loc {
+  font-size: 14px;
+  line-height: 18px;
+  color: var(--vm-muted);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dir-row__go {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 999px;
+  background: var(--vm-accent-soft-bg);
+  color: var(--vm-accent-soft-fg);
+  cursor: pointer;
+}
+
+// Thanh quick-select A-Z bên phải (như danh bạ Zalo). Chiều cao vừa nội dung,
+// canh giữa dọc → tỉ lệ Y của ngón tay khớp đúng chữ cái đang chạm.
+.dir__rail {
+  position: absolute;
+  right: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 6px 3px;
+  // Lớp đen mờ phía dưới thanh để chữ A-Z nổi trên nội dung.
+  background: rgba(24, 24, 27, 0.35);
+  border-radius: 999px;
+  backdrop-filter: blur(2px);
+  // Chặn cuộn/rubber-band khi kéo dọc trên thanh.
+  touch-action: none;
+  user-select: none;
+}
+.dir__rail-letter {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 15px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--vm-blue);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+}
+.dir__rail-letter.is-active {
+  color: #fff;
+  background: var(--vm-blue);
+  border-radius: 999px;
+}
+// Bong bóng chữ cái to giữa màn hình khi đang kéo (giống danh bạ Zalo).
+.dir__rail-bubble {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 72px;
+  height: 72px;
+  border-radius: 18px;
+  background: rgba(24, 24, 27, 0.72);
+  color: #fff;
+  font-size: 34px;
+  font-weight: 700;
+  pointer-events: none;
+}
+
+// Màn chi tiết chỉ đường dùng lại style .mtg-detail; chỉ nâng z-index để nằm
+// TRÊN danh sách (.dir = 65) khi mở chồng. Đặt sau .mtg-detail nên thắng.
+.dir-detail {
+  z-index: 67;
+}
+// Chỉ đường nhiều đoạn → danh sách bullet (cùng cỡ chữ/màu với desc-body).
+.dir-detail__steps {
+  margin: 0;
+  padding-left: 20px;
+  list-style: disc;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.dir-detail__steps li {
+  font-size: 15px;
+  line-height: 20px;
+  color: var(--vm-muted);
 }
 
 // ===================================================================
@@ -2074,7 +2308,8 @@ body[zaui-theme="dark"] {
   // Nền trang (đang hardcode #f9fafb) → gần đen.
   .history,
   .mtg-detail,
-  .fr {
+  .fr,
+  .dir {
     background: var(--vm-page);
   }
   .section-container {
