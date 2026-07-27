@@ -9,6 +9,7 @@ import Persons from "@gravity-ui/icons/Persons";
 import CircleInfo from "@gravity-ui/icons/CircleInfo";
 
 import { api, AuthError } from "@/services/api";
+import { getToken } from "@/services/auth";
 import { useSwipeBack } from "@/hooks/use-swipe-back";
 import { useSettings, useT } from "@/services/settings";
 import type { TFunction, TranslationKey } from "@/services/i18n";
@@ -121,6 +122,18 @@ function formatLastChecked(value?: string | null): string {
   });
 }
 
+// Cache mức module: giữ kết quả nạp gần nhất để lần mở lại hiện ngay, tránh nháy
+// màn "Đang tải…" mỗi lần vào. Vẫn refresh nền (stale-while-revalidate) khi mở.
+// Gắn theo token: đổi phiên (login/logout) → token khác → cache cũ bị bỏ qua nên
+// không lộ dữ liệu của người khác.
+type ScoutCache = { token: string | null; scouts: RoomScoutRow[]; userOffice: string };
+let scoutCache: ScoutCache | null = null;
+
+// Cache của đúng phiên hiện tại, hoặc null nếu khác phiên / chưa có.
+function readScoutCache(): ScoutCache | null {
+  return scoutCache && scoutCache.token === getToken() ? scoutCache : null;
+}
+
 type Props = { onClose: () => void };
 
 // Màn "Săn phòng" (Figma iPhone 17-9): trượt từ PHẢI vào, có nút back → swipe-back.
@@ -132,9 +145,14 @@ export default function RoomScout({ onClose }: Props) {
   const [entered, setEntered] = useState(false);
   const [leaving, setLeaving] = useState(false);
 
-  const [scouts, setScouts] = useState<RoomScoutRow[]>([]);
-  const [userOffice, setUserOffice] = useState<string>("");
-  const [loading, setLoading] = useState(true);
+  // Seed từ cache: có cache thì hiện ngay dữ liệu cũ, không bật màn loading.
+  const [scouts, setScouts] = useState<RoomScoutRow[]>(
+    () => readScoutCache()?.scouts ?? [],
+  );
+  const [userOffice, setUserOffice] = useState<string>(
+    () => readScoutCache()?.userOffice ?? "",
+  );
+  const [loading, setLoading] = useState(() => readScoutCache() === null);
   const [editing, setEditing] = useState(false);
 
   useEffect(() => {
@@ -148,8 +166,11 @@ export default function RoomScout({ onClose }: Props) {
         api.me().catch(() => null),
         api.roomScouts(),
       ]);
-      setUserOffice((me?.profile?.office ?? "").trim());
+      const office = (me?.profile?.office ?? "").trim();
+      setUserOffice(office);
       setScouts(res.scouts);
+      // Cập nhật cache cho lần mở sau (stale-while-revalidate).
+      scoutCache = { token: getToken(), scouts: res.scouts, userOffice: office };
     } catch (e) {
       if (!(e instanceof AuthError)) {
         // Giữ trạng thái cũ; báo nhẹ để không kẹt màn trắng.
@@ -542,6 +563,8 @@ function ScoutForm({
                 suffix={suffix}
               />
             </div>
+
+            <p className="scout__help">{t("scout.scoutRangeHelp")}</p>
 
             {crossesLunch && (
               <div className="scout__lunch">

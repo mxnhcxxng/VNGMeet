@@ -664,6 +664,15 @@ def _location_rank(
     return (4, 2**31, 1)
 
 
+LUNCH_START_MIN = 12 * 60  # 12:00
+LUNCH_END_MIN = 13 * 60  # 13:00
+
+
+def _overlaps_lunch(start_min: int, end_min: int) -> bool:
+    """True nếu khung [start_min, end_min) giao với giờ nghỉ trưa 12:00-13:00."""
+    return start_min < LUNCH_END_MIN and end_min > LUNCH_START_MIN
+
+
 def _earliest_free_start(
     slots: list[int],
     window_start_min: int,
@@ -674,10 +683,14 @@ def _earliest_free_start(
 ) -> int | None:
     """Phút bắt đầu (từ 00:00) SỚM NHẤT mà phòng trống liên tục đủ `duration_min`
     và kết thúc trước `window_end_min`. Ứng viên cách nhau `step_min` (mốc 30p).
-    Slot coi là trống khi giá trị ∈ {0, -1}. None nếu không có khối trống nào."""
+    Slot coi là trống khi giá trị ∈ {0, -1}. Bỏ qua khung giao với giờ nghỉ trưa
+    12:00-13:00. None nếu không có khối trống nào."""
     latest_start = window_end_min - duration_min
     start = window_start_min
     while start <= latest_start:
+        if _overlaps_lunch(start, start + duration_min):
+            start += step_min
+            continue
         s_idx = start // slot_min
         e_idx = (start + duration_min) // slot_min
         if all(

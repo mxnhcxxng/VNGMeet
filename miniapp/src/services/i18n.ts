@@ -44,8 +44,8 @@ const en = {
   "home.greeting": "Hi, {name}",
   "home.menuTitle": "Pick the option",
   "home.menuTitleMuted": "that fits you best",
-  "action.find": "Find a room",
-  "action.scout": "Scout a room",
+  "action.find": "Find rooms",
+  "action.scout": "Scout rooms",
   "action.direction": "Directions",
   "action.chatbot": "Chatbot",
   "home.upcoming": "Upcoming",
@@ -167,6 +167,8 @@ const en = {
   "scout.duration": "Duration",
   "scout.selectDuration": "Select duration",
   "scout.scoutRange": "Search time range",
+  "scout.scoutRangeHelp":
+    "The wider the search time range, the higher the chance of getting a room.",
   "scout.startTime": "Start time",
   "scout.endTime": "End time",
   "scout.capacity": "Capacity",
@@ -380,6 +382,8 @@ const vi: Partial<Record<TranslationKey, string>> = {
   "scout.duration": "Thời lượng",
   "scout.selectDuration": "Chọn thời lượng",
   "scout.scoutRange": "Khung giờ tìm phòng",
+  "scout.scoutRangeHelp":
+    "Khoảng thời gian quét càng rộng thì khả năng đặt được phòng càng cao.",
   "scout.startTime": "Giờ bắt đầu",
   "scout.endTime": "Giờ kết thúc",
   "scout.capacity": "Sức chứa",

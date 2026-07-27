@@ -1831,6 +1831,13 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
 .scout__lunch {
   margin-top: 6px;
 }
+// Gợi ý dưới ô "Khung giờ tìm phòng".
+.scout__help {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--vm-muted);
+}
 // Chú thích "tự dừng lúc 00:00" — nền nhạt + icon accent.
 .scout__note {
   display: flex;
