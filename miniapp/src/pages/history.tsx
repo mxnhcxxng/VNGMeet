@@ -6,7 +6,9 @@ import MapPin from "@gravity-ui/icons/MapPin";
 import ClockArrowRotateLeft from "@gravity-ui/icons/ClockArrowRotateLeft";
 
 import MeetingDetail from "@/components/meeting-detail";
+import SwipeViews from "@/components/swipe-views";
 import { api, AuthError } from "@/services/api";
+import { roomFlag } from "@/services/room-flags";
 import { useT } from "@/services/settings";
 import type { TranslationKey } from "@/services/i18n";
 import type { BookingHistoryItem, BookingStatus, UpcomingEvent } from "@/types";
@@ -95,9 +97,83 @@ export default function HistoryPage() {
     void load();
   }, []);
 
-  const filtered = items.filter((item) =>
-    tab === "all" ? true : tab === "past" ? isPast(item) : !isPast(item),
+  const tabIndex = Math.max(
+    0,
+    TABS.findIndex((tabItem) => tabItem.key === tab),
   );
+
+  function itemsFor(key: TabKey): BookingHistoryItem[] {
+    return items.filter((item) =>
+      key === "all" ? true : key === "past" ? isPast(item) : !isPast(item),
+    );
+  }
+
+  function renderCard(item: BookingHistoryItem) {
+    const status = STATUS_META[item.status] ?? STATUS_META.pending;
+    const flag = roomFlag(item.room_name);
+    return (
+      <div
+        key={item.id}
+        className="history-card"
+        role="button"
+        tabIndex={0}
+        onClick={() => setSelected(item)}
+      >
+        <div
+          className="history-card__media"
+          style={
+            item.image ? { backgroundImage: `url(${item.image})` } : undefined
+          }
+        />
+        <div className="history-card__body">
+          <div className="history-card__title">
+            {item.subject || t("common.meeting")}
+          </div>
+          <span className={`history-chip ${status.className}`}>
+            {t(status.labelKey)}
+          </span>
+          <div className="history-card__info">
+            {item.room_name && (
+              <div className="history-card__row">
+                <PlanetEarth width={16} height={16} />
+                <span>
+                  {flag && `${flag} `}
+                  {item.room_name}
+                </span>
+              </div>
+            )}
+            <div className="history-card__row">
+              <Clock width={16} height={16} />
+              <span>
+                {formatShortDate(item.date)} • {hhmm(item.start_time)} -{" "}
+                {hhmm(item.end_time)}
+              </span>
+            </div>
+            {item.location && (
+              <div className="history-card__row">
+                <MapPin width={16} height={16} />
+                <span>{item.location}</span>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function renderPanel(key: TabKey) {
+    const list = itemsFor(key);
+    if (list.length === 0) {
+      return (
+        <div className="history__empty">
+          <ClockArrowRotateLeft width={40} height={40} />
+          <div className="history__empty-title">{t("history.empty")}</div>
+          <div>{t("history.emptyHint")}</div>
+        </div>
+      );
+    }
+    return <div className="history__list">{list.map(renderCard)}</div>;
+  }
 
   return (
     <div className="history">
@@ -139,65 +215,16 @@ export default function HistoryPage() {
             {t("common.retry")}
           </button>
         </div>
-      ) : filtered.length === 0 ? (
-        <div className="history__empty">
-          <ClockArrowRotateLeft width={40} height={40} />
-          <div className="history__empty-title">{t("history.empty")}</div>
-          <div>{t("history.emptyHint")}</div>
-        </div>
       ) : (
-        <div className="history__list">
-          {filtered.map((item) => {
-            const status = STATUS_META[item.status] ?? STATUS_META.pending;
-            return (
-              <div
-                key={item.id}
-                className="history-card"
-                role="button"
-                tabIndex={0}
-                onClick={() => setSelected(item)}
-              >
-                <div
-                  className="history-card__media"
-                  style={
-                    item.image
-                      ? { backgroundImage: `url(${item.image})` }
-                      : undefined
-                  }
-                />
-                <div className="history-card__body">
-                  <div className="history-card__title">
-                    {item.subject || t("common.meeting")}
-                  </div>
-                  <span className={`history-chip ${status.className}`}>
-                    {t(status.labelKey)}
-                  </span>
-                  <div className="history-card__info">
-                    {item.room_name && (
-                      <div className="history-card__row">
-                        <PlanetEarth width={16} height={16} />
-                        <span>{item.room_name}</span>
-                      </div>
-                    )}
-                    <div className="history-card__row">
-                      <Clock width={16} height={16} />
-                      <span>
-                        {formatShortDate(item.date)} • {hhmm(item.start_time)} -{" "}
-                        {hhmm(item.end_time)}
-                      </span>
-                    </div>
-                    {item.location && (
-                      <div className="history-card__row">
-                        <MapPin width={16} height={16} />
-                        <span>{item.location}</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
+        <SwipeViews
+          autoHeight
+          index={tabIndex}
+          onIndexChange={(i) => setTab(TABS[i].key)}
+        >
+          {TABS.map((tabItem) => (
+            <div key={tabItem.key}>{renderPanel(tabItem.key)}</div>
+          ))}
+        </SwipeViews>
       )}
 
       {selected && (

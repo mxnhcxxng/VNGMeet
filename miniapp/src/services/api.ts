@@ -7,6 +7,9 @@ import type {
   ChatThread,
   FreeRoomsResponse,
   MeResponse,
+  RoomScout,
+  RoomScoutPayload,
+  RoomScoutsResponse,
   ScheduleResponse,
   UpcomingEvent,
   UserProfile,
@@ -140,6 +143,36 @@ export const api = {
         method: "manual",
         ...payload,
       }),
+    }),
+
+  // --- Săn phòng (Room Scout) — dùng CHUNG /api/room-scouts với web. Backend
+  // tự động kiểm tra phòng mỗi phút trong khung giờ đã chọn và đặt ngay khi có
+  // phòng phù hợp (auto-book), suy user từ session JWT như đặt phòng thường. ---
+  roomScouts: () => request<RoomScoutsResponse>("/room-scouts"),
+
+  createRoomScout: (payload: RoomScoutPayload) =>
+    request<{ ok: boolean; scout: RoomScout }>("/room-scouts", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  updateRoomScout: (id: string, payload: RoomScoutPayload) =>
+    request<{ ok: boolean; scout: RoomScout }>(`/room-scouts/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+
+  // Dừng phiên săn phòng (huỷ). outcome mặc định "canceled".
+  stopRoomScout: (id: string, outcome: "canceled" | "success" = "canceled") =>
+    request<{ ok: boolean; status: string }>(
+      `/room-scouts/${id}?outcome=${outcome}`,
+      { method: "DELETE" },
+    ),
+
+  // Xác nhận đã xem tất cả phiên săn phòng thành công (ẩn màn "đã tìm thấy").
+  acknowledgeAllRoomScouts: () =>
+    request<{ ok: boolean }>("/room-scouts/acknowledge-all", {
+      method: "POST",
     }),
 
   chatThreads: () => request<{ threads: ChatThread[] }>("/chat/threads"),

@@ -22,6 +22,8 @@ export interface FreeRoom {
   email?: string | null;
   building?: string | null;
   floor?: string | null;
+  capacity?: number | null; // số chỗ ngồi (nếu BE có)
+  capacity_size?: CapacitySize | null; // small | medium | large
   image?: string | null; // thumbnail_link
   start_time: string; // HH:MM
   end_time: string; // HH:MM
@@ -103,6 +105,61 @@ export interface ScheduleResponse {
   days: string[]; // ISO yyyy-mm-dd, today .. today+N-1
   times: string[]; // nhãn giờ trong khung giờ làm việc, vd "09:00"
   rooms: ScheduleRoom[];
+}
+
+// --- Săn phòng (Room Scout) — khớp GET/POST /api/room-scouts của backend, dùng
+// CHUNG shape với bản web (frontend/lib/api.ts RoomScout / RoomScoutPayload). ---
+
+export type CapacitySize = "small" | "medium" | "large";
+
+// Một phiên săn phòng. Backend tự động kiểm tra phòng trống mỗi phút trong khung
+// giờ đã chọn và đặt ngay khi có phòng phù hợp → status chuyển "success".
+export interface RoomScout {
+  id: string;
+  email: string;
+  scout_date: string; // ISO "yyyy-mm-dd"
+  duration_minutes: number;
+  capacity_size?: CapacitySize | null;
+  capacity_sizes?: CapacitySize[] | null;
+  scout_start_time?: string | null; // "HH:MM"
+  scout_end_time?: string | null; // "HH:MM"
+  ignore_lunch_break?: boolean;
+  office?: string | null;
+  status: "active" | "stopped" | "expired" | "failed" | "canceled" | "success";
+  last_checked_at?: string | null;
+  expires_at: string;
+  created_at: string;
+  // Set khi auto-book thành công → dựng màn "đã tìm thấy phòng".
+  booked_room_email?: string | null;
+  booked_start_time?: string | null; // "HH:MM"
+  booked_end_time?: string | null; // "HH:MM"
+  acknowledged_at?: string | null;
+  booked_room?: {
+    name?: string | null;
+    email?: string | null;
+    building?: string | null;
+    floor?: string | null;
+    zone?: string | null;
+    capacity_size?: CapacitySize | null;
+    thumbnail_link?: string | null;
+    map_link?: string | null;
+  } | null;
+}
+
+// Payload tạo/cập nhật phiên săn phòng (POST/PATCH /api/room-scouts).
+export interface RoomScoutPayload {
+  scout_date: string; // ISO "yyyy-mm-dd"
+  duration_minutes: number;
+  capacity_sizes: CapacitySize[];
+  scout_start_time: string; // "HH:MM"
+  scout_end_time: string; // "HH:MM"
+  ignore_lunch_break?: boolean;
+  office?: string | null;
+}
+
+export interface RoomScoutsResponse {
+  scouts: RoomScout[];
+  can_send_mail: boolean;
 }
 
 // Chế độ giao diện + ngôn ngữ — khớp giá trị hợp lệ của backend (theme:

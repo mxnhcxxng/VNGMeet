@@ -249,6 +249,25 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
   color: var(--vm-accent-soft-fg);
 }
 
+// --- Trang trượt ngang đổi tab (SwipeViews) ---
+// Vuốt dọc vẫn cuộn trang nhờ pan-y; vuốt ngang do JS xử lý (trượt track).
+.swipe-views {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  touch-action: pan-y;
+}
+.swipe-views__track {
+  display: flex;
+  will-change: transform;
+}
+.swipe-views__panel {
+  flex: none;
+  width: 100%;
+  // Không cho co lại; mỗi trang đúng bằng bề ngang viewport.
+  align-self: flex-start;
+}
+
 // --- Panel phòng trống: luôn giữ chiều cao (4 ô) để không giật khi đổi tab ---
 .room-panel {
   position: relative;
@@ -276,6 +295,7 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
   background-color: #3f3f46; // fallback khi phòng chưa có ảnh
   background-size: cover;
   background-position: center;
+  cursor: pointer;
 }
 .event-card__overlay {
   position: absolute;
@@ -400,11 +420,20 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
   background: var(--vm-surface-2);
   color: var(--vm-muted);
 }
-// Chip đặt trên ảnh: nền trắng mờ + blur để đọc rõ trên nền ảnh.
+// Chip đặt trên ảnh: nền trắng mờ + blur để đọc rõ trên nền ảnh. Chữ luôn màu
+// tối cố định (không dùng --vm-ink) vì nền chip luôn trắng — dark mode để ink
+// thành trắng sẽ làm mất chữ.
 .room-chip--onmedia {
   background: rgba(255, 255, 255, 0.9);
-  color: var(--vm-ink);
+  color: #18181b;
   backdrop-filter: blur(4px);
+}
+// Chip sức chứa: "tên size (khoảng số + icon người)" — khớp subtext màn Tìm phòng.
+.room-chip--cap {
+  gap: 2px;
+}
+.room-chip--cap svg {
+  flex: none;
 }
 
 // ===================================================================
@@ -893,10 +922,10 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
   flex-direction: column;
   gap: 20px;
 }
-.mtg-detail__heading {
+.mtg-detail__main {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 12px;
 }
 .mtg-detail__title {
   margin: 0;
@@ -904,11 +933,6 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
   font-weight: 600;
   line-height: 26px;
   color: var(--vm-ink);
-}
-.mtg-detail__subtitle {
-  font-size: 16px;
-  line-height: 22px;
-  color: var(--vm-muted);
 }
 .mtg-detail__map {
   display: block;
@@ -1436,6 +1460,377 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
   cursor: pointer;
 }
 
+// ZaUI Snackbar (toast): mặc định bottom 12px → dính sát lề dưới / home indicator.
+// Nâng lên chừa vùng an toàn để đọc được rõ (áp dụng cho mọi toast).
+.zaui-snackbar-bottom {
+  bottom: calc(24px + var(--zaui-safe-area-inset-bottom, 0px));
+}
+
+// ===================================================================
+// Màn "Săn phòng" (Room Scout) — overlay trượt từ phải, giống Tìm phòng
+// ===================================================================
+.scout {
+  position: fixed;
+  inset: 0;
+  z-index: 66; // trên home & Tìm phòng (65), dưới booking-modal (70)
+  display: flex;
+  flex-direction: column;
+  background: var(--vm-surface);
+  transform: translateX(100%);
+  transition: transform 0.26s ease;
+  will-change: transform;
+}
+.scout.is-open {
+  transform: translateX(0);
+}
+// Màn chỉnh sửa đè lên màn "đang săn" (66) — dưới booking-modal (70).
+.scout--layer {
+  z-index: 67;
+}
+
+// Trạng thái loading (căn giữa) — dùng chung phong cách với .fr__state.
+.scout__state {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  color: var(--vm-muted);
+  font-size: 14px;
+}
+
+.scout__scroll {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 16px;
+}
+.scout__subtitle {
+  margin: 0;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--vm-muted);
+}
+.scout__form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.scout__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+// Nhãn cụm "Khung giờ tìm phòng" (2 picker) — khớp nhãn của ZaUI Picker/Input.
+.scout__label {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  color: var(--vm-ink);
+}
+.scout__range-row {
+  display: flex;
+  gap: 12px;
+}
+.scout__range-row > * {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.scout__chevron {
+  color: var(--vm-muted);
+}
+.scout__lunch {
+  margin-top: 6px;
+}
+// Chú thích "tự dừng lúc 00:00" — nền nhạt + icon accent.
+.scout__note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--vm-surface-2);
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--vm-muted);
+}
+.scout__note svg {
+  flex: none;
+  margin-top: 1px;
+  color: var(--vm-blue);
+}
+
+// Thanh nút đáy — cùng phong cách booking-modal__actions.
+.scout__actions {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  padding: 12px 16px;
+  padding-bottom: calc(12px + var(--zaui-safe-area-inset-bottom, 0px));
+  background: var(--vm-surface);
+  border-top: 1px solid var(--vm-separator);
+}
+.scout__actions-row {
+  display: flex;
+  gap: 8px;
+}
+.scout__actions-row > button {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+// --- Sức chứa (multi-select chips) ---
+.scout__caps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.scout__cap-chip {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 10px 8px;
+  border: 1px solid var(--vm-separator);
+  border-radius: 10px;
+  background: var(--vm-surface);
+  color: var(--vm-ink);
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+.scout__cap-name {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 18px;
+}
+// Số lượng người tách xuống dòng riêng, cỡ nhỏ + mờ hơn.
+.scout__cap-range {
+  font-size: 12px;
+  line-height: 16px;
+  opacity: 0.7;
+}
+.scout__cap-chip.is-active {
+  border-color: var(--vm-blue);
+  background: var(--vm-accent-soft-bg);
+  color: var(--vm-accent-soft-fg);
+}
+
+// ZaUI Picker/DatePicker: chevron ở suffix bị sát mép phải → chừa 12px cho đều
+// (DatePicker vốn có .zaui-date-picker-suffix margin-right 12px, bỏ để khỏi cộng
+// dồn thành 24px). Chỉ ảnh hưởng input trigger nằm trong .scout.
+.scout .zaui-input-suffix {
+  margin-right: 12px;
+}
+.scout .zaui-date-picker-suffix {
+  margin-right: 0;
+}
+
+// --- Thẻ "đang săn phòng" ---
+.scout__hero {
+  position: relative;
+  flex: none;
+  height: 150px;
+  border-radius: 12px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  background: linear-gradient(135deg, #3a8bff 0%, var(--vm-blue) 100%);
+}
+.scout__hero-img {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+}
+.scout__hero-img--fade {
+  animation: scout-thumb-fade 0.6s ease;
+}
+@keyframes scout-thumb-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.scout__scouting-title {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 30px;
+  color: var(--vm-ink);
+}
+.scout__dots {
+  display: inline-block;
+  width: 22px;
+  text-align: left;
+  margin-left: 2px;
+}
+.scout__detail {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 14px;
+}
+.scout__detail-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.scout__detail-row dt {
+  color: var(--vm-muted);
+}
+.scout__detail-row dd {
+  margin: 0;
+  font-weight: 500;
+  color: var(--vm-ink);
+  text-align: right;
+}
+.scout__scouting-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.scout__grow {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.scout__edit-btn {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: var(--vm-blue);
+  color: #fff;
+  cursor: pointer;
+}
+.scout__edit-btn:disabled {
+  opacity: 0.5;
+}
+
+// --- Thẻ "đã tìm thấy phòng" (full-screen, ảnh nền + gradient) ---
+.scout__success {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  background: var(--vm-surface);
+  padding: 16px;
+  gap: 16px;
+}
+.scout__success-bg {
+  position: relative;
+  flex: 1 1 auto;
+  border-radius: 16px;
+  overflow: hidden;
+  background-color: #3f3f46;
+  background-size: cover;
+  background-position: center;
+  // Chừa vùng an toàn phía trên (notch) vì màn này không có header.
+  padding-top: var(--zaui-safe-area-inset-top, 0px);
+}
+.scout__success-grad {
+  position: absolute;
+  inset-inline: 0;
+  height: 45%;
+  pointer-events: none;
+}
+.scout__success-grad--top {
+  top: 0;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.8) 0%, rgba(0, 0, 0, 0) 100%);
+}
+.scout__success-grad--bottom {
+  bottom: 0;
+  background: linear-gradient(0deg, rgba(0, 0, 0, 0.9) 0%, rgba(0, 0, 0, 0) 100%);
+}
+.scout__success-top {
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  padding: calc(20px + var(--zaui-safe-area-inset-top, 0px)) 20px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: #fff;
+}
+.scout__success-heading {
+  margin: 0;
+  white-space: pre-line;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 30px;
+}
+.scout__success-sub {
+  margin: 0;
+  font-size: 15px;
+  line-height: 22px;
+}
+.scout__success-bottom {
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  color: #fff;
+  text-align: center;
+}
+.scout__success-room {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 26px;
+}
+.scout__success-email {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  opacity: 0.9;
+}
+.scout__success-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 2px;
+}
+.scout__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 16px;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.22);
+  backdrop-filter: blur(4px);
+}
+.scout__chip--cap {
+  background: #f05a22; // chip sức chứa nhấn cam (khớp mockup web)
+}
+
 // ===================================================================
 // Tab Tài khoản = màn Cài đặt (giao diện + ngôn ngữ)
 // ===================================================================
@@ -1669,5 +2064,47 @@ body[zaui-theme="dark"] {
   }
   .history-chip--canceled {
     color: #a1a1aa;
+  }
+
+  // ZaUI Picker / DatePicker sheet: zaui.css chỉ có biến `--zaui-light-*` (không
+  // có bản dark) nên sheet luôn sáng → vỡ dark mode. Sheet render trong portal là
+  // con của <body> (nơi đặt zaui-theme) nên định nghĩa lại các biến này ở scope
+  // dark là chúng kế thừa xuống. Khớp mockup: nền tối, chữ xám, dòng chọn nền
+  // sáng nhẹ + chữ xanh.
+  --zaui-light-modal-background: #17181c;
+  --zaui-light-modal-divider: var(--vm-separator);
+  --zaui-light-picker-title-color: var(--vm-ink);
+  --zaui-light-picker-option-color: var(--vm-muted);
+  --zaui-light-picker-option-selected-color: var(--vm-blue);
+  --zaui-light-picker-selected-background-color: rgba(255, 255, 255, 0.08);
+
+  // Phòng khi sheet dùng .zaui-sheet-content thay cho .zaui-modal-content.
+  .zaui-sheet-content {
+    background: #17181c;
+  }
+
+  // Skeleton: nền đã kế thừa --vm-surface-2 (tối), nhưng vệt shimmer trắng 0.6
+  // quá gắt trên nền tối → làm dịu bằng dải sáng mờ.
+  .skeleton::after {
+    background: linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0) 0%,
+      rgba(255, 255, 255, 0.08) 50%,
+      rgba(255, 255, 255, 0) 100%
+    );
+  }
+
+  // Chip toà/tầng trên card phòng: dark mode → nền tối mờ + chữ trắng (thay vì
+  // nền trắng + chữ đen như light mode).
+  .room-chip--onmedia {
+    background: rgba(0, 0, 0, 0.55);
+    color: #fff;
+  }
+
+  // Nút "Xem chi tiết" trên event card: dark mode → nền tối + chữ trắng (light
+  // mode là nền trắng + chữ đen).
+  .event-card__cta {
+    background: rgba(0, 0, 0, 0.55);
+    color: #fff;
   }
 }

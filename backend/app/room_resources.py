@@ -813,6 +813,8 @@ async def free_rooms_today(request: Request):
                 "email": e["room"].get("email"),
                 "building": e["room"].get("building"),
                 "floor": e["room"].get("floor"),
+                "capacity": e["room"].get("capacity"),
+                "capacity_size": e["room"].get("capacity_size"),
                 "image": e["room"].get("thumbnail_link"),
                 "start_time": _hhmm(e["start_min"]),
                 "end_time": _hhmm(e["start_min"] + duration),

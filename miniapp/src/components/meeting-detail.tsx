@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
 
 import ChevronLeft from "@gravity-ui/icons/ChevronLeft";
-import Calendar from "@gravity-ui/icons/Calendar";
+import PlanetEarth from "@gravity-ui/icons/PlanetEarth";
 import Clock from "@gravity-ui/icons/Clock";
 import MapPin from "@gravity-ui/icons/MapPin";
 import Persons from "@gravity-ui/icons/Persons";
 
 import MapModal from "@/components/map-modal";
 import { useSwipeBack } from "@/hooks/use-swipe-back";
+import { roomFlag } from "@/services/room-flags";
 import { useT } from "@/services/settings";
 import type { UpcomingEvent } from "@/types";
 
@@ -58,6 +59,8 @@ export default function MeetingDetail({ event, onClose }: Props) {
   const swipeBack = useSwipeBack(handleClose, !mapOpen);
 
   const title = event.subject || event.room_name || t("common.meeting");
+  const flag = roomFlag(event.room_name);
+  const dateTime = `${formatDate(event.date)} • ${event.start_time} - ${event.end_time}`;
   const attendees = (event.attendees ?? [])
     .map(stripAttendeeDomain)
     .filter(Boolean);
@@ -89,11 +92,50 @@ export default function MeetingDetail({ event, onClose }: Props) {
 
       <div className="mtg-detail__scroll">
         <section className="mtg-detail__card">
-          <div className="mtg-detail__heading">
+          <div className="mtg-detail__main">
             <h1 className="mtg-detail__title">{title}</h1>
-            {event.room_name && event.room_name !== title && (
-              <div className="mtg-detail__subtitle">{event.room_name}</div>
-            )}
+
+            <div className="mtg-detail__info">
+              {event.room_name && event.room_name !== title && (
+                <div className="mtg-detail__row">
+                  <PlanetEarth width={16} height={16} />
+                  <span>
+                    {flag && `${flag} `}
+                    {event.room_name}
+                  </span>
+                </div>
+              )}
+              <div className="mtg-detail__row">
+                <Clock width={16} height={16} />
+                <span>{dateTime}</span>
+              </div>
+              {event.location && (
+                <div className="mtg-detail__row">
+                  <MapPin width={16} height={16} />
+                  <span>{event.location}</span>
+                </div>
+              )}
+              {attendees.length > 0 && (
+                <div className="mtg-detail__row mtg-detail__row--attendees">
+                  <Persons width={16} height={16} />
+                  <span className="mtg-detail__attendees">
+                    {visibleAttendees.join(", ")}
+                    {!showAllAttendees && extraCount > 0 && (
+                      <>
+                        {"  "}
+                        <button
+                          type="button"
+                          className="mtg-detail__more"
+                          onClick={() => setShowAllAttendees(true)}
+                        >
+                          {t("detail.others", { count: extraCount })}
+                        </button>
+                      </>
+                    )}
+                  </span>
+                </div>
+              )}
+            </div>
           </div>
 
           {event.map && (
@@ -106,45 +148,6 @@ export default function MeetingDetail({ event, onClose }: Props) {
               <img src={event.map} alt={t("detail.mapAlt")} />
             </button>
           )}
-
-          <div className="mtg-detail__info">
-            <div className="mtg-detail__row">
-              <Calendar width={16} height={16} />
-              <span>{formatDate(event.date)}</span>
-            </div>
-            <div className="mtg-detail__row">
-              <Clock width={16} height={16} />
-              <span>
-                {event.start_time} - {event.end_time}
-              </span>
-            </div>
-            {event.location && (
-              <div className="mtg-detail__row">
-                <MapPin width={16} height={16} />
-                <span>{event.location}</span>
-              </div>
-            )}
-            {attendees.length > 0 && (
-              <div className="mtg-detail__row mtg-detail__row--attendees">
-                <Persons width={16} height={16} />
-                <span className="mtg-detail__attendees">
-                  {visibleAttendees.join(", ")}
-                  {!showAllAttendees && extraCount > 0 && (
-                    <>
-                      {"  "}
-                      <button
-                        type="button"
-                        className="mtg-detail__more"
-                        onClick={() => setShowAllAttendees(true)}
-                      >
-                        {t("detail.others", { count: extraCount })}
-                      </button>
-                    </>
-                  )}
-                </span>
-              </div>
-            )}
-          </div>
         </section>
 
         <section className="mtg-detail__card mtg-detail__desc">

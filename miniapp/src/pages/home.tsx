@@ -5,18 +5,27 @@ import Magnifier from "@gravity-ui/icons/Magnifier";
 import Binoculars from "@gravity-ui/icons/Binoculars";
 import MapPin from "@gravity-ui/icons/MapPin";
 import Comment from "@gravity-ui/icons/Comment";
-import Calendar from "@gravity-ui/icons/Calendar";
+import PlanetEarth from "@gravity-ui/icons/PlanetEarth";
 import Clock from "@gravity-ui/icons/Clock";
+import PersonFill from "@gravity-ui/icons/PersonFill";
 import ArrowsRotateRight from "@gravity-ui/icons/ArrowsRotateRight";
 
 import favicon from "@/static/favicon-white.png";
 import MeetingDetail from "@/components/meeting-detail";
 import BookingModal from "@/components/booking-modal";
 import FindRoom from "@/pages/find-room";
+import RoomScout from "@/pages/room-scout";
 import { useDisplayName } from "@/services/auth";
 import { api, AuthError } from "@/services/api";
+import { roomFlag } from "@/services/room-flags";
 import { useT } from "@/services/settings";
-import type { FreeRoom, FreeRoomsResponse, UpcomingEvent } from "@/types";
+import type { TranslationKey } from "@/services/i18n";
+import type {
+  CapacitySize,
+  FreeRoom,
+  FreeRoomsResponse,
+  UpcomingEvent,
+} from "@/types";
 
 // Chatbot Zalo OA — bấm nút "Chatbot" mở cửa sổ chat với OA này.
 const CHATBOT_OA_ID = "4092201589741480262";
@@ -45,6 +54,21 @@ function durationLabel(minutes: number): string {
   return `${minutes / 60}h`;
 }
 
+// Cỡ sức chứa (khớp find-room): capacity số → nhóm; hoặc dùng capacity_size sẵn.
+const CAP_RANGE: Record<CapacitySize, string> = {
+  small: "≤4",
+  medium: "5–12",
+  large: "13+",
+};
+function capacitySize(room: FreeRoom): CapacitySize | null {
+  if (typeof room.capacity === "number") {
+    if (room.capacity <= 4) return "small";
+    if (room.capacity <= 12) return "medium";
+    return "large";
+  }
+  return room.capacity_size ?? null;
+}
+
 const DEFAULT_DURATION = 60; // tab "1h" chọn sẵn (khớp Figma)
 
 // Màn Home theo Figma (node 286-9472). Icon dùng bộ @gravity-ui/icons y hệt bản
@@ -66,6 +90,8 @@ export default function HomePage() {
   const [detailOpen, setDetailOpen] = useState(false);
   // Mở màn "Tìm phòng" (overlay push từ phải).
   const [findOpen, setFindOpen] = useState(false);
+  // Mở màn "Săn phòng" (overlay push từ phải).
+  const [scoutOpen, setScoutOpen] = useState(false);
   // Phòng đang chọn để đặt (mở BookingModal).
   const [selectedRoom, setSelectedRoom] = useState<FreeRoom | null>(null);
 
@@ -76,7 +102,12 @@ export default function HomePage() {
       Icon: Magnifier,
       onClick: () => setFindOpen(true),
     },
-    { key: "scout", label: t("action.scout"), Icon: Binoculars, onClick: undefined },
+    {
+      key: "scout",
+      label: t("action.scout"),
+      Icon: Binoculars,
+      onClick: () => setScoutOpen(true),
+    },
     { key: "direction", label: t("action.direction"), Icon: MapPin, onClick: undefined },
     { key: "chatbot", label: t("action.chatbot"), Icon: Comment, onClick: openChatbot },
   ];
@@ -136,6 +167,10 @@ export default function HomePage() {
   const roomsTitle = freeRooms?.isTomorrow
     ? t("home.freeTomorrow")
     : t("home.freeToday");
+  // Tiêu đề card = tiêu đề cuộc họp; thiếu thì lùi về tên phòng.
+  const eventTitle = event
+    ? event.subject || event.room_name || t("common.meeting")
+    : "";
 
   return (
     <div className="home">
@@ -189,6 +224,9 @@ export default function HomePage() {
           <div className="home-section__title">{t("home.upcoming")}</div>
           <div
             className="event-card"
+            role="button"
+            tabIndex={0}
+            onClick={() => setDetailOpen(true)}
             style={
               event.image
                 ? { backgroundImage: `url(${event.image})` }
@@ -197,17 +235,20 @@ export default function HomePage() {
           >
             <div className="event-card__overlay" />
             <div className="event-card__body">
-              <div className="event-card__title">
-                {event.room_name || event.subject || t("common.meeting")}
-              </div>
-              <div className="event-card__row">
-                <Calendar width={16} height={16} />
-                <span>{formatDate(event.date)}</span>
-              </div>
+              <div className="event-card__title">{eventTitle}</div>
+              {event.room_name && event.room_name !== eventTitle && (
+                <div className="event-card__row">
+                  <PlanetEarth width={16} height={16} />
+                  <span>
+                    {roomFlag(event.room_name) && `${roomFlag(event.room_name)} `}
+                    {event.room_name}
+                  </span>
+                </div>
+              )}
               <div className="event-card__row">
                 <Clock width={16} height={16} />
                 <span>
-                  {event.start_time} - {event.end_time}
+                  {formatDate(event.date)} • {event.start_time} - {event.end_time}
                 </span>
               </div>
               {event.location && (
@@ -292,23 +333,26 @@ export default function HomePage() {
                         : undefined
                     }
                   >
-                    {(room.building || room.floor) && (
-                      <div className="room-chips">
-                        {room.building && (
-                          <span className="room-chip room-chip--onmedia">
-                            {room.building}
+                    {(() => {
+                      const cap = capacitySize(room);
+                      return cap ? (
+                        <div className="room-chips">
+                          <span className="room-chip room-chip--onmedia room-chip--cap">
+                            <span>
+                              {t(`cap.${cap}` as TranslationKey)} ({CAP_RANGE[cap]}
+                            </span>
+                            <PersonFill width={11} height={11} />
+                            <span>)</span>
                           </span>
-                        )}
-                        {room.floor && (
-                          <span className="room-chip room-chip--onmedia">
-                            {t("common.floor", { floor: room.floor })}
-                          </span>
-                        )}
-                      </div>
-                    )}
+                        </div>
+                      ) : null;
+                    })()}
                   </div>
                   <div className="room-card__info">
-                    <div className="room-card__name">{room.name}</div>
+                    <div className="room-card__name">
+                      {roomFlag(room.name) && `${roomFlag(room.name)} `}
+                      {room.name}
+                    </div>
                     <div className="room-card__time">
                       {room.start_time} - {room.end_time}
                     </div>
@@ -340,6 +384,8 @@ export default function HomePage() {
       )}
 
       {findOpen && <FindRoom onClose={() => setFindOpen(false)} />}
+
+      {scoutOpen && <RoomScout onClose={() => setScoutOpen(false)} />}
 
       {selectedRoom && freeRooms && (
         <BookingModal
