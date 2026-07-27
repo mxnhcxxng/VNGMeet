@@ -8,6 +8,7 @@ import PersonFill from "@gravity-ui/icons/PersonFill";
 import PlanetEarth from "@gravity-ui/icons/PlanetEarth";
 
 import BookingModal from "@/components/booking-modal";
+import { useAxisLock } from "@/hooks/use-axis-lock";
 import { useSwipeBack } from "@/hooks/use-swipe-back";
 import { api, AuthError } from "@/services/api";
 import { roomFlag } from "@/services/room-flags";
@@ -17,6 +18,13 @@ import type { FreeRoom, ScheduleResponse, ScheduleRoom } from "@/types";
 
 // Số ngày nạp về — khớp RANGE_DAYS của web (today .. today+15, tới ~10/8).
 const DAYS = 16;
+// Chu kỳ tự làm mới lưới lịch (chỉ khi màn đang hiển thị) — khớp web
+// (BROWSE_REFRESH_INTERVAL_MS = 2 phút). Availability đọc từ cache Supabase nên
+// làm mới định kỳ để bắt thay đổi (phòng vừa bị đặt/nhả).
+const GRID_REFRESH_MS = 2 * 60 * 1000;
+// Cache cấp module cho lưới lịch: mở lại màn "Tìm phòng" render ngay từ cache rồi
+// revalidate ngầm (sống trong phiên, mất khi reload app).
+let cachedSchedule: ScheduleResponse | null = null;
 // Chiều cao 1 hàng giờ (px) — phải KHỚP --fr-row-h trong app.scss (dùng cho
 // auto-scroll về khung giờ làm việc + định vị thanh "now").
 const ROW_H = 44;
@@ -168,12 +176,13 @@ export default function FindRoom({ onClose }: Props) {
   const [entered, setEntered] = useState(false);
   const [leaving, setLeaving] = useState(false);
 
-  const [data, setData] = useState<ScheduleResponse | null>(null);
+  const [data, setData] = useState<ScheduleResponse | null>(cachedSchedule);
   const [office, setOffice] = useState<string>("");
   const [userBuilding, setUserBuilding] = useState<string>("");
   const [userFloor, setUserFloor] = useState<string>("");
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
-  const [loading, setLoading] = useState(true);
+  // Skeleton chỉ lần đầu chưa có cache; có cache thì render ngay + nạp ngầm.
+  const [loading, setLoading] = useState(cachedSchedule === null);
   const [error, setError] = useState(false);
   const [dayIndex, setDayIndex] = useState(0);
   const [selected, setSelected] = useState<Selection | null>(null);
@@ -185,6 +194,9 @@ export default function FindRoom({ onClose }: Props) {
   const [now, setNow] = useState(() => new Date());
 
   const gridWrapRef = useRef<HTMLDivElement>(null);
+  // Lưới lịch cuộn 2 chiều → khoá hướng: mỗi cử chỉ chỉ cuộn ngang HOẶC dọc.
+  // Trả về callback ref (gắn listener đúng lúc lưới mount) + vẫn set gridWrapRef.
+  const setGridWrap = useAxisLock(gridWrapRef);
   const didAutoScroll = useRef(false);
   // Nút ngày đang chọn — dùng để cuộn dải ngày sao cho nó luôn nằm trong tầm nhìn.
   const activeDayRef = useRef<HTMLButtonElement | null>(null);
@@ -208,7 +220,7 @@ export default function FindRoom({ onClose }: Props) {
   const swipeBack = useSwipeBack(handleClose, !booking);
 
   async function load() {
-    setLoading(true);
+    if (cachedSchedule === null) setLoading(true);
     setError(false);
     try {
       // Hồ sơ (office/toà/tầng + phòng ưa thích) và lịch phòng nạp song song.
@@ -216,6 +228,7 @@ export default function FindRoom({ onClose }: Props) {
         api.me().catch(() => null),
         api.availability(DAYS),
       ]);
+      cachedSchedule = res;
       setData(res);
       setOffice((me?.profile?.office ?? "").trim());
       setUserBuilding((me?.profile?.building ?? "").trim());
@@ -232,8 +245,34 @@ export default function FindRoom({ onClose }: Props) {
     }
   }
 
+  // Làm mới ngầm CHỈ lưới lịch (không đụng loading/hồ sơ) — dùng cho chu kỳ tự
+  // cập nhật; lỗi thì giữ nguyên dữ liệu cũ.
+  async function refreshSchedule() {
+    try {
+      const res = await api.availability(DAYS);
+      cachedSchedule = res;
+      setData(res);
+    } catch {
+      /* im lặng — giữ lưới hiện tại */
+    }
+  }
+
   useEffect(() => {
     void load();
+  }, []);
+
+  // Tự làm mới lưới mỗi GRID_REFRESH_MS khi màn đang hiển thị (khớp web). Booking
+  // xong cũng làm mới ngay để bắt phản hồi phòng.
+  useEffect(() => {
+    const tick = () => {
+      if (document.visibilityState === "visible") void refreshSchedule();
+    };
+    const id = window.setInterval(tick, GRID_REFRESH_MS);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener("visibilitychange", tick);
+    };
   }, []);
 
   // Đổi ngày thì bỏ ô đang chọn (ô thuộc ngày cũ).
@@ -495,7 +534,7 @@ export default function FindRoom({ onClose }: Props) {
         ) : rooms.length === 0 ? (
           <div className="fr__state">{t("find.noRooms")}</div>
         ) : (
-          <div className="fr__grid-wrap" ref={gridWrapRef}>
+          <div className="fr__grid-wrap" ref={setGridWrap}>
             <div className="fr__grid" style={{ gridTemplateColumns: gridCols }}>
               {/* Hàng tiêu đề: góc "Giờ" + tên phòng (tim + cờ + sức chứa) */}
               <div className="fr__corner">{t("find.hour")}</div>
@@ -570,7 +609,10 @@ export default function FindRoom({ onClose }: Props) {
           <div className="fr__actions-info">
             <div className="fr__info-item">
               <PlanetEarth className="fr__info-icon" width={16} height={16} />
-              <span className="fr__info-text">{selectedInfo.name}</span>
+              <span className="fr__info-text">
+                {roomFlag(selectedInfo.name) && `${roomFlag(selectedInfo.name)} `}
+                {selectedInfo.name}
+              </span>
             </div>
             <div className="fr__info-item">
               <Clock className="fr__info-icon" width={16} height={16} />

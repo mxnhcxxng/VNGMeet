@@ -41,16 +41,41 @@ textarea {
   cursor: pointer;
 }
 
+// Khung cuộn chính của zmp-ui mặc định `overflow: auto` (cuộn CẢ 2 chiều) +
+// `-webkit-overflow-scrolling: touch`. Hai thứ này gây:
+//  1) Cuộn chéo "360" (kéo nền là trôi cả ngang lẫn dọc).
+//  2) Bug WKWebView: position: sticky KHÔNG dính trong container có
+//     -webkit-overflow-scrolling: touch → header/tab bị trôi mất.
+// → Ép chỉ cuộn DỌC (bỏ trục ngang) và tắt scrolling-touch để sticky hoạt động.
+.zaui-page {
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: auto;
+}
+
 // ===================================================================
 // Home screen (khớp Figma: node 286-9472)
 // ===================================================================
 .home {
+  position: relative;
   min-height: 100%;
   background: var(--vm-surface);
   // Chừa chỗ cho bottom-nav (~64px + safe area) và thêm 40px để nội dung không
   // sát lề dưới.
   padding-bottom: calc(64px + 40px + var(--zaui-safe-area-inset-bottom, 0px));
   color: var(--vm-ink);
+}
+// Tấm phủ xanh phía TRÊN nội dung: chỉ lộ ra khi kéo quá đỉnh (overscroll/
+// rubber-band). Nhờ vậy pull-down thấy nền xanh khớp hero, không lộ trắng/đen
+// của khung cuộn phía sau. Không ảnh hưởng bố cục (nằm ngoài vùng nội dung).
+.home::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -600px;
+  height: 600px;
+  background: var(--vm-blue);
+  pointer-events: none;
 }
 
 // Sentinel 0px ở đỉnh nội dung để phát hiện trạng thái đã cuộn (header sticky).
@@ -227,6 +252,8 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
   gap: 8px;
   margin-bottom: 12px;
   overflow-x: auto;
+  // Chỉ cuộn ngang; cử chỉ dọc để trang cuộn (không cuộn chéo).
+  touch-action: pan-x;
   scrollbar-width: none;
 }
 .duration-tabs::-webkit-scrollbar {
@@ -456,6 +483,7 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
 .booking-modal__scroll {
   flex: 1 1 auto;
   overflow-y: auto;
+  touch-action: pan-y;
   display: flex;
   flex-direction: column;
   gap: 20px;
@@ -654,10 +682,22 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
 // Tab Lịch sử đặt phòng (Figma 346-1292)
 // ===================================================================
 .history {
+  position: relative;
   min-height: 100%;
   background: #f9fafb;
   // Chừa chỗ cho bottom-nav (~64px + safe area) + 40px lề dưới (khớp Figma).
   padding-bottom: calc(64px + 40px + var(--zaui-safe-area-inset-bottom, 0px));
+}
+// Tấm phủ xanh phía trên (khớp header xanh) — chỉ lộ khi kéo quá đỉnh.
+.history::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -600px;
+  height: 600px;
+  background: var(--vm-blue);
+  pointer-events: none;
 }
 
 // Header xanh cố định trên đỉnh, canh giữa dọc → thẳng hàng với cụm nút
@@ -681,7 +721,12 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
 }
 
 // Tab lọc theo thời gian (Tất cả / Sắp tới / Đã qua) — dải trắng dưới header.
+// Sticky ngay dưới header xanh: khi cuộn chỉ danh sách trôi, cụm header + tab
+// đứng yên. top = chiều cao header (44px + safe-area). z thấp hơn header (30).
 .history__tabs {
+  position: sticky;
+  top: calc(44px + var(--zaui-safe-area-inset-top, 0px));
+  z-index: 29;
   display: flex;
   gap: 8px;
   padding: 12px;
@@ -910,6 +955,7 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
 .mtg-detail__scroll {
   flex: 1 1 auto;
   overflow-y: auto;
+  touch-action: pan-y;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -1114,6 +1160,7 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
   display: flex;
   gap: 4px;
   overflow-x: auto;
+  touch-action: pan-x;
   scrollbar-width: none;
   scroll-behavior: smooth;
   // Chặn hiệu ứng "spring"/rubber-band khi cuộn hết cỡ (none = tắt cả bounce).
@@ -1178,6 +1225,10 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
   // Chặn hiệu ứng "spring"/rubber-band khi cuộn hết cỡ, cả 2 chiều.
   overscroll-behavior: none;
   -webkit-overflow-scrolling: auto;
+  // useAxisLock tự lái cuộn (preventDefault) để khoá 1 trục/cử chỉ → tắt hẳn
+  // cử chỉ cuộn native ở đây, nếu không webview có thể bắt đầu cuộn chéo trong
+  // vài px đầu rồi phớt lờ preventDefault suốt phần còn lại của cử chỉ.
+  touch-action: none;
 }
 .fr__grid {
   display: grid;
@@ -1220,8 +1271,9 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
   font-weight: 600;
   line-height: 16px;
   white-space: nowrap;
-  // Viền trắng phía ngoài, bám theo bo góc của viên (thay cho nền vuông).
-  box-shadow: 0 0 0 2px #fff;
+  // Viền ngoài bám bo góc của viên (thay nền vuông). Dùng biến surface để tự
+  // đổi theo sáng/tối (nền lưới = --vm-surface) thay vì #fff cứng.
+  box-shadow: 0 0 0 2px var(--vm-surface);
 }
 .fr__now-line {
   flex: 1 1 auto;
@@ -1502,6 +1554,7 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
 .scout__scroll {
   flex: 1 1 auto;
   overflow-y: auto;
+  touch-action: pan-y;
   display: flex;
   flex-direction: column;
   gap: 20px;

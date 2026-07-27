@@ -70,21 +70,28 @@ function toEvent(item: BookingHistoryItem): UpcomingEvent {
   };
 }
 
+// Cache cấp module: đổi tab dưới (Home/History/Account) làm unmount trang nên
+// state mất; giữ ở đây để quay lại render tức thì rồi revalidate ngầm (giống web
+// BookingHistory). Sống trong phiên, không persist khi reload app.
+let cachedBookings: BookingHistoryItem[] | null = null;
+
 // Tab "Lịch sử đặt phòng" (Figma 346-1292): header xanh + tab lọc + danh sách
 // thẻ lịch sử (nối BE qua GET /api/bookings). Bấm 1 thẻ → màn chi tiết lịch họp.
 export default function HistoryPage() {
   const t = useT();
-  const [items, setItems] = useState<BookingHistoryItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [items, setItems] = useState<BookingHistoryItem[]>(cachedBookings ?? []);
+  // Skeleton chỉ hiện lần đầu chưa có cache; có cache thì render ngay + nạp ngầm.
+  const [loading, setLoading] = useState(cachedBookings === null);
   const [error, setError] = useState(false);
   const [tab, setTab] = useState<TabKey>("all");
   const [selected, setSelected] = useState<BookingHistoryItem | null>(null);
 
   async function load() {
-    setLoading(true);
+    if (cachedBookings === null) setLoading(true);
     setError(false);
     try {
       const { bookings } = await api.bookingHistory();
+      cachedBookings = bookings;
       setItems(bookings);
     } catch (e) {
       if (!(e instanceof AuthError)) setError(true);

@@ -12,6 +12,7 @@ import ArrowsRotateRight from "@gravity-ui/icons/ArrowsRotateRight";
 
 import favicon from "@/static/favicon-white.png";
 import MeetingDetail from "@/components/meeting-detail";
+import SwipeViews from "@/components/swipe-views";
 import BookingModal from "@/components/booking-modal";
 import FindRoom from "@/pages/find-room";
 import RoomScout from "@/pages/room-scout";
@@ -71,6 +72,12 @@ function capacitySize(room: FreeRoom): CapacitySize | null {
 
 const DEFAULT_DURATION = 60; // tab "1h" chọn sẵn (khớp Figma)
 
+// Cache cấp module (sống qua việc chuyển tab dưới, mất khi reload app): quay lại
+// Home render ngay từ cache rồi revalidate ngầm — không nháy skeleton.
+let cachedEvent: UpcomingEvent | null = null;
+let cachedEventLoaded = false;
+let cachedFreeRooms: FreeRoomsResponse | null = null;
+
 // Màn Home theo Figma (node 286-9472). Icon dùng bộ @gravity-ui/icons y hệt bản
 // web, font Inter. "Lịch sắp tới" + "Phòng trống" lấy từ BE.
 export default function HomePage() {
@@ -79,13 +86,15 @@ export default function HomePage() {
   const [scrolled, setScrolled] = useState(false);
   const sentinelRef = useRef<HTMLDivElement>(null);
 
-  const [event, setEvent] = useState<UpcomingEvent | null>(null);
-  const [freeRooms, setFreeRooms] = useState<FreeRoomsResponse | null>(null);
+  const [event, setEvent] = useState<UpcomingEvent | null>(cachedEvent);
+  const [freeRooms, setFreeRooms] = useState<FreeRoomsResponse | null>(
+    cachedFreeRooms,
+  );
   const [duration, setDuration] = useState(DEFAULT_DURATION);
   const [refreshing, setRefreshing] = useState(false);
   // Loading lần đầu để hiện skeleton: event + phòng trống nạp xong thì tắt.
-  const [eventLoading, setEventLoading] = useState(true);
-  const [roomsLoaded, setRoomsLoaded] = useState(false);
+  const [eventLoading, setEventLoading] = useState(!cachedEventLoaded);
+  const [roomsLoaded, setRoomsLoaded] = useState(cachedFreeRooms !== null);
   // Mở màn "Chi tiết lịch họp" (overlay push từ phải).
   const [detailOpen, setDetailOpen] = useState(false);
   // Mở màn "Tìm phòng" (overlay push từ phải).
@@ -117,6 +126,7 @@ export default function HomePage() {
     setRefreshing(true);
     try {
       const data = await api.freeRoomsToday();
+      cachedFreeRooms = data;
       setFreeRooms(data);
     } catch (e) {
       if (!(e instanceof AuthError)) setFreeRooms(null);
@@ -132,6 +142,8 @@ export default function HomePage() {
     void (async () => {
       try {
         const { event } = await api.upcomingBooking();
+        cachedEvent = event;
+        cachedEventLoaded = true;
         if (alive) setEvent(event);
       } catch (e) {
         if (!(e instanceof AuthError) && alive) setEvent(null);
@@ -158,12 +170,8 @@ export default function HomePage() {
   }, []);
 
   const durations = freeRooms?.durations ?? [30, 60, 90, 120, 150, 180];
-  const rooms: FreeRoom[] = freeRooms?.byDuration[String(duration)] ?? [];
-  // Luôn render đúng 4 ô để chiều cao panel không đổi khi đổi tab / khi trống.
-  const cells: (FreeRoom | null)[] = Array.from(
-    { length: 4 },
-    (_, i) => rooms[i] ?? null,
-  );
+  // Vị trí tab đang chọn trong danh sách thời lượng (đồng bộ với SwipeViews).
+  const durIndex = Math.max(0, durations.indexOf(duration));
   const roomsTitle = freeRooms?.isTomorrow
     ? t("home.freeTomorrow")
     : t("home.freeToday");
@@ -171,6 +179,77 @@ export default function HomePage() {
   const eventTitle = event
     ? event.subject || event.room_name || t("common.meeting")
     : "";
+
+  // Một thẻ phòng trống (hoặc ô giữ chỗ khi thiếu phòng → panel luôn 4 ô).
+  function renderRoomCell(room: FreeRoom | null, i: number) {
+    if (!room) {
+      return (
+        <div key={`ghost-${i}`} className="room-card room-card--ghost">
+          <div className="room-card__media" />
+          <div className="room-card__info">
+            <div className="room-card__name"> </div>
+            <div className="room-card__time"> </div>
+          </div>
+        </div>
+      );
+    }
+    const cap = capacitySize(room);
+    const flag = roomFlag(room.name);
+    return (
+      <div
+        key={room.email || i}
+        className="room-card"
+        role="button"
+        tabIndex={0}
+        onClick={() => setSelectedRoom(room)}
+      >
+        <div
+          className="room-card__media"
+          style={room.image ? { backgroundImage: `url(${room.image})` } : undefined}
+        >
+          {cap && (
+            <div className="room-chips">
+              <span className="room-chip room-chip--onmedia room-chip--cap">
+                <span>
+                  {t(`cap.${cap}` as TranslationKey)} ({CAP_RANGE[cap]}
+                </span>
+                <PersonFill width={11} height={11} />
+                <span>)</span>
+              </span>
+            </div>
+          )}
+        </div>
+        <div className="room-card__info">
+          <div className="room-card__name">
+            {flag && `${flag} `}
+            {room.name}
+          </div>
+          <div className="room-card__time">
+            {room.start_time} - {room.end_time}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Panel phòng trống cho 1 mốc thời lượng — luôn 4 ô để chiều cao không đổi.
+  function renderRoomPanel(minutes: number) {
+    const list = freeRooms?.byDuration[String(minutes)] ?? [];
+    const cells: (FreeRoom | null)[] = Array.from(
+      { length: 4 },
+      (_, i) => list[i] ?? null,
+    );
+    return (
+      <div className="room-panel">
+        <div className="room-grid">{cells.map(renderRoomCell)}</div>
+        {list.length === 0 && (
+          <div className="room-panel__empty">
+            {refreshing ? t("home.loadingRooms") : t("home.noRooms")}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="home">
@@ -314,68 +393,14 @@ export default function HomePage() {
             ))}
           </div>
         ) : (
-        <div className="room-panel">
-          <div className="room-grid">
-            {cells.map((room, i) =>
-              room ? (
-                <div
-                  key={room.email || i}
-                  className="room-card"
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => setSelectedRoom(room)}
-                >
-                  <div
-                    className="room-card__media"
-                    style={
-                      room.image
-                        ? { backgroundImage: `url(${room.image})` }
-                        : undefined
-                    }
-                  >
-                    {(() => {
-                      const cap = capacitySize(room);
-                      return cap ? (
-                        <div className="room-chips">
-                          <span className="room-chip room-chip--onmedia room-chip--cap">
-                            <span>
-                              {t(`cap.${cap}` as TranslationKey)} ({CAP_RANGE[cap]}
-                            </span>
-                            <PersonFill width={11} height={11} />
-                            <span>)</span>
-                          </span>
-                        </div>
-                      ) : null;
-                    })()}
-                  </div>
-                  <div className="room-card__info">
-                    <div className="room-card__name">
-                      {roomFlag(room.name) && `${roomFlag(room.name)} `}
-                      {room.name}
-                    </div>
-                    <div className="room-card__time">
-                      {room.start_time} - {room.end_time}
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                // Ô giữ chỗ (ẩn) để chiều cao panel không đổi.
-                <div key={`ghost-${i}`} className="room-card room-card--ghost">
-                  <div className="room-card__media" />
-                  <div className="room-card__info">
-                    <div className="room-card__name">{" "}</div>
-                    <div className="room-card__time">{" "}</div>
-                  </div>
-                </div>
-              ),
-            )}
-          </div>
-          {rooms.length === 0 && (
-            <div className="room-panel__empty">
-              {refreshing ? t("home.loadingRooms") : t("home.noRooms")}
-            </div>
-          )}
-        </div>
+          <SwipeViews
+            index={durIndex}
+            onIndexChange={(i) => setDuration(durations[i])}
+          >
+            {durations.map((m) => (
+              <div key={m}>{renderRoomPanel(m)}</div>
+            ))}
+          </SwipeViews>
         )}
       </section>
 

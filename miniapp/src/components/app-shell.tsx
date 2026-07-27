@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Page } from "zmp-ui";
 
 import BottomNav, { TabKey } from "@/components/bottom-nav";
@@ -19,6 +19,19 @@ export default function AppShell() {
   // màn Tài khoản dùng lại (office/floor... cần cho việc lưu cài đặt lên server).
   const [me, setMe] = useState<MeResponse | null>(null);
   const { hydrateFromProfile } = useSettings();
+  // Neo để tìm khung cuộn <Page> (.zaui-page) mà cả 3 tab dùng CHUNG.
+  const scrollAnchorRef = useRef<HTMLDivElement>(null);
+
+  // Ba tab render trong cùng một khung cuộn <Page> nên vị trí cuộn "dính" từ
+  // tab này sang tab kia (Home cuộn xuống → mở Lịch sử vẫn ở giữa trang). Mỗi
+  // lần đổi tab, đưa khung cuộn về đầu để từng tab độc lập và luôn mở ở trên
+  // cùng. useLayoutEffect: reset trước khi vẽ nên không thấy nhảy.
+  useLayoutEffect(() => {
+    const page = scrollAnchorRef.current?.closest(".zaui-page") as
+      | HTMLElement
+      | null;
+    if (page) page.scrollTop = 0;
+  }, [tab]);
 
   useEffect(() => {
     let alive = true;
@@ -39,6 +52,7 @@ export default function AppShell() {
 
   return (
     <Page hideScrollbar>
+      <div ref={scrollAnchorRef} hidden />
       {tab === "home" && <HomePage />}
       {tab === "history" && <HistoryPage />}
       {tab === "account" && <AccountPage me={me} onMeChange={setMe} />}
