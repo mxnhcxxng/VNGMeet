@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { openWebview } from "zmp-sdk";
 import Copy from "@gravity-ui/icons/Copy";
+import Check from "@gravity-ui/icons/Check";
 
 import favicon from "@/static/favicon-white.png";
 import qrCode from "@/static/qr-vngmeet.png";
@@ -70,7 +71,12 @@ export default function BlockScreen() {
                 type="button"
                 onClick={() => void copyLink()}
               >
-                <Copy width={14} height={14} />
+                {/* Sao chép xong → icon copy đổi thành dấu check (Figma 403-13608). */}
+                {copied ? (
+                  <Check width={14} height={14} />
+                ) : (
+                  <Copy width={14} height={14} />
+                )}
                 <span>{copied ? t("block.copied") : t("block.copy")}</span>
               </button>
             </div>

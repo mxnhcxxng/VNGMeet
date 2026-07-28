@@ -35,12 +35,17 @@ const en = {
   "gate.botLinkFailed":
     "Failed to link Zalo Bot. The code may have expired — try again from the bot.",
 
+  // --- Permission block screen (phone permission denied / not granted) -----
+  "permission.desc":
+    "VNG Meet needs your phone number to verify your identity. Please grant permission to continue.",
+  "permission.grant": "Grant permission",
+
   // --- Block screen (token expired / phone not linked to any profile) ------
   "block.desc":
     "Your account hasn't been created yet, or your token has expired. Please sign in using the link below to continue.",
   "block.copy": "Copy",
   "block.copied": "Copied",
-  "block.visit": "Open link",
+  "block.visit": "Open VNG Meet",
 
   // --- Chatbot link-success screen ----------------------------------------
   "linkSuccess.title": "Chatbot linked successfully",
@@ -300,12 +305,17 @@ const vi: Partial<Record<TranslationKey, string>> = {
   "gate.botLinkFailed":
     "Liên kết Zalo Bot thất bại. Mã có thể đã hết hạn, thử lại từ bot nhé.",
 
+  // --- Màn chặn khi quyền SĐT bị từ chối / chưa được cấp ------------------
+  "permission.desc":
+    "Hệ thống cần số điện thoại của bạn để xác thực, vui lòng cấp quyền để tiếp tục",
+  "permission.grant": "Cấp quyền",
+
   // --- Block screen (token hết hạn / SĐT chưa liên kết profile nào) --------
   "block.desc":
     "Tài khoản của bạn chưa được tạo hoặc token đã hết hạn, vui lòng đăng nhập tại link ở dưới đây để tiếp tục",
   "block.copy": "Sao chép",
   "block.copied": "Đã sao chép",
-  "block.visit": "Truy cập",
+  "block.visit": "Truy cập VNG Meet",
 
   // --- Màn liên kết chatbot thành công ------------------------------------
   "linkSuccess.title": "Liên kết chatbot thành công",

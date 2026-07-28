@@ -2759,7 +2759,7 @@ body[zaui-theme="dark"] {
   position: fixed;
   inset: 0;
   z-index: 80;
-  background: linear-gradient(180deg, #003e99 0%, #0068ff 100%);
+  background: linear-gradient(180deg, #0068ff 0%, #ffffff 100%);
   color: #fff;
 }
 .block-scr__body {
@@ -2821,10 +2821,15 @@ body[zaui-theme="dark"] {
   align-items: center;
   gap: 8px;
 }
+// Link giờ là "chip" nền trắng chữ xanh (Figma 403-13608) thay vì chữ trắng trơn.
 .block-scr__link-text {
+  padding: 6px 16px;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #006af5;
   font-size: 16px;
   line-height: 22px;
-  color: #fff;
+  font-weight: 500;
 }
 .block-scr__copy {
   display: inline-flex;
@@ -2846,8 +2851,87 @@ body[zaui-theme="dark"] {
   height: 48px;
   border: none;
   border-radius: 999px;
-  background: #d6e9ff;
-  color: #006af5;
+  background: #006af5;
+  color: #fff;
+  font-size: 15px;
+  line-height: 20px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+// =====================================================================
+// Màn chặn khi quyền SĐT bị từ chối / chưa được cấp (Figma 403-13683)
+// Nền xanh loang xuống trắng; ảnh minh hoạ màn hình chính bị cắt bớt ở đáy.
+// =====================================================================
+.perm-scr {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(180deg, #0068ff 0%, #ffffff 100%);
+  color: #fff;
+}
+// Vùng nội dung: xếp dọc, canh giữa ngang. overflow hidden để phần dưới của
+// ảnh mockup tràn ra bị cắt (khớp Figma — điện thoại hụt đáy).
+.perm-scr__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  overflow: hidden;
+  padding: calc(40px + var(--zaui-safe-area-inset-top, 0px)) 16px 0;
+}
+.perm-scr__brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.perm-scr__logo {
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
+}
+.perm-scr__title {
+  font-size: 28px;
+  line-height: 40px;
+  font-weight: 500;
+}
+.perm-scr__desc {
+  margin-top: 24px;
+  max-width: 328px;
+  font-size: 16px;
+  line-height: 22px;
+  text-align: center;
+  color: #fff;
+}
+// Ảnh mockup: rộng 240 như Figma, đặt ngay dưới mô tả; chiều cao tự nhiên vượt
+// quá vùng còn lại nên đáy bị .perm-scr__body cắt.
+.perm-scr__mockup {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-top: 32px;
+  display: flex;
+  justify-content: center;
+}
+.perm-scr__mockup img {
+  height: 100%;
+  width: auto;
+  max-width: 100%;
+  display: block;
+}
+.perm-scr__footer {
+  flex: none;
+  padding: 12px 16px calc(24px + var(--zaui-safe-area-inset-bottom, 0px));
+}
+.perm-scr__cta {
+  width: 100%;
+  height: 48px;
+  border: none;
+  border-radius: 999px;
+  background: #006af5;
+  color: #fff;
   font-size: 15px;
   line-height: 20px;
   font-weight: 500;

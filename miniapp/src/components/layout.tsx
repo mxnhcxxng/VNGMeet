@@ -17,6 +17,7 @@ import { AppProps } from "zmp-ui/app";
 import AppShell from "@/components/app-shell";
 import BlockScreen from "@/components/block-screen";
 import LinkSuccess from "@/components/link-success";
+import PermissionScreen from "@/components/permission-screen";
 import { setToken, useToken } from "@/services/auth";
 import { api, LinkRequiredError } from "@/services/api";
 import { errText, hasPhonePermission, requestPhoneNumber } from "@/services/phone";
@@ -77,6 +78,10 @@ function Gate() {
   const { t } = useSettings();
   const [phase, setPhase] = useState<Phase>("authing");
   const [detail, setDetail] = useState(""); // DEBUG: message lỗi thật
+  // Trạng thái quyền SĐT: null = đang kiểm tra (chưa biết), true = đã cấp,
+  // false = chưa cấp / bị từ chối. Home CHỈ được render khi phoneOk === true →
+  // không bao giờ lọt vào Home trước khi có quyền.
+  const [phoneOk, setPhoneOk] = useState<boolean | null>(null);
   // Đã liên kết Zalo Bot xong → hiện màn "Liên kết chatbot thành công".
   const [botLinked, setBotLinked] = useState(false);
   const running = useRef(false);
@@ -90,6 +95,7 @@ function Gate() {
     try {
       // Bước 1: xin quyền SĐT Zalo (popup lần đầu, sau đó im lặng).
       const grant = await requestPhoneNumber();
+      setPhoneOk(true); // requestPhoneNumber thành công = user đã cấp quyền SĐT.
       // Bước 2: BE đổi token→SĐT, map SĐT→user Microsoft đã link, trả session JWT.
       try {
         const { access_token, username } = await api.authWithZalo(grant);
@@ -114,34 +120,33 @@ function Gate() {
     } catch (e) {
       // requestPhoneNumber ném lỗi = user từ chối / timeout / SDK lỗi.
       setDetail(errText(e));
+      setPhoneOk(false); // chưa có quyền → giữ ở màn chặn cấp quyền.
       setPhase("denied");
     } finally {
       running.current = false;
     }
   }, [openSnackbar]);
 
-  // Auto authen ĐÚNG 1 LẦN mỗi khi ở trạng thái chưa đăng nhập (token null):
-  // lúc mở app, và khi bị 401 (token bị xoá → token đổi → chạy lại 1 lần).
-  // KHÔNG đưa `authenticate` vào deps: nó phụ thuộc openSnackbar (đổi ref mỗi
-  // render) nên nếu để vào, mỗi lần set lỗi → re-render → effect chạy lại →
-  // popup xin quyền bị bật LIÊN TỤC. Chỉ chạy lại khi `token` đổi.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // KIỂM TRA QUYỀN SĐT NGAY KHI MỞ APP (chạy 1 lần lúc mount). Mini App remount
+  // mỗi lần mở nên đây là "mỗi khi mở miniapp". getSetting im lặng, không popup.
+  // Chưa có quyền → phoneOk=false → render màn chặn (KHÔNG vào Home). Đã có quyền
+  // → phoneOk=true → hiệu ứng bên dưới lo việc lấy session nếu cần.
   useEffect(() => {
-    if (!token) void authenticate();
-  }, [token]);
-
-  // Bảo đảm quyền SĐT LUÔN được xin mỗi khi mở app: session JWT sống ~30 ngày
-  // nên các lần mở sau sẽ bỏ qua authenticate() ở trên → không xin lại quyền.
-  // Nếu đã có session nhưng quyền scope.userPhonenumber chưa/không còn được cấp
-  // (vd user thu hồi trong cài đặt Zalo), chạy lại authen để bật popup xin quyền.
-  // getSetting im lặng nên khi quyền đã có sẽ không làm phiền user.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    if (!token) return;
     void (async () => {
-      if (!(await hasPhonePermission())) void authenticate();
+      setPhoneOk(await hasPhonePermission());
     })();
-  }, [token]);
+  }, []);
+
+  // Khi ĐÃ CÓ quyền SĐT nhưng chưa có session (token null) → tự đổi lấy session.
+  // getPhoneNumber lúc này im lặng (quyền đã cấp) nên không làm phiền user.
+  // Gate CHỈ auto-authen khi phoneOk === true: lúc chưa cấp quyền thì đứng ở màn
+  // chặn chờ user bấm "Cấp quyền", không tự bật popup.
+  // KHÔNG đưa `authenticate` vào deps: nó phụ thuộc openSnackbar (đổi ref mỗi
+  // render) → tránh bật popup liên tục. Chỉ chạy lại khi token/phoneOk đổi.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (phoneOk === true && !token) void authenticate();
+  }, [token, phoneOk]);
 
   // Liên kết Zalo Bot: khi đã có session và deep-link kèm ?bot_pair=<code>, đổi mã
   // lấy liên kết chat_id ↔ tài khoản VNG (chỉ chạy 1 lần).
@@ -166,8 +171,27 @@ function Gate() {
     })();
   }, [token, openSnackbar]);
 
-  // Gate luôn được render BÊN TRONG ZMPRouter (xem Layout), nên <Page> ở cả 2
-  // nhánh đều có context router — không còn lỗi invariant của react-router.
+  // Đang kiểm tra quyền SĐT (chưa biết) → chờ, TUYỆT ĐỐI không render Home.
+  if (phoneOk === null) {
+    return (
+      <Page className="flex flex-col items-center justify-center px-6 bg-white dark:bg-black">
+        <Box textAlign="center" className="space-y-4">
+          <Text.Title size="large">VNGMeet</Text.Title>
+          <Text className="text-gray-500">{t("gate.authing")}</Text>
+        </Box>
+      </Page>
+    );
+  }
+
+  // Chưa cấp / bị từ chối quyền SĐT → màn chặn có nút "Cấp quyền" (Figma 403-13683).
+  // Đặt TRƯỚC nhánh `token`: dù đã có session hợp lệ mà chưa có quyền (lần đầu mở
+  // hoặc user thu hồi trong cài đặt Zalo) vẫn phải cấp quyền trước khi vào Home.
+  if (!phoneOk) {
+    return <PermissionScreen onGrant={() => void authenticate()} />;
+  }
+
+  // Đã có quyền SĐT. Gate luôn render BÊN TRONG ZMPRouter (xem Layout) nên <Page>
+  // ở mọi nhánh đều có context router — không còn lỗi invariant của react-router.
   if (token) {
     // Vừa liên kết chatbot xong → màn thành công, "Trở về màn hình chính" đóng lại.
     if (botLinked) return <LinkSuccess onClose={() => setBotLinked(false)} />;
@@ -175,7 +199,7 @@ function Gate() {
   }
 
   // SĐT Zalo không map được profile nào / token hết hạn và tài khoản không còn
-  // → BE trả 403 → màn chặn hướng dẫn đăng nhập lại qua link (Figma 400-2855).
+  // → BE trả 403 → màn hướng dẫn đăng nhập lại qua link/QR (Figma 403-13608).
   if (phase === "unlinked") {
     return <BlockScreen />;
   }
@@ -202,7 +226,7 @@ function Gate() {
               </Text>
             )}
             <Button fullWidth onClick={() => void authenticate()}>
-              {phase === "denied" ? t("gate.allowPhone") : t("common.retry")}
+              {t("common.retry")}
             </Button>
           </>
         )}
