@@ -48,6 +48,14 @@ KNOWN_COMMANDS = {"start", "help", "whoami", "new", "recent", "switch"}
 
 FOOTER = "↩️ /new · /recent · /switch <số> · /help"
 
+# Shared bullet list of what the bot can help with (rendered as a Markdown <ul>).
+TASKS_LIST = (
+    "- 🔎 Tìm phòng họp\n"
+    "- 🔭 Săn phòng họp (đặt phòng ngay khi có phòng trống)\n"
+    "- 🕛 Hẹn giờ đặt phòng họp (đặt phòng được mở lúc nửa đêm)\n"
+    "- 🗺️ Chỉ đường đến phòng họp"
+)
+
 MSG_START = (
     "👋 Xin chào! Đây là trợ lý VNGMeet.\n"
     "• Gõ nội dung bất kỳ để chat với trợ lý.\n"
@@ -55,12 +63,13 @@ MSG_START = (
     "• /whoami kiểm tra tài khoản. /help xem tất cả lệnh."
 )
 MSG_HELP = (
-    "🤖 Các lệnh:\n"
-    "/new [tiêu đề] – tạo đoạn chat mới\n"
-    "/recent        – danh sách đoạn chat\n"
-    "/switch <số>   – chuyển đoạn chat\n"
-    "/whoami        – tài khoản & đoạn chat hiện tại\n"
-    "/help          – menu này\n"
+    "🤖 **Các lệnh**\n"
+    "- `/new [tiêu đề]` – tạo đoạn chat mới\n"
+    "- `/recent` – danh sách đoạn chat\n"
+    "- `/switch <số>` – chuyển đoạn chat\n"
+    "- `/whoami` – tài khoản & đoạn chat hiện tại\n"
+    "- `/help` – menu này\n"
+    "\n"
     "💬 Gõ nội dung (không bắt đầu bằng \"/\") để chat với trợ lý."
 )
 MSG_UNKNOWN = "❓ Lệnh không tồn tại. Gõ /help để xem các lệnh."
@@ -108,29 +117,33 @@ def _strip_think(text: str) -> str:
     return cleaned.strip()
 
 
-# Zalo Bot chỉ hiển thị text thuần (không markdown), nên phải "phẳng hoá" reply.
+# Zalo Bot renders a subset of Markdown server-side when parse_mode="markdown":
+# **bold**, *italic*, ~~strike~~, `code`, headings (#), lists (-/*/1.), blockquotes
+# (>) and colour tags. It has NO hyperlink syntax and no tables, so we only flatten
+# those two and keep the rest for Zalo to render. See _send (parse_mode).
 _IMG_MD_RE = re.compile(r"!\[[^\]]*\]\((https?://[^)\s]+)\)")
 _LINK_MD_RE = re.compile(r"\[([^\]]+)\]\((https?://[^)\s]+)\)")
 _TABLE_SEP_RE = re.compile(r"^\|?[\s:\-|]*-[\s:\-|]*\|?$")
+# Bare URLs: escape markdown-significant chars inside them so an underscore in a
+# link (e.g. a pairing code) isn't parsed as italic. Zalo uses '\' as escape char.
+_URL_RE = re.compile(r"https?://\S+")
+_MD_SPECIAL_RE = re.compile(r"([\\_*~`])")
 
 
-def _md_to_plain(text: str) -> str:
-    """Convert Markdown to plain text for Zalo (no markdown rendering).
+def _md_for_zalo(text: str) -> str:
+    """Adapt Markdown for Zalo Bot (sent with parse_mode="markdown").
 
-    Handles headings, **bold**/__bold__/`code`, [text](url) → "text (url)", and
-    tables (drop the |---| separator row, keep cells joined by ' | '). Images are
-    expected to be removed beforehand (sent via sendPhoto).
+    Zalo renders **bold**, *italic*, ~~strike~~, `code`, headings, lists and
+    blockquotes natively, so those are KEPT verbatim. Zalo has no hyperlink
+    syntax, so [text](url) is flattened to "text (url)" (relative → just "text").
+    Markdown tables aren't supported either: the |---| separator row is dropped
+    and cells joined by ' | '. Images are removed beforehand (sent via sendPhoto).
     """
     if not text:
         return text
     out = text
-    out = re.sub(r"(?m)^\s{0,3}#{1,6}\s*", "", out)          # headings
-    out = re.sub(r"\*\*(.+?)\*\*", r"\1", out, flags=re.S)    # **bold**
-    out = re.sub(r"__(.+?)__", r"\1", out, flags=re.S)        # __bold__
-    out = re.sub(r"(?<![\w*])\*(?!\s)([^*\n]+?)(?<!\s)\*(?![\w*])", r"\1", out)  # *italic*
-    out = re.sub(r"`([^`]+)`", r"\1", out)                    # `code`
-    out = _LINK_MD_RE.sub(r"\1 (\2)", out)                    # [text](http url) -> text (url)
-    out = re.sub(r"\[([^\]]+)\]\([^)\s]*\)", r"\1", out)      # [text](relative) -> text
+    out = _LINK_MD_RE.sub(r"\1 (\2)", out)                   # [text](http url) -> text (url)
+    out = re.sub(r"\[([^\]]+)\]\([^)\s]*\)", r"\1", out)     # [text](relative) -> text
     lines: list[str] = []
     for line in out.split("\n"):
         stripped = line.strip()
@@ -139,11 +152,24 @@ def _md_to_plain(text: str) -> str:
         if "|" in line:
             cells = [c.strip() for c in line.strip().strip("|").split("|")]
             line = " | ".join(c for c in cells if c != "")
-        line = re.sub(r"^\s*[-*]\s+", "• ", line)             # bullets
         lines.append(line)
     out = "\n".join(lines)
     out = re.sub(r"\n{3,}", "\n\n", out)
     return out.strip()
+
+
+def _escape_url_markdown(text: str) -> str:
+    """Backslash-escape markdown-significant chars inside bare URLs.
+
+    With parse_mode="markdown" an underscore/asterisk inside a URL would otherwise
+    be treated as italic/bold and corrupt the link (pairing/reauth deep-links carry
+    token_urlsafe codes that may contain '_'). Only chars inside URL spans are touched.
+    """
+    if not text:
+        return text
+    return _URL_RE.sub(
+        lambda m: _MD_SPECIAL_RE.sub(r"\\\1", m.group(0)), text
+    )
 
 
 def _prepare_reply(text: str) -> tuple[str, list[str]]:
@@ -158,7 +184,7 @@ def _prepare_reply(text: str) -> tuple[str, list[str]]:
         if url not in images:
             images.append(url)
     text = _IMG_MD_RE.sub("", text)     # remove ![..](url); resend as photos
-    text = _md_to_plain(text)
+    text = _md_for_zalo(text)
     return text, images
 
 
@@ -290,10 +316,6 @@ def _miniapp_link_with(param: str, value: str) -> str:
 
 def _pair_link(code: str) -> str:
     return _miniapp_link_with("bot_pair", code)
-
-
-def _reauth_link() -> str:
-    return _miniapp_link_with("bot_reauth", "1")
 
 
 # --------------------------------------------------------------------------- #
@@ -593,12 +615,15 @@ def _chunk_text(text: str, limit: int = ZALO_MAX_TEXT) -> list[str]:
 
 
 async def _send(chat_id: str, text: str, buttons: list[dict] | None = None) -> None:
+    text = _escape_url_markdown(text)
     chunks = _chunk_text(text) or ([""] if buttons else [])
     if not chunks:
         return
     last = len(chunks) - 1
     for i, chunk in enumerate(chunks):
-        payload = {"chat_id": chat_id, "text": chunk or "\u200b"}
+        # Zalo renders a Markdown subset server-side; text is already adapted via
+        # _md_for_zalo (agent replies) / static strings, with URLs escaped above.
+        payload = {"chat_id": chat_id, "text": chunk or "\u200b", "parse_mode": "markdown"}
         # EXPERIMENTAL: attach OA-style buttons (name/type/payload) to the last
         # chunk. Zalo Bot Platform sendMessage does not document buttons, so this
         # may be ignored/rejected — log the response so we can see what happens.
@@ -638,7 +663,7 @@ def _msg_session_expired() -> str:
     return (
         "⏰ Phiên đăng nhập đã hết hạn.\n"
         "Mở mini app đăng nhập lại để tiếp tục:\n"
-        f"👉 {_reauth_link()}"
+        "👉 go.zalo.me/VNGMeet"
     )
 
 
@@ -681,11 +706,16 @@ async def _cmd_new(sb, link: dict, chat_id: str, arg: str) -> None:
         _set_current_thread(sb, chat_id, str(thread["id"]))
         await _send(
             chat_id,
-            f"✅ Đã tạo đoạn chat mới: {thread.get('title')}.\nGõ nội dung để bắt đầu.",
+            f"✅ Đã tạo đoạn chat mới: **{thread.get('title')}**. "
+            "Mô tả nhu cầu của bạn theo gợi ý dưới đây:\n" + TASKS_LIST,
         )
         return
     _set_current_thread(sb, chat_id, None)
-    await _send(chat_id, "✅ Đã tạo đoạn chat mới.\nGõ nội dung để bắt đầu.")
+    await _send(
+        chat_id,
+        "✅ Đã tạo đoạn chat mới. Mô tả nhu cầu của bạn theo gợi ý dưới đây:\n"
+        + TASKS_LIST,
+    )
 
 
 async def _cmd_recent(link: dict, chat_id: str) -> None:
@@ -934,7 +964,9 @@ async def bot_link(request: Request, code: str = Body(..., embed=True)):
         try:
             await _send(
                 pairing["chat_id"],
-                f"✅ Đã liên kết tài khoản {name}. Giờ bạn có thể chat với trợ lý ngay tại đây!",
+                f"✅ Đã liên kết tài khoản **{name}**. Bot sẽ hỗ trợ bạn trong các tác vụ:\n"
+                + TASKS_LIST
+                + "\n\nGõ /help để hiển thị tất cả các lệnh.",
             )
         except Exception as e:  # noqa: BLE001 — linking still succeeded
             log.warning("bot link notify failed: %s", e)

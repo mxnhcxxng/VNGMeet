@@ -57,6 +57,7 @@ const en = {
   "linkSuccess.scout": "Scout a meeting room",
   "linkSuccess.schedule": "Schedule a room booking",
   "linkSuccess.direction": "Directions to a meeting room",
+  "linkSuccess.gotoBot": "Go to chatbot",
   "linkSuccess.backHome": "Back to home",
 
   // --- Bottom navigation --------------------------------------------------
@@ -164,6 +165,9 @@ const en = {
   "dir.viewDirections": "View directions",
   "dir.directionsTitle": "How to get there",
   "dir.directionsEmpty": "No directions available for this room yet.",
+  "dir.share": "Share directions",
+  "dir.shareIntro": "Directions to {room}",
+  "dir.shareFailed": "Couldn't open sharing. Please try again in the Zalo app.",
 
   // --- Account / Settings -------------------------------------------------
   "settings.title": "Account",
@@ -327,6 +331,7 @@ const vi: Partial<Record<TranslationKey, string>> = {
   "linkSuccess.scout": "Săn phòng họp",
   "linkSuccess.schedule": "Hẹn giờ đặt phòng họp",
   "linkSuccess.direction": "Chỉ đường đến phòng họp",
+  "linkSuccess.gotoBot": "Đi đến chat bot",
   "linkSuccess.backHome": "Trở về màn hình chính",
 
   // --- Bottom navigation --------------------------------------------------
@@ -433,14 +438,17 @@ const vi: Partial<Record<TranslationKey, string>> = {
   "dir.viewDirections": "Xem chỉ đường",
   "dir.directionsTitle": "Hướng dẫn đường đi",
   "dir.directionsEmpty": "Phòng này chưa có chỉ đường.",
+  "dir.share": "Chia sẻ đường đi",
+  "dir.shareIntro": "Đường đi tới {room}",
+  "dir.shareFailed": "Không thể mở chia sẻ. Vui lòng thử lại trong ứng dụng Zalo.",
 
   // --- Account / Settings -------------------------------------------------
   "settings.title": "Tài khoản",
   "settings.displayPreference": "Giao diện",
   "settings.displayPreferenceDesc": "Chuyển giữa chế độ sáng và tối.",
-  "settings.themeSystem": "Theo hệ thống",
-  "settings.themeLight": "Chế độ sáng",
-  "settings.themeDark": "Chế độ tối",
+  "settings.themeSystem": "Hệ thống",
+  "settings.themeLight": "Sáng",
+  "settings.themeDark": "Tối",
   "settings.language": "Ngôn ngữ",
   "settings.languageDesc": "Ngôn ngữ mặc định cho VNGMeet.",
   "settings.langVi": "Tiếng Việt",

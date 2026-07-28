@@ -1,4 +1,4 @@
-import favicon from "@/static/favicon-white.png";
+import logo from "@/static/logo.png";
 import mockup from "@/static/permission-mockup.png";
 import { useT } from "@/services/settings";
 
@@ -12,8 +12,7 @@ export default function PermissionScreen({ onGrant }: { onGrant: () => void }) {
     <div className="perm-scr">
       <div className="perm-scr__body">
         <div className="perm-scr__brand">
-          <img className="perm-scr__logo" src={favicon} alt="VNG Meet" />
-          <span className="perm-scr__title">VNG Meet</span>
+          <img className="perm-scr__logo" src={logo} alt="VNG Meet" />
         </div>
 
         <p className="perm-scr__desc">{t("permission.desc")}</p>

@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { openChat } from "zmp-sdk";
 
 import Magnifier from "@gravity-ui/icons/Magnifier";
 import Binoculars from "@gravity-ui/icons/Binoculars";
@@ -10,7 +9,7 @@ import Clock from "@gravity-ui/icons/Clock";
 import PersonFill from "@gravity-ui/icons/PersonFill";
 import ArrowsRotateRight from "@gravity-ui/icons/ArrowsRotateRight";
 
-import favicon from "@/static/favicon-white.png";
+import logo from "@/static/logo.png";
 import MeetingDetail from "@/components/meeting-detail";
 import SwipeViews from "@/components/swipe-views";
 import BookingModal from "@/components/booking-modal";
@@ -20,30 +19,16 @@ import Directions from "@/pages/directions";
 import { useDisplayName } from "@/services/auth";
 import { api, AuthError } from "@/services/api";
 import { roomFlag } from "@/services/room-flags";
+import { openChatbot } from "@/services/chatbot";
 import { useT } from "@/services/settings";
 import type { TranslationKey } from "@/services/i18n";
 import type {
   CapacitySize,
   FreeRoom,
   FreeRoomsResponse,
+  MeResponse,
   UpcomingEvent,
 } from "@/types";
-
-// Chatbot Zalo OA — bấm nút "Chatbot" mở cửa sổ chat với OA này.
-const CHATBOT_OA_ID = "4092201589741480262";
-const CHATBOT_URL = "https://zalo.me/4092201589741480262";
-
-// Mở chat với OA qua zmp-sdk (chỉ chạy trong app Zalo); ngoài app thì fallback
-// mở link zalo.me.
-function openChatbot(): void {
-  try {
-    void openChat({ type: "oa", id: CHATBOT_OA_ID }).catch(() => {
-      window.open(CHATBOT_URL, "_blank");
-    });
-  } catch {
-    window.open(CHATBOT_URL, "_blank");
-  }
-}
 
 // "2026-07-24" -> "24/07"
 function formatDate(iso: string): string {
@@ -81,7 +66,11 @@ let cachedFreeRooms: FreeRoomsResponse | null = null;
 
 // Màn Home theo Figma (node 286-9472). Icon dùng bộ @gravity-ui/icons y hệt bản
 // web, font Inter. "Lịch sắp tới" + "Phòng trống" lấy từ BE.
-export default function HomePage() {
+type Props = {
+  me: MeResponse | null;
+};
+
+export default function HomePage({ me }: Props) {
   const t = useT();
   const name = useDisplayName() ?? t("common.you");
   const [scrolled, setScrolled] = useState(false);
@@ -264,8 +253,7 @@ export default function HomePage() {
       <div ref={sentinelRef} className="home__sentinel" />
 
       <header className={`home__topbar${scrolled ? " is-scrolled" : ""}`}>
-        <img className="home__favicon" src={favicon} alt="zMeeting" />
-        <span className="home__appname">zMeeting</span>
+        <img className="home__favicon" src={logo} alt="VNG Meet" />
       </header>
 
       <div className="home__hero">
@@ -424,7 +412,12 @@ export default function HomePage() {
 
       {scoutOpen && <RoomScout onClose={() => setScoutOpen(false)} />}
 
-      {dirOpen && <Directions onClose={() => setDirOpen(false)} />}
+      {dirOpen && (
+        <Directions
+          office={me?.profile?.office ?? null}
+          onClose={() => setDirOpen(false)}
+        />
+      )}
 
       {selectedRoom && freeRooms && (
         <BookingModal

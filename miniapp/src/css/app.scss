@@ -84,7 +84,7 @@ textarea {
   height: 0;
 }
 
-// --- Header (favicon + zMeeting): sticky, là header thực sự của trang ---
+// --- Header (logo VNG Meet): sticky, là header thực sự của trang ---
 // Cao 44px khớp MP-Header của Zalo, canh giữa theo chiều dọc → thẳng hàng với
 // nút "..."/tắt mini app ở góc phải. padding-top = safe area (status bar/notch),
 // nội dung căn lề trái 12px (không bị tụt vào như khi lồng trong padding hero).
@@ -107,16 +107,10 @@ textarea {
   box-shadow: 0 2px 8px rgba(20, 20, 21, 0.16);
 }
 .home__favicon {
-  width: 24px;
   height: 24px;
+  width: auto;
   flex: none;
   object-fit: contain;
-}
-.home__appname {
-  color: #fff;
-  font-size: 16px;
-  font-weight: 600;
-  line-height: 24px;
 }
 
 // --- Hero: nền gradient xanh (lời chào + menu card) ---
@@ -578,9 +572,10 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
   flex: 1 1 auto;
   display: flex;
   flex-direction: column;
-  // Nền trắng + vệt xanh nhạt loang từ đỉnh.
+  // Nền xanh đậm loang từ đỉnh (Figma Rectangle 50) → trắng. Dùng đơn vị px để
+  // dải gradient chỉ phủ 200px trên cùng, phần còn lại của màn giữ trắng.
   background:
-    linear-gradient(180deg, rgba(0, 104, 255, 0.22) 0%, rgba(0, 104, 255, 0) 30%),
+    linear-gradient(180deg, #0068ff -170px, #ffffff 200px),
     var(--vm-surface);
 }
 .booking-success__body {
@@ -601,7 +596,8 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
   height: 80px;
   border-radius: 999px;
   color: #fff;
-  background: linear-gradient(135deg, #3a8bff 0%, var(--vm-blue) 100%);
+  // Tick gradient chuẩn cho các màn thành công.
+  background: linear-gradient(180deg, #0068ff 0%, #549aff 100%);
 }
 .booking-success__text {
   display: flex;
@@ -633,7 +629,6 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
   z-index: 50;
   display: flex;
   background: var(--vm-surface);
-  border-top: 1px solid var(--vm-separator);
   padding-bottom: env(safe-area-inset-bottom, 0);
 }
 .bottom-nav__item {
@@ -748,12 +743,13 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
   color: var(--vm-accent-soft-fg);
 }
 
-// Danh sách thẻ: các thẻ trắng tràn hết bề ngang, cách nhau 12px trên nền xám.
+// Danh sách thẻ: chừa lề 12px hai bên (khớp Figma 346-1292), các thẻ trắng bo
+// góc 12px, cách nhau 12px trên nền xám.
 .history__list {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding-top: 12px;
+  padding: 12px 12px 0;
 }
 
 .history-card {
@@ -761,14 +757,16 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
   align-items: stretch;
   min-height: 158px;
   background: var(--vm-surface);
+  border-radius: 12px;
   overflow: hidden;
 }
-// Ảnh phòng bên trái: rộng 100px, cao hết thẻ, bo góc phải (khớp Figma).
+// Ảnh phòng bên trái: rộng 100px, cao hết thẻ; góc trái bo theo thẻ (nhờ
+// overflow:hidden của thẻ), cạnh phải áp sát phần nội dung nên để vuông.
 .history-card__media {
   flex: none;
   width: 100px;
   align-self: stretch;
-  border-radius: 0 8px 8px 0;
+  border-radius: 8px;
   background-size: cover;
   background-position: center;
   // Placeholder khi mock chưa có ảnh: gradient xanh-xám nhẹ.
@@ -1070,6 +1068,32 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
   color: var(--vm-muted);
   font-style: italic;
 }
+// CTA "Chia sẻ đường đi" ghim đáy màn chi tiết (dưới vùng scroll). Nền trắng +
+// viền trên nhẹ để tách khỏi nội dung; chừa safe-area đáy.
+.mtg-detail__footer {
+  flex: none;
+  padding: 12px 16px calc(12px + var(--zaui-safe-area-inset-bottom, 0px));
+  background: var(--vm-surface);
+}
+.mtg-detail__share {
+  width: 100%;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: none;
+  border-radius: 999px;
+  background: #006af5;
+  color: #fff;
+  font-size: 15px;
+  line-height: 20px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.mtg-detail__share:active {
+  background: #0057cc;
+}
 
 // ===================================================================
 // Map modal (xem sơ đồ chỉ đường toàn màn hình)
@@ -1130,30 +1154,6 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
   transform: translateX(0);
 }
 
-// Tab office (Campus / TNR) — dải trắng dưới header, dùng lại tông pill của
-// history-tab. Sala không có tab (không có chỉ đường).
-.dir__tabs {
-  flex: none;
-  display: flex;
-  gap: 8px;
-  padding: 12px;
-  background: var(--vm-surface);
-}
-.dir-tab {
-  padding: 6px 16px;
-  border: none;
-  border-radius: 999px;
-  background: var(--vm-surface-2);
-  color: var(--vm-ink);
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-}
-.dir-tab.is-active {
-  background: var(--vm-accent-soft-bg);
-  color: var(--vm-accent-soft-fg);
-}
-
 .dir__body {
   position: relative; // mốc offsetTop cho quick-select A-Z
   flex: 1 1 auto;
@@ -1188,23 +1188,28 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
   font-weight: 600;
   color: var(--vm-muted);
 }
+// Danh sách phòng của mỗi nhóm gói trong thẻ trắng bo góc (khớp thẻ màn Tài
+// khoản): lề 12px hai bên, vạch chia trải hết bề ngang thẻ.
 .dir__list {
   display: flex;
   flex-direction: column;
+  margin: 0 12px;
+  border-radius: 12px;
+  overflow: hidden;
   background: var(--vm-surface);
 }
 
-// 1 dòng phòng: ảnh + (tên kèm cờ + vị trí) + nút chỉ đường (compass).
+// 1 dòng phòng: ảnh + (tên kèm cờ + vị trí) + nút chỉ đường (compass). Lề phải
+// (12px thẻ + 16px dòng) đủ để nút chỉ đường không nằm dưới thanh quick-select.
 .dir-row {
   display: flex;
   align-items: center;
   gap: 12px;
-  // Lề phải rộng hơn để nút chỉ đường không nằm dưới thanh quick-select A-Z.
-  padding: 12px 28px 12px 16px;
+  padding: 12px 16px;
   cursor: pointer;
 }
 .dir-row + .dir-row {
-  border-top: 1px solid var(--vm-separator);
+  border-top: 1px solid var(--vm-divider);
 }
 .dir-row__media {
   flex: none;
@@ -1266,8 +1271,9 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
   align-items: center;
   gap: 1px;
   padding: 6px 3px;
-  // Lớp đen mờ phía dưới thanh để chữ A-Z nổi trên nội dung.
-  background: rgba(24, 24, 27, 0.35);
+  // Nền mờ để chữ A-Z nổi trên nội dung. Light: trắng mờ; dark: đen mờ (ghi đè
+  // trong body[zaui-theme="dark"]).
+  background: rgba(255, 255, 255, 0.82);
   border-radius: 999px;
   backdrop-filter: blur(2px);
   // Chặn cuộn/rubber-band khi kéo dọc trên thanh.
@@ -1699,7 +1705,6 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
   gap: 10px;
   padding: 16px 16px calc(24px + var(--zaui-safe-area-inset-bottom, 0px));
   background: var(--vm-surface);
-  border-top: 1px solid var(--vm-separator);
 }
 // State đã chọn: cụm phòng + cụm giờ, căn giữa, cách nhau 24px (Figma 381-32278).
 .fr__actions-info {
@@ -1865,7 +1870,6 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
   padding: 12px 16px;
   padding-bottom: calc(12px + var(--zaui-safe-area-inset-bottom, 0px));
   background: var(--vm-surface);
-  border-top: 1px solid var(--vm-separator);
 }
 .scout__actions-row {
   display: flex;
@@ -2221,54 +2225,84 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
   color: var(--vm-muted);
 }
 
-// --- Giao diện: 3 thẻ (Hệ thống / Sáng / Tối) ---
+// --- Giao diện: 3 thẻ chọn theme kiểu Zalo (Sáng / Tối / Hệ thống) ---
+// Mỗi thẻ: ảnh preview bo góc + hàng radio · nhãn bên dưới. Thẻ đang chọn có
+// viền xanh quanh ảnh và radio tô xanh.
 .settings__theme-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
+  gap: 12px;
 }
 .settings__theme-card {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
-  padding: 14px 8px;
-  border: 1.5px solid var(--vm-separator);
-  border-radius: 12px;
-  background: var(--vm-surface-2);
+  gap: 10px;
+  padding: 0;
+  border: none;
+  background: none;
   color: var(--vm-ink);
   cursor: pointer;
-  transition: border-color 0.15s ease, background 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
 }
 .settings__theme-card:disabled {
   opacity: 0.6;
 }
-.settings__theme-card.is-active {
+.settings__theme-preview {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: 12px;
+  border: 2px solid var(--vm-separator);
+  transition: border-color 0.15s ease;
+}
+.settings__theme-card.is-active .settings__theme-preview {
   border-color: var(--vm-blue);
-  background: var(--vm-accent-soft-bg);
-  color: var(--vm-accent-soft-fg);
+}
+.settings__theme-choice {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.settings__theme-radio {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid var(--vm-separator);
+  box-sizing: border-box;
+  transition: border-color 0.15s ease, border-width 0.15s ease;
+}
+.settings__theme-radio.is-active {
+  border-color: var(--vm-blue);
+  border-width: 5px;
 }
 .settings__theme-label {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
-  line-height: 16px;
+  line-height: 18px;
   text-align: center;
 }
+.settings__theme-card.is-active .settings__theme-label {
+  color: var(--vm-blue);
+}
 
-// --- Ngôn ngữ: danh sách chọn (kiểu dòng-menu giống nút bên ngoài) ---
+// --- Ngôn ngữ: danh sách chọn dạng thẻ trắng bo góc (khớp thẻ màn Tài khoản) ---
 .settings__lang-list {
   display: flex;
   flex-direction: column;
-  padding: 0 14px;
   border-radius: 12px;
   background: var(--vm-surface);
+  overflow: hidden; // cắt vạch chia theo góc bo
 }
 .settings__lang-row {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   width: 100%;
-  padding: 14px 0;
+  padding: 16px;
   border: none;
   border-bottom: 1px solid var(--vm-divider);
   background: none;
@@ -2287,7 +2321,7 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
   flex: 1 1 auto;
   text-align: left;
   font-size: 16px;
-  font-weight: 500;
+  font-weight: 400;
   line-height: 22px;
 }
 .settings__lang-check {
@@ -2296,7 +2330,7 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
 }
 
 // ===================================================================
-// Màn Tài khoản (Figma 400-2293): hồ sơ + thẻ token + danh sách mục.
+// Màn Tài khoản (Figma 400-2699): hồ sơ + thẻ token + danh sách mục.
 // Mỗi mục mở một trang con trượt từ phải (.acct-sub).
 // ===================================================================
 .acct {
@@ -2325,16 +2359,19 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
-  padding: calc(var(--zaui-safe-area-inset-top, 0px) + 44px + 12px) 16px 16px;
+  gap: 12px;
+  padding: calc(var(--zaui-safe-area-inset-top, 0px) + 44px + 12px) 16px 0;
   // Nền halo tách riêng ở .acct::before (Rectangle 50), hero để trong suốt.
   background: transparent;
 }
+// Vành xanh quanh avatar (Figma 400-2699). box-sizing border-box giữ tổng 80px.
 .acct__avatar {
   width: 80px;
   height: 80px;
   border-radius: 999px;
   object-fit: cover;
+  box-sizing: border-box;
+  border: 2px solid var(--vm-blue);
 }
 .acct__identity {
   display: flex;
@@ -2344,20 +2381,20 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
   text-align: center;
 }
 .acct__name {
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 700;
-  line-height: 24px;
+  line-height: 26px;
   color: var(--vm-ink);
 }
 .acct__phone {
-  font-size: 14px;
-  line-height: 18px;
+  font-size: 16px;
+  line-height: 22px;
   color: var(--vm-muted);
 }
 
 // --- Thẻ token hết hạn ---
 .acct__token {
-  margin: 12px 12px 0;
+  margin: 24px 12px 0;
   padding: 12px 16px;
   border-radius: 12px;
   background: var(--vm-accent-soft-bg);
@@ -2390,20 +2427,28 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
   color: var(--vm-muted);
 }
 
-// --- Nhóm mục full-bleed (icon + nhãn), kẻ vạch mảnh giữa các dòng ---
-// Không bọc thẻ bo góc: các dòng trải hết bề ngang, vạch chia thụt 12px theo
-// padding của nhóm (khớp Figma 400-2293).
-.acct__menu {
-  margin-top: 12px;
-  padding: 0 12px;
+// --- Nhóm mục dạng thẻ trắng bo góc trên dải nền xám (Figma 400-2699) ---
+// Dải xám lấp đầy phần còn lại tới bottom-nav; mỗi nhóm là một thẻ trắng bo góc,
+// vạch chia trải hết bề ngang thẻ.
+.acct__tail {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: var(--vm-page, #f9fafb);
+  padding: 12px 12px calc(64px + 40px + var(--zaui-safe-area-inset-bottom, 0px));
+}
+.acct__card {
+  border-radius: 12px;
   background: var(--vm-surface);
+  overflow: hidden; // cắt vạch chia + ripple theo góc bo
 }
 .acct__row {
   display: flex;
   align-items: center;
   gap: 10px;
   width: 100%;
-  padding: 12px 0;
+  padding: 16px;
   border: none;
   border-bottom: 1px solid var(--vm-divider);
   background: none;
@@ -2422,19 +2467,8 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
 .acct__row-label {
   flex: 1 1 auto;
   font-size: 16px;
-  font-weight: 500;
+  font-weight: 400;
   line-height: 22px;
-}
-
-// Dải nền xám phía dưới lấp đầy phần còn lại tới bottom-nav; dòng Phản hồi là
-// một dải trắng full-bleed nằm trên đó.
-.acct__tail {
-  flex: 1 1 auto;
-  background: var(--vm-page, #f9fafb);
-  padding-bottom: calc(64px + 40px + var(--zaui-safe-area-inset-bottom, 0px));
-}
-.acct__tail .acct__menu {
-  margin-top: 12px;
 }
 
 // --- Trang con trượt từ phải (dùng lại header xanh của .mtg-detail) ---
@@ -2565,7 +2599,6 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
   flex: none;
   padding: 16px 16px calc(16px + var(--zaui-safe-area-inset-bottom, 0px));
   background: var(--vm-surface);
-  border-top: 1px solid var(--vm-divider);
 }
 
 // Sheet chọn phòng ưa thích
@@ -2670,6 +2703,11 @@ body[zaui-theme="dark"] {
     background: var(--vm-surface);
   }
 
+  // Thanh quick-select A-Z: đổi lại nền đen mờ cho hợp nền tối.
+  .dir__rail {
+    background: rgba(0, 0, 0, 0.4);
+  }
+
   // Chữ tối trên thẻ trắng (hardcode #344054) → sáng lại.
   .history-card__title,
   .fr__corner,
@@ -2768,8 +2806,14 @@ body[zaui-theme="dark"] {
   flex-direction: column;
   align-items: center;
   gap: 40px;
-  padding: calc(40px + var(--zaui-safe-area-inset-top, 0px)) 16px
-    calc(24px + var(--zaui-safe-area-inset-bottom, 0px));
+  // Màn này render như overlay fixed (ngoài <Page> ZaUI) nên biến
+  // --zaui-safe-area-inset-top không resolve → fallback env() để chừa notch.
+  // 44px = dải nút hành động Zalo ("..."/X) ngay dưới safe-area; +24px = khoảng
+  // cách tính TỪ dải nút xuống.
+  padding: calc(
+      44px + 24px + var(--zaui-safe-area-inset-top, env(safe-area-inset-top, 0px))
+    )
+    16px calc(24px + var(--zaui-safe-area-inset-bottom, 0px));
 }
 .block-scr__brand {
   display: flex;
@@ -2777,14 +2821,9 @@ body[zaui-theme="dark"] {
   gap: 8px;
 }
 .block-scr__logo {
-  width: 40px;
   height: 40px;
+  width: auto;
   object-fit: contain;
-}
-.block-scr__title {
-  font-size: 30px;
-  line-height: 40px;
-  font-weight: 500;
 }
 // Vùng giữa nở ra để nút "Truy cập" luôn nằm đáy.
 .block-scr__main {
@@ -2794,6 +2833,23 @@ body[zaui-theme="dark"] {
   display: flex;
   flex-direction: column;
   gap: 40px;
+}
+// Trạng thái chờ authen: spinner canh giữa trên nền màn chặn (tránh nháy trắng).
+.block-scr__loading {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.block-scr__spinner {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+  animation: vm-spin 0.8s linear infinite;
 }
 .block-scr__desc {
   font-size: 16px;
@@ -2815,36 +2871,22 @@ body[zaui-theme="dark"] {
   padding: 10px;
   object-fit: contain;
 }
+// Chip xanh: link + icon copy trên cùng một nút (Figma 403-13608).
 .block-scr__link {
-  display: flex;
-  flex-direction: column;
+  display: inline-flex;
   align-items: center;
   gap: 8px;
-}
-// Link giờ là "chip" nền trắng chữ xanh (Figma 403-13608) thay vì chữ trắng trơn.
-.block-scr__link-text {
-  padding: 6px 16px;
+  padding: 4px 12px;
+  border: none;
   border-radius: 999px;
-  background: #ffffff;
-  color: #006af5;
+  background: #0068ff;
+  color: #fff;
+  cursor: pointer;
+}
+.block-scr__link-text {
   font-size: 16px;
   line-height: 22px;
   font-weight: 500;
-}
-.block-scr__copy {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  height: 28px;
-  padding: 4px 12px;
-  border: none;
-  border-radius: 16px;
-  background: #0485f7;
-  color: #fcfcfc;
-  font-size: 14px;
-  line-height: 20px;
-  font-weight: 500;
-  cursor: pointer;
 }
 .block-scr__cta {
   width: 100%;
@@ -2881,7 +2923,12 @@ body[zaui-theme="dark"] {
   flex-direction: column;
   align-items: center;
   overflow: hidden;
-  padding: calc(40px + var(--zaui-safe-area-inset-top, 0px)) 16px 0;
+  // Overlay fixed ngoài <Page> ZaUI → fallback env() để chừa notch (như block-scr).
+  // 44px = dải nút hành động Zalo ("..."/X) ngay dưới safe-area; +24px = khoảng cách tính TỪ dải nút xuống.
+  padding: calc(
+      44px + 24px + var(--zaui-safe-area-inset-top, env(safe-area-inset-top, 0px))
+    )
+    16px 0;
 }
 .perm-scr__brand {
   display: flex;
@@ -2889,14 +2936,9 @@ body[zaui-theme="dark"] {
   gap: 8px;
 }
 .perm-scr__logo {
-  width: 40px;
   height: 40px;
+  width: auto;
   object-fit: contain;
-}
-.perm-scr__title {
-  font-size: 28px;
-  line-height: 40px;
-  font-weight: 500;
 }
 .perm-scr__desc {
   margin-top: 24px;
@@ -2958,12 +3000,8 @@ body[zaui-theme="dark"] {
   right: 0;
   height: 200px;
   pointer-events: none;
-  background: linear-gradient(
-    180deg,
-    rgba(0, 104, 255, 0.2) 0%,
-    rgba(0, 104, 255, 0.06) 40%,
-    rgba(0, 104, 255, 0) 100%
-  );
+  // Nền xanh đậm → trắng (Figma Rectangle 50, 360×200).
+  background: linear-gradient(180deg, #0068ff -85.28%, #ffffff 100%);
 }
 .link-ok__body {
   position: relative;
@@ -2974,14 +3012,23 @@ body[zaui-theme="dark"] {
   flex-direction: column;
   align-items: center;
   gap: 24px;
-  padding: calc(40px + var(--zaui-safe-area-inset-top, 0px)) 16px 16px;
+  // LinkSuccess là overlay `position: fixed` render THẲNG từ gate (không nằm
+  // trong <Page> của ZaUI) nên `--zaui-safe-area-inset-top` không resolve →
+  // fallback về env(safe-area-inset-top) để vẫn chừa notch.
+  // 44px = dải nút hành động Zalo ("..."/X, cao đúng bằng home topbar) nằm NGAY
+  // dưới safe-area; +40px = khoảng cách mong muốn tính TỪ nút 3 chấm xuống.
+  padding: calc(
+      44px + 40px + var(--zaui-safe-area-inset-top, env(safe-area-inset-top, 0px))
+    )
+    16px 16px;
 }
 .link-ok__check {
   flex: none;
   width: 80px;
   height: 80px;
   border-radius: 999px;
-  background: var(--vm-blue);
+  // Tick gradient chuẩn cho các màn thành công.
+  background: linear-gradient(180deg, #0068ff 0%, #549aff 100%);
   color: #fff;
   display: flex;
   align-items: center;
@@ -3063,6 +3110,9 @@ body[zaui-theme="dark"] {
 }
 .link-ok__footer {
   flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   padding: 16px 16px calc(24px + var(--zaui-safe-area-inset-bottom, 0px));
 }
 .link-ok__cta {
@@ -3070,10 +3120,18 @@ body[zaui-theme="dark"] {
   height: 48px;
   border: none;
   border-radius: 999px;
-  background: #006af5;
-  color: #fff;
   font-size: 15px;
   line-height: 20px;
   font-weight: 500;
   cursor: pointer;
+}
+// Nút chính (solid): "Đi đến chat bot".
+.link-ok__cta--primary {
+  background: #006af5;
+  color: #fff;
+}
+// Nút phụ (soft): "Trở về màn hình chính" — nền xanh nhạt B20, chữ xanh B60.
+.link-ok__cta--secondary {
+  background: #d6e9ff;
+  color: #006af5;
 }

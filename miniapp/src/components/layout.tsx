@@ -204,7 +204,13 @@ function Gate() {
     return <BlockScreen />;
   }
 
-  // Chưa có token: đang authen, hoặc rơi vào một trạng thái lỗi cần user xử lý.
+  // Đã cấp quyền SĐT, đang đổi session (chưa có token) → spinner trên nền màn chặn
+  // thay cho màn loading trắng, để không bị nháy trắng trước khi ra Home/BlockScreen.
+  if (phase === "authing") {
+    return <BlockScreen loading />;
+  }
+
+  // Rơi vào trạng thái lỗi authen (không phải link) cần user thử lại.
   const message: Record<Exclude<Phase, "authing">, string> = {
     denied: t("gate.denied"),
     unlinked: t("gate.unlinked"),
@@ -215,21 +221,15 @@ function Gate() {
     <Page className="flex flex-col items-center justify-center px-6 bg-white dark:bg-black">
       <Box textAlign="center" className="space-y-4">
         <Text.Title size="large">VNGMeet</Text.Title>
-        {phase === "authing" ? (
-          <Text className="text-gray-500">{t("gate.authing")}</Text>
-        ) : (
-          <>
-            <Text className="text-gray-500">{message[phase]}</Text>
-            {detail && (
-              <Text size="xSmall" className="text-red-500 break-words">
-                {detail}
-              </Text>
-            )}
-            <Button fullWidth onClick={() => void authenticate()}>
-              {t("common.retry")}
-            </Button>
-          </>
+        <Text className="text-gray-500">{message[phase]}</Text>
+        {detail && (
+          <Text size="xSmall" className="text-red-500 break-words">
+            {detail}
+          </Text>
         )}
+        <Button fullWidth onClick={() => void authenticate()}>
+          {t("common.retry")}
+        </Button>
       </Box>
     </Page>
   );

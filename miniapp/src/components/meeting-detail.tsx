@@ -1,14 +1,18 @@
 import { useEffect, useState } from "react";
 
+import { showToast } from "zmp-sdk";
+
 import ChevronLeft from "@gravity-ui/icons/ChevronLeft";
 import PlanetEarth from "@gravity-ui/icons/PlanetEarth";
 import Clock from "@gravity-ui/icons/Clock";
 import MapPin from "@gravity-ui/icons/MapPin";
 import Persons from "@gravity-ui/icons/Persons";
+import ArrowShapeTurnUpRight from "@gravity-ui/icons/ArrowShapeTurnUpRight";
 
 import MapModal from "@/components/map-modal";
 import { useSwipeBack } from "@/hooks/use-swipe-back";
 import { roomFlag } from "@/services/room-flags";
+import { composeDirectionsText, shareDirections } from "@/services/share";
 import { useT } from "@/services/settings";
 import type { TranslationKey } from "@/services/i18n";
 import type { BookingStatus, UpcomingEvent } from "@/types";
@@ -88,6 +92,17 @@ export default function MeetingDetail({ event, status, onClose }: Props) {
       : attendees.slice(0, ATTENDEES_PREVIEW);
   const description = (event.body ?? "").trim();
   const chip = status ? STATUS_CHIP[status] : null;
+
+  // Chia sẻ đường đi tới phòng họp: ưu tiên ảnh sơ đồ, không có thì chia sẻ text.
+  async function handleShare() {
+    const roomName = event.room_name || title;
+    const text = composeDirectionsText({
+      intro: t("dir.shareIntro", { room: roomName }),
+      location: event.location,
+    });
+    const ok = await shareDirections({ text, map: event.map });
+    if (!ok) void showToast({ message: t("dir.shareFailed") });
+  }
 
   return (
     <div
@@ -184,6 +199,17 @@ export default function MeetingDetail({ event, status, onClose }: Props) {
           )}
         </section>
       </div>
+
+      <footer className="mtg-detail__footer">
+        <button
+          className="mtg-detail__share"
+          type="button"
+          onClick={handleShare}
+        >
+          <ArrowShapeTurnUpRight width={18} height={18} />
+          {t("dir.share")}
+        </button>
+      </footer>
 
       {mapOpen && event.map && (
         <MapModal src={event.map} onClose={() => setMapOpen(false)} />

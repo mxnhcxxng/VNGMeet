@@ -1,13 +1,17 @@
 import { useEffect, useState } from "react";
 
+import { showToast } from "zmp-sdk";
+
 import ChevronLeft from "@gravity-ui/icons/ChevronLeft";
 import MapPin from "@gravity-ui/icons/MapPin";
 import Persons from "@gravity-ui/icons/Persons";
+import ArrowShapeTurnUpRight from "@gravity-ui/icons/ArrowShapeTurnUpRight";
 
 import MapModal from "@/components/map-modal";
 import { officeLabel } from "@/pages/directions";
 import { useSwipeBack } from "@/hooks/use-swipe-back";
 import { roomFlag } from "@/services/room-flags";
+import { composeDirectionsText, shareDirections } from "@/services/share";
 import { useT } from "@/services/settings";
 import type { TranslationKey } from "@/services/i18n";
 import type { CapacitySize, DirectoryRoom } from "@/types";
@@ -55,6 +59,17 @@ export default function RoomDirectionDetail({ room, onClose }: Props) {
 
   // Vuốt mép trái để quay lại danh sách; tắt khi map modal đang mở.
   const swipeBack = useSwipeBack(handleClose, !mapOpen);
+
+  // Chia sẻ đường đi: ưu tiên ảnh sơ đồ, không có thì chia sẻ text hướng dẫn.
+  async function handleShare() {
+    const text = composeDirectionsText({
+      intro: t("dir.shareIntro", { room: room.name }),
+      location,
+      directions: room.direction,
+    });
+    const ok = await shareDirections({ text, map: room.map });
+    if (!ok) void showToast({ message: t("dir.shareFailed") });
+  }
 
   const flag = roomFlag(room.name);
   const cap = capacitySize(room);
@@ -150,6 +165,17 @@ export default function RoomDirectionDetail({ room, onClose }: Props) {
           )}
         </section>
       </div>
+
+      <footer className="mtg-detail__footer">
+        <button
+          className="mtg-detail__share"
+          type="button"
+          onClick={handleShare}
+        >
+          <ArrowShapeTurnUpRight width={18} height={18} />
+          {t("dir.share")}
+        </button>
+      </footer>
 
       {mapOpen && room.map && (
         <MapModal src={room.map} onClose={() => setMapOpen(false)} />

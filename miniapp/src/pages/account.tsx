@@ -7,13 +7,13 @@ import Palette from "@gravity-ui/icons/Palette";
 import Globe from "@gravity-ui/icons/Globe";
 import Comment from "@gravity-ui/icons/Comment";
 import ChevronLeft from "@gravity-ui/icons/ChevronLeft";
-import Display from "@gravity-ui/icons/Display";
-import Sun from "@gravity-ui/icons/Sun";
-import Moon from "@gravity-ui/icons/Moon";
 import Check from "@gravity-ui/icons/Check";
 
 import ProfileInfo from "@/components/profile-info";
 import defaultAvatar from "@/static/default-avatar.jpg";
+import themeLightPreview from "@/static/theme-light.png";
+import themeDarkPreview from "@/static/theme-dark.png";
+import themeSystemPreview from "@/static/theme-system.png";
 import { api, AuthError } from "@/services/api";
 import { useDisplayName } from "@/services/auth";
 import { useSettings, type ThemeMode } from "@/services/settings";
@@ -28,14 +28,16 @@ type Props = {
 // Biểu mẫu góp ý (dùng chung với web) — mở trong webview của Zalo.
 const FEEDBACK_URL = "https://forms.office.com/r/tqXL5RYBqM";
 
+// Thứ tự khớp app Zalo: Sáng · Tối · Hệ thống. Mỗi mục có ảnh preview minh hoạ
+// giao diện (giống card chọn theme trong Zalo).
 const THEME_OPTIONS: {
   mode: ThemeMode;
   labelKey: "settings.themeSystem" | "settings.themeLight" | "settings.themeDark";
-  Icon: typeof Sun;
+  preview: string;
 }[] = [
-  { mode: "system", labelKey: "settings.themeSystem", Icon: Display },
-  { mode: "light", labelKey: "settings.themeLight", Icon: Sun },
-  { mode: "dark", labelKey: "settings.themeDark", Icon: Moon },
+  { mode: "light", labelKey: "settings.themeLight", preview: themeLightPreview },
+  { mode: "dark", labelKey: "settings.themeDark", preview: themeDarkPreview },
+  { mode: "system", labelKey: "settings.themeSystem", preview: themeSystemPreview },
 ];
 
 const LANG_OPTIONS: {
@@ -83,8 +85,9 @@ function useCountdown(expSec?: number | null): string | null {
   return `${pad2(h)}:${pad2(m)}:${pad2(s)}`;
 }
 
-// Màn Tài khoản (Figma 400-2293): hồ sơ + thẻ token + danh sách mục (Thông tin cá
-// nhân / Giao diện / Ngôn ngữ / Phản hồi). Mỗi mục mở một trang con trượt từ phải.
+// Màn Tài khoản (Figma 400-2699): hồ sơ + thẻ token + danh sách mục (Thông tin cá
+// nhân / Giao diện / Ngôn ngữ / Phản hồi) trong thẻ trắng bo góc. Mỗi mục mở một
+// trang con trượt từ phải.
 export default function AccountPage({ me, onMeChange }: Props) {
   const { theme, setTheme, language, setLanguage, t } = useSettings();
   const { openSnackbar } = useSnackbar();
@@ -188,29 +191,27 @@ export default function AccountPage({ me, onMeChange }: Props) {
         </section>
       )}
 
-      {/* Nhóm cài đặt chính (full-bleed, kẻ vạch mảnh giữa các dòng) */}
-      <section className="acct__menu">
-        <MenuRow
-          Icon={PersonPencil}
-          label={t("settings.personalInfo")}
-          onClick={() => setSub("profile")}
-        />
-        <MenuRow
-          Icon={Palette}
-          label={t("settings.displayPreference")}
-          onClick={() => setSub("theme")}
-        />
-        <MenuRow
-          Icon={Globe}
-          label={t("settings.language")}
-          onClick={() => setSub("language")}
-          last
-        />
-      </section>
-
-      {/* Nhóm phản hồi trên dải nền xám, lấp đầy phần còn lại tới bottom-nav */}
+      {/* Nhóm cài đặt trong thẻ trắng bo góc, trên dải nền xám tới bottom-nav */}
       <section className="acct__tail">
-        <div className="acct__menu">
+        <div className="acct__card">
+          <MenuRow
+            Icon={PersonPencil}
+            label={t("settings.personalInfo")}
+            onClick={() => setSub("profile")}
+          />
+          <MenuRow
+            Icon={Palette}
+            label={t("settings.displayPreference")}
+            onClick={() => setSub("theme")}
+          />
+          <MenuRow
+            Icon={Globe}
+            label={t("settings.language")}
+            onClick={() => setSub("language")}
+            last
+          />
+        </div>
+        <div className="acct__card">
           <MenuRow
             Icon={Comment}
             label={t("settings.feedback")}
@@ -233,19 +234,34 @@ export default function AccountPage({ me, onMeChange }: Props) {
           <div className="acct-sub__scroll">
             <p className="acct-sub__desc">{t("settings.displayPreferenceDesc")}</p>
             <div className="settings__theme-grid">
-              {THEME_OPTIONS.map(({ mode, labelKey, Icon }) => (
-                <button
-                  key={mode}
-                  type="button"
-                  className={`settings__theme-card${
-                    theme === mode ? " is-active" : ""
-                  }`}
-                  onClick={() => pickTheme(mode)}
-                >
-                  <Icon width={22} height={22} />
-                  <span className="settings__theme-label">{t(labelKey)}</span>
-                </button>
-              ))}
+              {THEME_OPTIONS.map(({ mode, labelKey, preview }) => {
+                const active = theme === mode;
+                return (
+                  <button
+                    key={mode}
+                    type="button"
+                    className={`settings__theme-card${active ? " is-active" : ""}`}
+                    onClick={() => pickTheme(mode)}
+                    role="radio"
+                    aria-checked={active}
+                  >
+                    <img
+                      className="settings__theme-preview"
+                      src={preview}
+                      alt=""
+                      aria-hidden="true"
+                    />
+                    <span className="settings__theme-choice">
+                      <span
+                        className={`settings__theme-radio${
+                          active ? " is-active" : ""
+                        }`}
+                      />
+                      <span className="settings__theme-label">{t(labelKey)}</span>
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           </div>
         </SubPage>

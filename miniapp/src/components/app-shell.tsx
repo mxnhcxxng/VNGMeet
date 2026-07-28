@@ -53,7 +53,7 @@ export default function AppShell() {
   return (
     <Page hideScrollbar>
       <div ref={scrollAnchorRef} hidden />
-      {tab === "home" && <HomePage />}
+      {tab === "home" && <HomePage me={me} />}
       {tab === "history" && <HistoryPage />}
       {tab === "account" && <AccountPage me={me} onMeChange={setMe} />}
       <BottomNav active={tab} onChange={setTab} />

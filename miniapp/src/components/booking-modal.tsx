@@ -18,6 +18,10 @@ type Props = {
   date: string; // ISO yyyy-mm-dd của ngày đang đặt (freeRooms.day)
   onClose: () => void;
   onBooked?: () => void;
+  // Nút "Về màn hình chính" ở màn success. Nếu modal mở từ một màn trung gian
+  // (vd Tìm phòng), truyền hàm đóng toàn bộ stack về home. Không truyền →
+  // mặc định chỉ đóng modal (dùng khi modal mở thẳng từ home).
+  onBackHome?: () => void;
   // true = ngày ngoài cửa sổ Graph → đặt hẹn giờ (scheduled), backend tự đặt lúc
   // 00:00 ngày mục tiêu. Đổi tiêu đề/chú thích/màn thành công cho phù hợp.
   schedule?: boolean;
@@ -39,6 +43,7 @@ export default function BookingModal({
   date,
   onClose,
   onBooked,
+  onBackHome,
   schedule = false,
 }: Props) {
   const displayName = useDisplayName();
@@ -167,7 +172,7 @@ export default function BookingModal({
             </div>
           </div>
           <div className="booking-modal__actions">
-            <Button fullWidth onClick={handleClose}>
+            <Button fullWidth onClick={onBackHome ?? handleClose}>
               {t("booking.backHome")}
             </Button>
           </div>

@@ -15,14 +15,7 @@ import type { DirectoryRoom } from "@/types";
 // (sống trong phiên, mất khi reload app).
 let cachedRooms: DirectoryRoom[] | null = null;
 
-// 2 tab office. Sala không có chỉ đường nên không đưa vào (theo yêu cầu). Khớp
-// case-insensitive với cột office của meeting_room_metadata.
-const TABS = [
-  { key: "campus", label: "Campus" },
-  { key: "tnr", label: "TNR" },
-] as const;
-type TabKey = (typeof TABS)[number]["key"];
-
+// Khớp case-insensitive với cột office của meeting_room_metadata.
 function officeKey(office?: string | null): string {
   return (office ?? "").trim().toLowerCase();
 }
@@ -59,14 +52,16 @@ function groupLetter(name: string): string {
 }
 
 type Props = {
+  // Office của user đang đăng nhập — danh sách luôn lọc theo office này.
+  office?: string | null;
   onClose: () => void;
 };
 
-// Màn "Chỉ đường" (Figma 392-12167): overlay push từ phải. Danh sách phòng chia
-// 2 tab Campus / TNR, nhóm theo chữ cái đầu, mỗi dòng có ảnh + tên (kèm cờ) +
-// vị trí + nút chỉ đường. Bấm dòng hoặc nút → mở màn chi tiết (có sơ đồ + hướng
+// Màn "Chỉ đường" (Figma 392-12167): overlay push từ phải. Danh sách phòng luôn
+// lọc theo office của user, nhóm theo chữ cái đầu, mỗi dòng có ảnh + tên (kèm cờ)
+// + vị trí + nút chỉ đường. Bấm dòng hoặc nút → mở màn chi tiết (có sơ đồ + hướng
 // dẫn đường đi).
-export default function Directions({ onClose }: Props) {
+export default function Directions({ office, onClose }: Props) {
   const t = useT();
   const [entered, setEntered] = useState(false);
   const [leaving, setLeaving] = useState(false);
@@ -74,7 +69,6 @@ export default function Directions({ onClose }: Props) {
   const [rooms, setRooms] = useState<DirectoryRoom[] | null>(cachedRooms);
   const [loading, setLoading] = useState(cachedRooms === null);
   const [error, setError] = useState(false);
-  const [tab, setTab] = useState<TabKey>("campus");
   const [selected, setSelected] = useState<DirectoryRoom | null>(null);
   // Chữ cái đang chạm trên thanh A-Z (hiện bong bóng + tô sáng); null = không chạm.
   const [activeLetter, setActiveLetter] = useState<string | null>(null);
@@ -115,16 +109,6 @@ export default function Directions({ onClose }: Props) {
     void load();
   }, []);
 
-  // Đổi tab office → reset hết trạng thái cuộn/chọn (nếu không, scrollTop cũ giữ
-  // nguyên khiến tab mới ngắn hơn bị cuộn quá nội dung → trông như trống trơn).
-  function selectTab(key: TabKey) {
-    if (key === tab) return;
-    setTab(key);
-    setActiveLetter(null);
-    setSelected(null);
-    if (bodyRef.current) bodyRef.current.scrollTop = 0;
-  }
-
   // Cuộn danh sách sao cho đầu nhóm `letter` lên sát mép trên vùng cuộn.
   function scrollToLetter(letter: string) {
     const body = bodyRef.current;
@@ -156,9 +140,13 @@ export default function Directions({ onClose }: Props) {
     }
   }
 
-  // Phòng của tab đang chọn, nhóm theo chữ cái đầu; nhóm & phòng đều sort A→Z.
+  // Phòng thuộc office của user, nhóm theo chữ cái đầu; nhóm & phòng đều sort A→Z.
+  // office rỗng (chưa có hồ sơ) → hiện tất cả để không trống trơn.
   const groups = useMemo(() => {
-    const list = (rooms ?? []).filter((r) => officeKey(r.office) === tab);
+    const target = officeKey(office);
+    const list = (rooms ?? []).filter(
+      (r) => !target || officeKey(r.office) === target,
+    );
     const byLetter = new Map<string, DirectoryRoom[]>();
     for (const r of list) {
       const letter = groupLetter(r.name);
@@ -172,7 +160,7 @@ export default function Directions({ onClose }: Props) {
         letter,
         items: items.sort((a, b) => a.name.localeCompare(b.name, "vi")),
       }));
-  }, [rooms, tab]);
+  }, [rooms, office]);
 
   return (
     <div
@@ -192,19 +180,6 @@ export default function Directions({ onClose }: Props) {
         </button>
         <span className="mtg-detail__header-title">{t("dir.title")}</span>
       </header>
-
-      <div className="dir__tabs">
-        {TABS.map((tabItem) => (
-          <button
-            key={tabItem.key}
-            type="button"
-            className={`dir-tab${tabItem.key === tab ? " is-active" : ""}`}
-            onClick={() => selectTab(tabItem.key)}
-          >
-            {tabItem.label}
-          </button>
-        ))}
-      </div>
 
       <div className="dir__body" ref={bodyRef}>
         {loading ? (

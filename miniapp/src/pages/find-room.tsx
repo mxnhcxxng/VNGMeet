@@ -633,6 +633,7 @@ export default function FindRoom({ onClose }: Props) {
           date={data.days[dayIndex]}
           schedule={booking.schedule}
           onClose={() => setBooking(null)}
+          onBackHome={handleClose}
           onBooked={() => {
             setSelected(null);
             void load();

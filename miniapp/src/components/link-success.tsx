@@ -8,6 +8,7 @@ import MapPin from "@gravity-ui/icons/MapPin";
 
 import botAvatar from "@/static/bot-avatar.png";
 import { useT } from "@/services/settings";
+import { openChatbot } from "@/services/chatbot";
 import type { TranslationKey } from "@/services/i18n";
 
 type IconProps = { width?: number; height?: number; className?: string };
@@ -60,7 +61,18 @@ export default function LinkSuccess({ onClose }: { onClose: () => void }) {
       </div>
 
       <div className="link-ok__footer">
-        <button className="link-ok__cta" type="button" onClick={onClose}>
+        <button
+          className="link-ok__cta link-ok__cta--primary"
+          type="button"
+          onClick={openChatbot}
+        >
+          {t("linkSuccess.gotoBot")}
+        </button>
+        <button
+          className="link-ok__cta link-ok__cta--secondary"
+          type="button"
+          onClick={onClose}
+        >
           {t("linkSuccess.backHome")}
         </button>
       </div>
