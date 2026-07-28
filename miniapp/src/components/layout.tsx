@@ -64,6 +64,61 @@ function clearBotPairParam(): void {
   }
 }
 
+// Trích mã bot_pair từ payload bất kỳ của event Zalo (OpenApp/AppResumed). Payload
+// không có kiểu cố định nên dò cả `bot_pair` trực tiếp lẫn chuỗi dạng
+// "...?bot_pair=<code>" nằm trong path/query/params/data.
+function pairCodeFromPayload(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") return null;
+  const obj = payload as Record<string, unknown>;
+  if (typeof obj.bot_pair === "string" && obj.bot_pair) return obj.bot_pair;
+  for (const key of ["params", "query", "data", "extraData", "path", "url"]) {
+    const v = obj[key];
+    if (typeof v === "string") {
+      const marker = "bot_pair=";
+      const i = v.indexOf(marker);
+      if (i >= 0) {
+        const code = v.slice(i + marker.length).split(/[&#]/)[0];
+        if (code) {
+          try {
+            return decodeURIComponent(code);
+          } catch {
+            return code;
+          }
+        }
+      }
+    } else {
+      const nested = pairCodeFromPayload(v);
+      if (nested) return nested;
+    }
+  }
+  return null;
+}
+
+// Nhớ các mã pairing đã xử lý TRONG PHIÊN (sessionStorage sống qua reload nhưng
+// mất khi đóng app) để tránh reload lặp vô hạn: getRouteParams có thể vẫn trả về
+// mã của lần mở đầu ngay cả sau khi đã liên kết xong.
+const PAIR_DONE_KEY = "vngmeet.botPairHandled";
+
+function wasPairHandled(code: string): boolean {
+  try {
+    const raw = sessionStorage.getItem(PAIR_DONE_KEY);
+    return raw ? (JSON.parse(raw) as string[]).includes(code) : false;
+  } catch {
+    return false;
+  }
+}
+
+function markPairHandled(code: string): void {
+  try {
+    const raw = sessionStorage.getItem(PAIR_DONE_KEY);
+    const set = new Set<string>(raw ? (JSON.parse(raw) as string[]) : []);
+    set.add(code);
+    sessionStorage.setItem(PAIR_DONE_KEY, JSON.stringify([...set]));
+  } catch {
+    // ignore
+  }
+}
+
 // Cổng authen bằng SĐT Zalo. Đặt trong SnackbarProvider để dùng useSnackbar.
 //
 // Luồng:
@@ -153,7 +208,7 @@ function Gate() {
   useEffect(() => {
     if (!token || pairHandled.current) return;
     const code = readBotPairCode();
-    if (!code) return;
+    if (!code || wasPairHandled(code)) return;
     pairHandled.current = true;
     void (async () => {
       try {
@@ -166,10 +221,56 @@ function Gate() {
           type: "error",
         });
       } finally {
+        // Đánh dấu đã xử lý (kể cả khi lỗi) để listener resume không reload lặp lại.
+        markPairHandled(code);
         clearBotPairParam();
       }
     })();
   }, [token, openSnackbar]);
+
+  // FIX luồng pair khi app đang mở: user vào bot → minimize app → bot trả link
+  // ?bot_pair=<code> → mở lại app. Lúc này Zalo KHÔNG remount webview nên effect
+  // pairing ở trên (chạy 1 lần lúc mount) không nổ lại → không tự liên kết.
+  // Zalo bắn event OpenApp/AppResumed khi re-open kèm deep-link mới; ta đọc mã mới
+  // rồi reload app để chạy lại toàn bộ luồng mount (đọc mã qua URL → linkBot).
+  useEffect(() => {
+    const evs = (zmpSdk as Record<string, unknown>)["events"] as
+      | { on?: (n: string, fn: (...a: unknown[]) => void) => void; off?: (n: string, fn: (...a: unknown[]) => void) => void }
+      | undefined;
+    const EventName = (zmpSdk as Record<string, unknown>)["EventName"] as
+      | Record<string, string>
+      | undefined;
+    if (!evs?.on || !EventName) return;
+
+    // Mã của LẦN MỞ ĐẦU do effect pairing lo; listener chỉ xử lý mã KHÁC (resume
+    // với deep-link mới) để không tạo thêm 1 lần reload thừa ngay khi mở app.
+    const initialCode = readBotPairCode();
+
+    const handler = (...args: unknown[]): void => {
+      let code: string | null = null;
+      for (const a of args) {
+        code = pairCodeFromPayload(a);
+        if (code) break;
+      }
+      if (!code) code = readBotPairCode();
+      if (!code || code === initialCode || wasPairHandled(code)) return;
+      // Ghi mã vào URL để lần mount sau (sau reload) đọc được qua fallback query.
+      try {
+        const url = new URL(window.location.href);
+        url.searchParams.set("bot_pair", code);
+        window.history.replaceState({}, "", url.toString());
+      } catch {
+        // ignore
+      }
+      window.location.reload();
+    };
+
+    const names = [EventName.OpenApp, EventName.AppResumed].filter(Boolean);
+    names.forEach((n) => evs.on!(n, handler));
+    return () => {
+      names.forEach((n) => evs.off?.(n, handler));
+    };
+  }, []);
 
   // Đang kiểm tra quyền SĐT (chưa biết) → chờ, TUYỆT ĐỐI không render Home.
   if (phoneOk === null) {

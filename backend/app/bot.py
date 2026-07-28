@@ -117,10 +117,13 @@ def _strip_think(text: str) -> str:
     return cleaned.strip()
 
 
-# Zalo Bot renders a subset of Markdown server-side when parse_mode="markdown":
-# **bold**, *italic*, ~~strike~~, `code`, headings (#), lists (-/*/1.), blockquotes
-# (>) and colour tags. It has NO hyperlink syntax and no tables, so we only flatten
-# those two and keep the rest for Zalo to render. See _send (parse_mode).
+# Zalo Bot renders a subset of Markdown server-side with parse_mode="markdown":
+# **bold**, *italic*, ~~strike~~, `code`, headings (#), blockquotes (>). We KEEP
+# those. But its <ul>/<li> list renderer splits supplementary-plane emoji
+# (🔎/🔭/🗺️, each a UTF-16 surrogate pair) into tofu boxes, so we DON'T emit
+# markdown lists: bullets "- "/"* " become a literal "• " (emoji then live in a
+# plain paragraph, which renders fine). Hyperlinks and tables aren't supported and
+# are flattened too. See _send (parse_mode + _escape_url_markdown).
 _IMG_MD_RE = re.compile(r"!\[[^\]]*\]\((https?://[^)\s]+)\)")
 _LINK_MD_RE = re.compile(r"\[([^\]]+)\]\((https?://[^)\s]+)\)")
 _TABLE_SEP_RE = re.compile(r"^\|?[\s:\-|]*-[\s:\-|]*\|?$")
@@ -133,11 +136,14 @@ _MD_SPECIAL_RE = re.compile(r"([\\_*~`])")
 def _md_for_zalo(text: str) -> str:
     """Adapt Markdown for Zalo Bot (sent with parse_mode="markdown").
 
-    Zalo renders **bold**, *italic*, ~~strike~~, `code`, headings, lists and
-    blockquotes natively, so those are KEPT verbatim. Zalo has no hyperlink
-    syntax, so [text](url) is flattened to "text (url)" (relative → just "text").
-    Markdown tables aren't supported either: the |---| separator row is dropped
-    and cells joined by ' | '. Images are removed beforehand (sent via sendPhoto).
+    Inline markdown Zalo renders natively (**bold**, *italic*, ~~strike~~,
+    `code`, headings, blockquotes) is KEPT. What Zalo can't handle or what
+    corrupts emoji is flattened:
+      - list bullets "- "/"* " -> "• "  (a real <ul>/<li> makes Zalo split
+        supplementary-plane emoji 🔎/🗺️ into tofu boxes)
+      - [text](url) -> "text (url)"     (Zalo has no hyperlink syntax)
+      - table |---| separator dropped, cells joined by ' | '
+    Images are removed beforehand (resent via sendPhoto).
     """
     if not text:
         return text
@@ -152,6 +158,7 @@ def _md_for_zalo(text: str) -> str:
         if "|" in line:
             cells = [c.strip() for c in line.strip().strip("|").split("|")]
             line = " | ".join(c for c in cells if c != "")
+        line = re.sub(r"^(\s*)[-*]\s+", r"\1• ", line)        # bullets -> • (no <ul>)
         lines.append(line)
     out = "\n".join(lines)
     out = re.sub(r"\n{3,}", "\n\n", out)
@@ -167,9 +174,7 @@ def _escape_url_markdown(text: str) -> str:
     """
     if not text:
         return text
-    return _URL_RE.sub(
-        lambda m: _MD_SPECIAL_RE.sub(r"\\\1", m.group(0)), text
-    )
+    return _URL_RE.sub(lambda m: _MD_SPECIAL_RE.sub(r"\\\1", m.group(0)), text)
 
 
 def _prepare_reply(text: str) -> tuple[str, list[str]]:
@@ -615,14 +620,14 @@ def _chunk_text(text: str, limit: int = ZALO_MAX_TEXT) -> list[str]:
 
 
 async def _send(chat_id: str, text: str, buttons: list[dict] | None = None) -> None:
-    text = _escape_url_markdown(text)
+    # Adapt Markdown for Zalo (keep bold/italic/code, turn lists into "\u2022 " so the
+    # <ul> renderer doesn't break emoji), then escape markdown chars inside URLs.
+    text = _escape_url_markdown(_md_for_zalo(text))
     chunks = _chunk_text(text) or ([""] if buttons else [])
     if not chunks:
         return
     last = len(chunks) - 1
     for i, chunk in enumerate(chunks):
-        # Zalo renders a Markdown subset server-side; text is already adapted via
-        # _md_for_zalo (agent replies) / static strings, with URLs escaped above.
         payload = {"chat_id": chat_id, "text": chunk or "\u200b", "parse_mode": "markdown"}
         # EXPERIMENTAL: attach OA-style buttons (name/type/payload) to the last
         # chunk. Zalo Bot Platform sendMessage does not document buttons, so this
