@@ -15,9 +15,11 @@ import {
 import { AppProps } from "zmp-ui/app";
 
 import AppShell from "@/components/app-shell";
+import BlockScreen from "@/components/block-screen";
+import LinkSuccess from "@/components/link-success";
 import { setToken, useToken } from "@/services/auth";
 import { api, LinkRequiredError } from "@/services/api";
-import { errText, requestPhoneNumber } from "@/services/phone";
+import { errText, hasPhonePermission, requestPhoneNumber } from "@/services/phone";
 import { SettingsProvider, useSettings } from "@/services/settings";
 
 type Phase = "authing" | "denied" | "unlinked" | "error";
@@ -75,6 +77,8 @@ function Gate() {
   const { t } = useSettings();
   const [phase, setPhase] = useState<Phase>("authing");
   const [detail, setDetail] = useState(""); // DEBUG: message lỗi thật
+  // Đã liên kết Zalo Bot xong → hiện màn "Liên kết chatbot thành công".
+  const [botLinked, setBotLinked] = useState(false);
   const running = useRef(false);
   const pairHandled = useRef(false);
 
@@ -126,6 +130,19 @@ function Gate() {
     if (!token) void authenticate();
   }, [token]);
 
+  // Bảo đảm quyền SĐT LUÔN được xin mỗi khi mở app: session JWT sống ~30 ngày
+  // nên các lần mở sau sẽ bỏ qua authenticate() ở trên → không xin lại quyền.
+  // Nếu đã có session nhưng quyền scope.userPhonenumber chưa/không còn được cấp
+  // (vd user thu hồi trong cài đặt Zalo), chạy lại authen để bật popup xin quyền.
+  // getSetting im lặng nên khi quyền đã có sẽ không làm phiền user.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!token) return;
+    void (async () => {
+      if (!(await hasPhonePermission())) void authenticate();
+    })();
+  }, [token]);
+
   // Liên kết Zalo Bot: khi đã có session và deep-link kèm ?bot_pair=<code>, đổi mã
   // lấy liên kết chat_id ↔ tài khoản VNG (chỉ chạy 1 lần).
   useEffect(() => {
@@ -136,10 +153,8 @@ function Gate() {
     void (async () => {
       try {
         await api.linkBot(code);
-        openSnackbar({
-          text: t("gate.botLinked"),
-          type: "success",
-        });
+        // Thành công → hiện màn "Liên kết chatbot thành công" (Figma 403-2707).
+        setBotLinked(true);
       } catch {
         openSnackbar({
           text: t("gate.botLinkFailed"),
@@ -154,7 +169,15 @@ function Gate() {
   // Gate luôn được render BÊN TRONG ZMPRouter (xem Layout), nên <Page> ở cả 2
   // nhánh đều có context router — không còn lỗi invariant của react-router.
   if (token) {
+    // Vừa liên kết chatbot xong → màn thành công, "Trở về màn hình chính" đóng lại.
+    if (botLinked) return <LinkSuccess onClose={() => setBotLinked(false)} />;
     return <AppShell />;
+  }
+
+  // SĐT Zalo không map được profile nào / token hết hạn và tài khoản không còn
+  // → BE trả 403 → màn chặn hướng dẫn đăng nhập lại qua link (Figma 400-2855).
+  if (phase === "unlinked") {
+    return <BlockScreen />;
   }
 
   // Chưa có token: đang authen, hoặc rơi vào một trạng thái lỗi cần user xử lý.

@@ -35,6 +35,25 @@ const en = {
   "gate.botLinkFailed":
     "Failed to link Zalo Bot. The code may have expired — try again from the bot.",
 
+  // --- Block screen (token expired / phone not linked to any profile) ------
+  "block.desc":
+    "Your account hasn't been created yet, or your token has expired. Please sign in using the link below to continue.",
+  "block.copy": "Copy",
+  "block.copied": "Copied",
+  "block.visit": "Open link",
+
+  // --- Chatbot link-success screen ----------------------------------------
+  "linkSuccess.title": "Chatbot linked successfully",
+  "linkSuccess.subtitle":
+    "You can now interact with VNG Meet directly through the chatbot",
+  "linkSuccess.botName": "Boot Room Booking",
+  "linkSuccess.botAccount": "Bot account",
+  "linkSuccess.find": "Find a meeting room",
+  "linkSuccess.scout": "Scout a meeting room",
+  "linkSuccess.schedule": "Schedule a room booking",
+  "linkSuccess.direction": "Directions to a meeting room",
+  "linkSuccess.backHome": "Back to home",
+
   // --- Bottom navigation --------------------------------------------------
   "nav.home": "Home",
   "nav.history": "History",
@@ -280,6 +299,25 @@ const vi: Partial<Record<TranslationKey, string>> = {
     "Đã liên kết Zalo Bot thành công! Quay lại chat bot để tiếp tục.",
   "gate.botLinkFailed":
     "Liên kết Zalo Bot thất bại. Mã có thể đã hết hạn, thử lại từ bot nhé.",
+
+  // --- Block screen (token hết hạn / SĐT chưa liên kết profile nào) --------
+  "block.desc":
+    "Tài khoản của bạn chưa được tạo hoặc token đã hết hạn, vui lòng đăng nhập tại link ở dưới đây để tiếp tục",
+  "block.copy": "Sao chép",
+  "block.copied": "Đã sao chép",
+  "block.visit": "Truy cập",
+
+  // --- Màn liên kết chatbot thành công ------------------------------------
+  "linkSuccess.title": "Liên kết chatbot thành công",
+  "linkSuccess.subtitle":
+    "Bây giờ bạn có thể tương tác trực tiếp với hệ thống VNG Meet qua chatbot",
+  "linkSuccess.botName": "Boot Room Booking",
+  "linkSuccess.botAccount": "Bot account",
+  "linkSuccess.find": "Tìm phòng họp",
+  "linkSuccess.scout": "Săn phòng họp",
+  "linkSuccess.schedule": "Hẹn giờ đặt phòng họp",
+  "linkSuccess.direction": "Chỉ đường đến phòng họp",
+  "linkSuccess.backHome": "Trở về màn hình chính",
 
   // --- Bottom navigation --------------------------------------------------
   "nav.home": "Trang chủ",
