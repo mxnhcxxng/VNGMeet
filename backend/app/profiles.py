@@ -472,6 +472,10 @@ def me(request: Request):
     if bearer.startswith("Bearer "):
         claims = _claims_from_bearer(request)
         profile, profile_complete = _me_profile_response(claims)
+        # Card "Token hết hạn sau" phải đếm ngược theo token Microsoft Graph thật
+        # (~24h, thứ gate booking) chứ không phải session JWT Zalo (30 ngày) — nếu
+        # dùng claims.exp thì hiện ~720h. Không có token Graph trong pool → None →
+        # FE ẩn card.
         return JSONResponse(
             {
                 "authenticated": True,
@@ -480,7 +484,9 @@ def me(request: Request):
                 "graphLinked": auth.has_refresh_token(claims["sub"]),
                 "profile": profile,
                 "profileComplete": profile_complete,
-                "tokenExpiresAt": claims.get("exp"),
+                "tokenExpiresAt": token_pool.get_active_token_exp(
+                    owner_key=claims.get("sub"), email=_profile_email(claims)
+                ),
             }
         )
     sid = auth.session_id(request)

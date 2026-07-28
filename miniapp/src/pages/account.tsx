@@ -1,22 +1,32 @@
-import { useState } from "react";
+import { useEffect, useState, type ComponentType } from "react";
 import { useSnackbar } from "zmp-ui";
+import { openWebview } from "zmp-sdk";
 
-import Person from "@gravity-ui/icons/Person";
+import PersonPencil from "@gravity-ui/icons/PersonPencil";
+import Palette from "@gravity-ui/icons/Palette";
+import Globe from "@gravity-ui/icons/Globe";
+import Comment from "@gravity-ui/icons/Comment";
+import ChevronLeft from "@gravity-ui/icons/ChevronLeft";
 import Display from "@gravity-ui/icons/Display";
 import Sun from "@gravity-ui/icons/Sun";
 import Moon from "@gravity-ui/icons/Moon";
-import Globe from "@gravity-ui/icons/Globe";
 import Check from "@gravity-ui/icons/Check";
 
+import ProfileInfo from "@/components/profile-info";
+import defaultAvatar from "@/static/default-avatar.jpg";
 import { api, AuthError } from "@/services/api";
 import { useDisplayName } from "@/services/auth";
 import { useSettings, type ThemeMode } from "@/services/settings";
 import type { Language, MeResponse } from "@/types";
+import { useSwipeBack } from "@/hooks/use-swipe-back";
 
 type Props = {
   me: MeResponse | null;
   onMeChange: (me: MeResponse) => void;
 };
+
+// Biểu mẫu góp ý (dùng chung với web) — mở trong webview của Zalo.
+const FEEDBACK_URL = "https://forms.office.com/r/tqXL5RYBqM";
 
 const THEME_OPTIONS: {
   mode: ThemeMode;
@@ -28,35 +38,84 @@ const THEME_OPTIONS: {
   { mode: "dark", labelKey: "settings.themeDark", Icon: Moon },
 ];
 
-const LANG_OPTIONS: { value: Language; labelKey: "settings.langVi" | "settings.langEn"; flag: string }[] = [
+const LANG_OPTIONS: {
+  value: Language;
+  labelKey: "settings.langVi" | "settings.langEn";
+  flag: string;
+}[] = [
   { value: "vi", labelKey: "settings.langVi", flag: "🇻🇳" },
   { value: "en", labelKey: "settings.langEn", flag: "🇬🇧" },
 ];
 
-// Tab Tài khoản = màn Cài đặt: đổi giao diện (sáng/tối/hệ thống) + ngôn ngữ
-// (Việt/Anh). Áp dụng NGAY (localStorage) và cố gắng đồng bộ lên hồ sơ user để
-// khớp với bản web (PATCH /api/users/me/profile). Backend bắt buộc office hợp lệ
-// nên chỉ đồng bộ được khi hồ sơ đã có office; nếu chưa thì chỉ lưu cục bộ.
+type SubKey = "profile" | "theme" | "language";
+
+// SĐT lưu dạng local VN "0339758256" → hiển thị nhóm 3-3-4 "033 975 8256".
+function formatPhone(raw?: string | null): string {
+  if (!raw) return "";
+  const d = raw.replace(/\D/g, "");
+  if (d.length === 10) return `${d.slice(0, 3)} ${d.slice(3, 6)} ${d.slice(6)}`;
+  if (d.length === 11) return `${d.slice(0, 4)} ${d.slice(4, 7)} ${d.slice(7)}`;
+  return raw;
+}
+
+function pad2(n: number): string {
+  return n < 10 ? `0${n}` : String(n);
+}
+
+// Đồng hồ đếm ngược tới hạn `expSec` (epoch giây). Trả "HH:MM:SS", null nếu chưa
+// có hạn, "" khi đã hết hạn (caller tự hiện nhãn "đã hết hạn").
+function useCountdown(expSec?: number | null): string | null {
+  const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
+  useEffect(() => {
+    if (!expSec) return;
+    const id = window.setInterval(
+      () => setNow(Math.floor(Date.now() / 1000)),
+      1000,
+    );
+    return () => window.clearInterval(id);
+  }, [expSec]);
+  if (!expSec) return null;
+  const left = expSec - now;
+  if (left <= 0) return "";
+  const h = Math.floor(left / 3600);
+  const m = Math.floor((left % 3600) / 60);
+  const s = left % 60;
+  return `${pad2(h)}:${pad2(m)}:${pad2(s)}`;
+}
+
+// Màn Tài khoản (Figma 400-2293): hồ sơ + thẻ token + danh sách mục (Thông tin cá
+// nhân / Giao diện / Ngôn ngữ / Phản hồi). Mỗi mục mở một trang con trượt từ phải.
 export default function AccountPage({ me, onMeChange }: Props) {
   const { theme, setTheme, language, setLanguage, t } = useSettings();
   const { openSnackbar } = useSnackbar();
   const displayName = useDisplayName() ?? t("common.you");
-  const [saving, setSaving] = useState(false);
+  const [sub, setSub] = useState<SubKey | null>(null);
 
   const profile = me?.profile ?? null;
-  const email = profile?.email || me?.email || "";
+  const phone = formatPhone(profile?.phone);
+  // Hạn token Graph thật (~24h) do backend trả (backend đọc từ graph_token_pool).
+  // KHÔNG decode session JWT Zalo làm fallback vì nó sống 30 ngày → card hiện
+  // ~720h. Không có token Graph → null → ẩn card.
+  const expSec = me?.tokenExpiresAt ?? null;
+  const countdown = useCountdown(expSec);
 
-  // Đồng bộ 1 thay đổi (theme hoặc language) lên hồ sơ user. Best-effort: theme/
-  // language đã được áp cục bộ trước khi gọi hàm này, nên lỗi mạng không làm mất
-  // lựa chọn của user.
+  // Nạp trước danh sách lựa chọn hồ sơ NGAY khi vào tab Tài khoản → khi bấm
+  // "Thông tin cá nhân" dữ liệu đã sẵn trong cache, mở màn không giật/không chờ.
+  useEffect(() => {
+    void api.userProfileOptions().catch(() => {
+      // im lặng — mở màn con sẽ tự thử lại nếu prefetch lỗi
+    });
+  }, []);
+
+  // Đồng bộ 1 thay đổi (theme/ngôn ngữ) lên hồ sơ user. Best-effort: đã áp cục bộ
+  // trước khi gọi nên lỗi mạng không làm mất lựa chọn. Backend bắt buộc office
+  // hợp lệ, nên chỉ đồng bộ được khi hồ sơ đã có office.
   async function persist(patch: { theme?: ThemeMode; language?: Language }) {
     const office = (profile?.office ?? "").trim();
     if (!office) {
-      // Chưa có office → backend từ chối PATCH. Chỉ lưu cục bộ.
       openSnackbar({ text: t("settings.savedLocalOnly"), type: "info" });
       return;
     }
-    setSaving(true);
     try {
       const res = await api.updateProfile({
         office,
@@ -74,19 +133,16 @@ export default function AccountPage({ me, onMeChange }: Props) {
           profileComplete: res.profileComplete,
         });
       }
-      openSnackbar({ text: t("settings.saved"), type: "success" });
     } catch (e) {
       if (!(e instanceof AuthError)) {
         openSnackbar({ text: t("settings.saveFailed"), type: "warning" });
       }
-    } finally {
-      setSaving(false);
     }
   }
 
   function pickTheme(mode: ThemeMode) {
     if (mode === theme) return;
-    setTheme(mode); // áp dụng ngay + lưu localStorage
+    setTheme(mode);
     void persist({ theme: mode });
   }
 
@@ -96,85 +152,202 @@ export default function AccountPage({ me, onMeChange }: Props) {
     void persist({ language: lang });
   }
 
+  async function openFeedback() {
+    try {
+      await openWebview({ url: FEEDBACK_URL, config: { style: "normal" } });
+    } catch {
+      try {
+        window.open(FEEDBACK_URL, "_blank");
+      } catch {
+        // ignore
+      }
+    }
+  }
+
   return (
-    <div className="settings">
-      <header className="settings__header">
-        <span className="settings__header-title">{t("settings.title")}</span>
+    <div className="acct">
+      {/* Hồ sơ + nền gradient xanh nhạt */}
+      <section className="acct__hero">
+        <img className="acct__avatar" src={defaultAvatar} alt={displayName} />
+        <div className="acct__identity">
+          <div className="acct__name">{displayName}</div>
+          {phone && <div className="acct__phone">{phone}</div>}
+        </div>
+      </section>
+
+      {/* Thẻ token hết hạn */}
+      {countdown !== null && (
+        <section className="acct__token">
+          <div className="acct__token-row">
+            <span className="acct__token-label">{t("account.tokenExpiry")}</span>
+            <span className="acct__token-time">
+              {countdown || t("account.tokenExpired")}
+            </span>
+          </div>
+          <p className="acct__token-desc">{t("account.tokenExpiryDesc")}</p>
+        </section>
+      )}
+
+      {/* Nhóm cài đặt chính (full-bleed, kẻ vạch mảnh giữa các dòng) */}
+      <section className="acct__menu">
+        <MenuRow
+          Icon={PersonPencil}
+          label={t("settings.personalInfo")}
+          onClick={() => setSub("profile")}
+        />
+        <MenuRow
+          Icon={Palette}
+          label={t("settings.displayPreference")}
+          onClick={() => setSub("theme")}
+        />
+        <MenuRow
+          Icon={Globe}
+          label={t("settings.language")}
+          onClick={() => setSub("language")}
+          last
+        />
+      </section>
+
+      {/* Nhóm phản hồi trên dải nền xám, lấp đầy phần còn lại tới bottom-nav */}
+      <section className="acct__tail">
+        <div className="acct__menu">
+          <MenuRow
+            Icon={Comment}
+            label={t("settings.feedback")}
+            onClick={() => void openFeedback()}
+            last
+          />
+        </div>
+      </section>
+
+      {/* Trang con: Thông tin cá nhân */}
+      {sub === "profile" && (
+        <SubPage title={t("settings.personalInfo")} onClose={() => setSub(null)}>
+          <ProfileInfo me={me} onMeChange={onMeChange} />
+        </SubPage>
+      )}
+
+      {/* Trang con: Giao diện */}
+      {sub === "theme" && (
+        <SubPage title={t("settings.displayPreference")} onClose={() => setSub(null)}>
+          <div className="acct-sub__scroll">
+            <p className="acct-sub__desc">{t("settings.displayPreferenceDesc")}</p>
+            <div className="settings__theme-grid">
+              {THEME_OPTIONS.map(({ mode, labelKey, Icon }) => (
+                <button
+                  key={mode}
+                  type="button"
+                  className={`settings__theme-card${
+                    theme === mode ? " is-active" : ""
+                  }`}
+                  onClick={() => pickTheme(mode)}
+                >
+                  <Icon width={22} height={22} />
+                  <span className="settings__theme-label">{t(labelKey)}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </SubPage>
+      )}
+
+      {/* Trang con: Ngôn ngữ */}
+      {sub === "language" && (
+        <SubPage title={t("settings.language")} onClose={() => setSub(null)}>
+          <div className="acct-sub__scroll">
+            <p className="acct-sub__desc">{t("settings.languageDesc")}</p>
+            <div className="settings__lang-list">
+              {LANG_OPTIONS.map(({ value, labelKey, flag }) => (
+                <button
+                  key={value}
+                  type="button"
+                  className="settings__lang-row"
+                  onClick={() => pickLanguage(value)}
+                >
+                  <span className="settings__lang-flag">{flag}</span>
+                  <span className="settings__lang-label">{t(labelKey)}</span>
+                  {language === value && (
+                    <Check className="settings__lang-check" width={20} height={20} />
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+        </SubPage>
+      )}
+    </div>
+  );
+}
+
+// Một dòng trong danh sách mục (icon + nhãn). Kẻ vạch dưới trừ dòng cuối nhóm.
+function MenuRow({
+  Icon,
+  label,
+  onClick,
+  last,
+}: {
+  Icon: ComponentType<{ width?: number; height?: number; className?: string }>;
+  label: string;
+  onClick: () => void;
+  last?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      className={`acct__row${last ? " acct__row--last" : ""}`}
+      onClick={onClick}
+    >
+      <Icon width={24} height={24} className="acct__row-icon" />
+      <span className="acct__row-label">{label}</span>
+    </button>
+  );
+}
+
+// Trang con trượt từ phải sang (dùng lại header xanh của .mtg-detail + swipe-back).
+function SubPage({
+  title,
+  onClose,
+  children,
+}: {
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  const { t } = useSettings();
+  const [entered, setEntered] = useState(false);
+  const [leaving, setLeaving] = useState(false);
+
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setEntered(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
+
+  function close() {
+    setLeaving(true);
+    window.setTimeout(onClose, 260); // khớp thời lượng slide-out
+  }
+
+  const swipeBack = useSwipeBack(close, true);
+
+  return (
+    <div
+      className={`acct-sub${entered && !leaving ? " is-open" : ""}`}
+      role="dialog"
+      aria-label={title}
+      {...swipeBack}
+    >
+      <header className="mtg-detail__header">
+        <button
+          className="mtg-detail__back"
+          type="button"
+          aria-label={t("common.back")}
+          onClick={close}
+        >
+          <ChevronLeft width={24} height={24} />
+        </button>
+        <span className="mtg-detail__header-title">{title}</span>
       </header>
-
-      <div className="settings__scroll">
-        {/* Hồ sơ */}
-        <section className="settings__profile">
-          <div className="settings__avatar">
-            <Person width={32} height={32} />
-          </div>
-          <div className="settings__profile-info">
-            <div className="settings__name">{displayName}</div>
-            {email && <div className="settings__email">{email}</div>}
-          </div>
-        </section>
-
-        {/* Giao diện (sáng / tối / hệ thống) */}
-        <section className="settings__section">
-          <div className="settings__section-head">
-            <div className="settings__section-title">
-              {t("settings.displayPreference")}
-            </div>
-            <div className="settings__section-desc">
-              {t("settings.displayPreferenceDesc")}
-            </div>
-          </div>
-          <div className="settings__theme-grid">
-            {THEME_OPTIONS.map(({ mode, labelKey, Icon }) => (
-              <button
-                key={mode}
-                type="button"
-                disabled={saving}
-                className={`settings__theme-card${
-                  theme === mode ? " is-active" : ""
-                }`}
-                onClick={() => pickTheme(mode)}
-              >
-                <Icon width={22} height={22} />
-                <span className="settings__theme-label">{t(labelKey)}</span>
-              </button>
-            ))}
-          </div>
-        </section>
-
-        {/* Ngôn ngữ */}
-        <section className="settings__section">
-          <div className="settings__section-head">
-            <div className="settings__section-title">
-              {t("settings.language")}
-            </div>
-            <div className="settings__section-desc">
-              {t("settings.languageDesc")}
-            </div>
-          </div>
-          <div className="settings__lang-list">
-            {LANG_OPTIONS.map(({ value, labelKey, flag }) => (
-              <button
-                key={value}
-                type="button"
-                disabled={saving}
-                className={`settings__lang-row${
-                  language === value ? " is-active" : ""
-                }`}
-                onClick={() => pickLanguage(value)}
-              >
-                <span className="settings__lang-flag">{flag}</span>
-                <span className="settings__lang-label">{t(labelKey)}</span>
-                {language === value ? (
-                  <Check className="settings__lang-check" width={20} height={20} />
-                ) : (
-                  <Globe className="settings__lang-globe" width={18} height={18} />
-                )}
-              </button>
-            ))}
-          </div>
-        </section>
-      </div>
+      <div className="acct-sub__body">{children}</div>
     </div>
   );
 }

@@ -190,6 +190,7 @@ export type Language = "en" | "vi";
 export interface UserProfile {
   email?: string | null;
   email_username?: string | null;
+  phone?: string | null; // SĐT (local VN, vd "0339758256") — hiện ở màn Tài khoản
   office?: string | null;
   building?: string | null;
   floor?: string | null;
@@ -205,6 +206,24 @@ export interface MeResponse {
   email?: string;
   profile?: UserProfile | null;
   profileComplete?: boolean;
+  tokenExpiresAt?: number | null; // epoch giây — hạn của session JWT (đếm ngược)
+}
+
+// Một lựa chọn cho các trường hồ sơ (office/floor/building/phòng ưa thích) — khớp
+// GET /api/users/profile-options, dùng CHUNG shape với web. parentValue dùng để
+// lọc floor/building/phòng theo office đang chọn.
+export interface UserProfileOption {
+  value: string;
+  label: string;
+  parentField?: string | null;
+  parentValue?: string | null;
+}
+
+export interface UserProfileOptions {
+  office: UserProfileOption[];
+  floor: UserProfileOption[];
+  building: UserProfileOption[];
+  preferredRooms: UserProfileOption[];
 }
 
 // Lịch "sắp tới" cho màn Home — khớp GET /api/bookings/upcoming của backend.

@@ -155,6 +155,36 @@ const en = {
   "settings.saved": "Settings saved",
   "settings.saveFailed": "Couldn't sync to the server, saved on this device.",
   "settings.savedLocalOnly": "Saved on this device.",
+  // Token expiry card (Figma 400-2293)
+  "account.tokenExpiry": "Token expires in",
+  "account.tokenExpired": "Token expired",
+  "account.tokenExpiryDesc":
+    "Due to development time constraints, the system currently only supports token-based login.",
+  // Menu rows + personal info (ported from web Settings)
+  "settings.personalInfo": "Personal info",
+  "settings.personalInfoDesc": "Update your personal details.",
+  "settings.feedback": "Feedback",
+  "settings.save": "Save",
+  "settings.domain": "Domain",
+  "settings.email": "Email",
+  "settings.office": "Office",
+  "settings.chooseOffice": "Choose office",
+  "settings.floor": "Floor",
+  "settings.chooseFloor": "Choose floor",
+  "settings.building": "Building",
+  "settings.chooseBuilding": "Choose building",
+  "settings.preferredRooms": "Preferred rooms",
+  "settings.preferredRoomsPlaceholder": "Maximum 3 rooms",
+  "settings.addRoom": "Add a room",
+  "settings.searchRooms": "Search rooms",
+  "settings.noResults": "No results found",
+  "settings.roomsLimit": "You can pick up to 3 rooms.",
+  "settings.bookingConfirmation": "Booking confirmation",
+  "settings.bookingConfirmationDesc":
+    "Let the chatbot book a room instantly when you pick one, skipping the in-chat confirmation card.",
+  "settings.bookingOn": "ON (Bot will book without confirmation)",
+  "settings.bookingOff": "OFF (Bot will always ask for confirmation)",
+  "settings.optionsFailed": "Couldn't load options. Please try again.",
 
   // --- Room Scout (Săn phòng) ---------------------------------------------
   "scout.title": "Scout a room",
@@ -370,6 +400,36 @@ const vi: Partial<Record<TranslationKey, string>> = {
   "settings.saved": "Đã lưu cài đặt",
   "settings.saveFailed": "Chưa đồng bộ được lên máy chủ, đã lưu trên thiết bị này.",
   "settings.savedLocalOnly": "Đã lưu trên thiết bị này.",
+  // Thẻ token hết hạn (Figma 400-2293)
+  "account.tokenExpiry": "Token hết hạn sau",
+  "account.tokenExpired": "Token đã hết hạn",
+  "account.tokenExpiryDesc":
+    "Do giới hạn về thời gian phát triển, hiện tại hệ thống chỉ hỗ trợ đăng nhập bằng token.",
+  // Menu + thông tin cá nhân (port từ Cài đặt bản web)
+  "settings.personalInfo": "Thông tin cá nhân",
+  "settings.personalInfoDesc": "Cập nhật thông tin cá nhân của bạn.",
+  "settings.feedback": "Phản hồi",
+  "settings.save": "Lưu",
+  "settings.domain": "Tên đăng nhập",
+  "settings.email": "Email",
+  "settings.office": "Văn phòng",
+  "settings.chooseOffice": "Chọn văn phòng",
+  "settings.floor": "Tầng",
+  "settings.chooseFloor": "Chọn tầng",
+  "settings.building": "Tòa nhà",
+  "settings.chooseBuilding": "Chọn tòa nhà",
+  "settings.preferredRooms": "Phòng yêu thích",
+  "settings.preferredRoomsPlaceholder": "Tối đa 3 phòng",
+  "settings.addRoom": "Thêm phòng",
+  "settings.searchRooms": "Tìm phòng",
+  "settings.noResults": "Không tìm thấy kết quả",
+  "settings.roomsLimit": "Bạn chỉ được chọn tối đa 3 phòng.",
+  "settings.bookingConfirmation": "Xác nhận đặt phòng",
+  "settings.bookingConfirmationDesc":
+    "Cho phép chatbot đặt phòng ngay khi bạn chọn, bỏ qua bước xác nhận trong khung chat.",
+  "settings.bookingOn": "BẬT (Bot đặt phòng không cần xác nhận)",
+  "settings.bookingOff": "TẮT (Bot luôn hỏi xác nhận)",
+  "settings.optionsFailed": "Không tải được lựa chọn. Vui lòng thử lại.",
 
   // --- Room Scout (Săn phòng) ---------------------------------------------
   "scout.title": "Săn phòng",

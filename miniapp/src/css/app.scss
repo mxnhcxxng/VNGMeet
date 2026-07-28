@@ -6,6 +6,7 @@
   --vm-ink: #18181b;
   --vm-muted: #71717a;
   --vm-separator: #e4e4e7;
+  --vm-divider: #f4f4f4; // vạch chia mảnh (nhạt hơn separator)
   --vm-surface: #ffffff;
   --vm-surface-2: #f4f4f5;
   --vm-accent-soft-bg: #eaf2fe;
@@ -2254,30 +2255,29 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
   text-align: center;
 }
 
-// --- Ngôn ngữ: danh sách chọn ---
+// --- Ngôn ngữ: danh sách chọn (kiểu dòng-menu giống nút bên ngoài) ---
 .settings__lang-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  padding: 0 14px;
+  border-radius: 12px;
+  background: var(--vm-surface);
 }
 .settings__lang-row {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 12px 14px;
-  border: 1.5px solid var(--vm-separator);
-  border-radius: 12px;
-  background: var(--vm-surface-2);
+  width: 100%;
+  padding: 14px 0;
+  border: none;
+  border-bottom: 1px solid var(--vm-divider);
+  background: none;
   color: var(--vm-ink);
   cursor: pointer;
-  transition: border-color 0.15s ease, background 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
 }
-.settings__lang-row:disabled {
-  opacity: 0.6;
-}
-.settings__lang-row.is-active {
-  border-color: var(--vm-blue);
-  background: var(--vm-accent-soft-bg);
+.settings__lang-row:last-child {
+  border-bottom: none;
 }
 .settings__lang-flag {
   font-size: 20px;
@@ -2285,17 +2285,363 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
 }
 .settings__lang-label {
   flex: 1 1 auto;
-  font-size: 15px;
+  text-align: left;
+  font-size: 16px;
   font-weight: 500;
-  line-height: 20px;
+  line-height: 22px;
 }
 .settings__lang-check {
   flex: none;
   color: var(--vm-blue);
 }
-.settings__lang-globe {
+
+// ===================================================================
+// Màn Tài khoản (Figma 400-2293): hồ sơ + thẻ token + danh sách mục.
+// Mỗi mục mở một trang con trượt từ phải (.acct-sub).
+// ===================================================================
+.acct {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  color: var(--vm-ink);
+  // Halo "Rectangle 50" (Figma 400:2496): dải 220px sát mép trên, linear dọc từ
+  // #0068FF 80% (đỉnh) mờ dần về trong suốt (đáy), phủ trên nền trắng.
+  background-color: var(--vm-surface);
+  background-image: linear-gradient(
+    360deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(0, 104, 255, 0.8) 100%
+  );
+  background-repeat: no-repeat;
+  background-size: 100% 220px;
+  background-position: top left;
+}
+
+// --- Hero: avatar + tên + SĐT trên nền halo xanh nhạt ---
+// padding-top chừa chỗ cho status bar + hàng capsule "..." của Zalo (~44px),
+// khớp Figma (nội dung bắt đầu dưới vùng header 74px).
+.acct__hero {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: calc(var(--zaui-safe-area-inset-top, 0px) + 44px + 12px) 16px 16px;
+  // Nền halo tách riêng ở .acct::before (Rectangle 50), hero để trong suốt.
+  background: transparent;
+}
+.acct__avatar {
+  width: 80px;
+  height: 80px;
+  border-radius: 999px;
+  object-fit: cover;
+}
+.acct__identity {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  text-align: center;
+}
+.acct__name {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 24px;
+  color: var(--vm-ink);
+}
+.acct__phone {
+  font-size: 14px;
+  line-height: 18px;
+  color: var(--vm-muted);
+}
+
+// --- Thẻ token hết hạn ---
+.acct__token {
+  margin: 12px 12px 0;
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: var(--vm-accent-soft-bg);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.acct__token-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.acct__token-label {
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 22px;
+  color: var(--vm-ink);
+}
+.acct__token-time {
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 22px;
+  color: var(--vm-blue);
+  font-variant-numeric: tabular-nums;
+}
+.acct__token-desc {
+  font-size: 14px;
+  line-height: 18px;
+  color: var(--vm-muted);
+}
+
+// --- Nhóm mục full-bleed (icon + nhãn), kẻ vạch mảnh giữa các dòng ---
+// Không bọc thẻ bo góc: các dòng trải hết bề ngang, vạch chia thụt 12px theo
+// padding của nhóm (khớp Figma 400-2293).
+.acct__menu {
+  margin-top: 12px;
+  padding: 0 12px;
+  background: var(--vm-surface);
+}
+.acct__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 0;
+  border: none;
+  border-bottom: 1px solid var(--vm-divider);
+  background: none;
+  color: var(--vm-ink);
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.acct__row--last {
+  border-bottom: none;
+}
+.acct__row-icon {
+  flex: none;
+  color: var(--vm-blue);
+}
+.acct__row-label {
+  flex: 1 1 auto;
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 22px;
+}
+
+// Dải nền xám phía dưới lấp đầy phần còn lại tới bottom-nav; dòng Phản hồi là
+// một dải trắng full-bleed nằm trên đó.
+.acct__tail {
+  flex: 1 1 auto;
+  background: var(--vm-page, #f9fafb);
+  padding-bottom: calc(64px + 40px + var(--zaui-safe-area-inset-bottom, 0px));
+}
+.acct__tail .acct__menu {
+  margin-top: 12px;
+}
+
+// --- Trang con trượt từ phải (dùng lại header xanh của .mtg-detail) ---
+.acct-sub {
+  position: fixed;
+  inset: 0;
+  z-index: 68; // trên home/tìm phòng/săn phòng, dưới booking-modal (70)
+  display: flex;
+  flex-direction: column;
+  background: var(--vm-page, #f9fafb);
+  transform: translateX(100%);
+  transition: transform 0.26s ease;
+  will-change: transform;
+}
+.acct-sub.is-open {
+  transform: translateX(0);
+}
+.acct-sub__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.acct-sub__scroll {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  touch-action: pan-y;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 12px calc(24px + var(--zaui-safe-area-inset-bottom, 0px));
+}
+.acct-sub__desc {
+  font-size: 14px;
+  line-height: 18px;
+  color: var(--vm-muted);
+}
+
+// --- Form "Thông tin cá nhân" (component profile-info) ---
+.pinfo__scroll {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  touch-action: pan-y;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px 16px 24px;
+}
+// Mỗi trường một dòng (full-width) cho dễ đọc trên màn hẹp.
+.pinfo__grid {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.pinfo__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+// Khớp nhãn của ZaUI Picker/Input (giống .scout__label).
+.pinfo__label {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  color: var(--vm-ink);
+}
+
+// Chevron của Picker vốn sát mép phải → chừa 12px cho đều (giống .scout).
+.pinfo__scroll .zaui-input-suffix {
+  margin-right: 12px;
+}
+.pinfo__chevron {
+  color: var(--vm-muted);
+}
+
+// Phòng ưa thích: ô chip + nút thêm, mở Sheet để chọn. Style khớp input Picker
+// (chiều cao, bo góc, viền, khoảng cách icon phải 12px) để đồng bộ với các trường
+// Office/Floor/Building.
+.pinfo__rooms {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 52px;
+  padding: 10px 12px;
+  border: 1px solid var(--vm-separator);
+  border-radius: 10px;
+  background: var(--vm-surface);
+  cursor: pointer;
+  text-align: left;
+  -webkit-tap-highlight-color: transparent;
+}
+.pinfo__rooms:disabled {
+  opacity: 0.6;
+}
+.pinfo__rooms-placeholder {
+  flex: 1 1 auto;
+  color: var(--vm-muted);
+  font-size: 16px;
+}
+.pinfo__chips {
+  flex: 1 1 auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.pinfo__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: var(--vm-accent-soft-bg);
+  color: var(--vm-accent-soft-fg);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 16px;
+}
+.pinfo__rooms-add {
+  flex: none;
+  color: var(--vm-blue);
+}
+
+// Footer cố định với nút Lưu
+.pinfo__footer {
+  flex: none;
+  padding: 16px 16px calc(16px + var(--zaui-safe-area-inset-bottom, 0px));
+  background: var(--vm-surface);
+  border-top: 1px solid var(--vm-divider);
+}
+
+// Sheet chọn phòng ưa thích
+.pinfo__sheet {
+  display: flex;
+  flex-direction: column;
+  max-height: 60vh;
+  padding: 8px 16px 16px;
+}
+.pinfo__search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--vm-surface-2);
+  margin-bottom: 8px;
+}
+.pinfo__search-icon {
   flex: none;
   color: var(--vm-muted);
+}
+.pinfo__search-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: none;
+  background: none;
+  outline: none;
+  color: var(--vm-ink);
+  font-size: 15px;
+}
+.pinfo__room-list {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+.pinfo__room {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 12px 4px;
+  border: none;
+  border-bottom: 1px solid var(--vm-divider);
+  background: none;
+  color: var(--vm-ink);
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.pinfo__room:disabled {
+  opacity: 0.4;
+}
+.pinfo__room.is-active .pinfo__room-name {
+  color: var(--vm-blue);
+  font-weight: 500;
+}
+.pinfo__room-name {
+  flex: 1 1 auto;
+  font-size: 15px;
+  line-height: 20px;
+}
+.pinfo__room-check {
+  flex: none;
+  color: var(--vm-blue);
+}
+.pinfo__room-empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--vm-muted);
+  font-size: 14px;
+}
+.pinfo__sheet-footer {
+  padding-top: 12px;
 }
 
 // ===================================================================
@@ -2306,6 +2652,7 @@ body[zaui-theme="dark"] {
   --vm-ink: #f5f5f7;
   --vm-muted: #9a9aa2;
   --vm-separator: #2a2c33;
+  --vm-divider: #2a2c33;
   --vm-surface: #16171b;
   --vm-surface-2: #202127;
   --vm-accent-soft-bg: rgba(0, 104, 255, 0.22);

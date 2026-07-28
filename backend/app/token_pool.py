@@ -118,6 +118,53 @@ def get_active_token(owner_key: str | None = None, email: str | None = None) -> 
         return None
 
 
+def get_active_token_exp(owner_key: str | None = None, email: str | None = None) -> int | None:
+    """Trả hạn (epoch giây) của token Graph ACTIVE mới nhất của CHÍNH user này.
+
+    Dùng cho card "Token hết hạn sau" ở Mini App: token thực sự gate booking là
+    token Graph trong pool (~24h), KHÔNG phải session JWT Zalo (30 ngày). Tra theo
+    owner_key trước rồi email — chỉ khớp đúng user, không đọc token của user khác.
+    Không cần giải mã token (chỉ đọc expires_at). Trả None nếu không có.
+    """
+    settings = get_settings()
+    if not settings.supabase_enabled or (not owner_key and not email):
+        return None
+    try:
+        from .supabase_client import get_supabase
+
+        sb = get_supabase()
+        cutoff = datetime.now(timezone.utc).isoformat()
+
+        def _fetch(column: str, value: str | None) -> int | None:
+            if not value:
+                return None
+            rows = (
+                sb.table("graph_token_pool")
+                .select("expires_at")
+                .eq(column, value)
+                .eq("status", "active")
+                .gt("expires_at", cutoff)
+                .order("expires_at", desc=True)
+                .limit(1)
+                .execute()
+                .data
+                or []
+            )
+            if not rows:
+                return None
+            try:
+                return int(datetime.fromisoformat(rows[0]["expires_at"]).timestamp())
+            except (KeyError, ValueError, TypeError):
+                return None
+
+        return _fetch("owner_key", str(owner_key) if owner_key else None) or _fetch(
+            "user_email", (email or "").strip().lower() or None
+        )
+    except Exception as e:  # noqa: BLE001 - pool read must never break /me
+        log.warning("could not read pooled token exp (owner=%s email=%s): %s", owner_key, email, e)
+        return None
+
+
 def _mark(sb, owner_key: str, status: str, error: str | None = None) -> None:
     try:
         sb.table("graph_token_pool").update(

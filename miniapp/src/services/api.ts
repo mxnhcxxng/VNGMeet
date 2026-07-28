@@ -14,6 +14,7 @@ import type {
   ScheduleResponse,
   UpcomingEvent,
   UserProfile,
+  UserProfileOptions,
 } from "@/types";
 
 // Ném ra khi backend trả 401 → session token đã bị xoá, Layout sẽ tự authen lại
@@ -32,6 +33,18 @@ export class LinkRequiredError extends Error {
     super("LINK_REQUIRED");
     this.name = "LinkRequiredError";
   }
+}
+
+// Cache cho lựa chọn hồ sơ (office/floor/building/phòng) — gần như tĩnh trong 1
+// phiên. Giữ CẢ promise (chống gọi trùng) LẪN giá trị đã resolve (để màn "Thông
+// tin cá nhân" đọc đồng bộ ngay lúc mount → không giật, không loading).
+let profileOptionsPromise: Promise<UserProfileOptions> | null = null;
+let profileOptionsValue: UserProfileOptions | null = null;
+
+// Giá trị options đã cache (null nếu chưa prefetch xong). Component đọc để khởi
+// tạo state đồng bộ, khỏi chờ mạng khi mở màn.
+export function getCachedProfileOptions(): UserProfileOptions | null {
+  return profileOptionsValue;
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -99,6 +112,31 @@ export const api = {
       "/users/me/profile",
       { method: "PATCH", body: JSON.stringify(payload) },
     ),
+
+  // Danh sách lựa chọn cho các trường hồ sơ (office/floor/building/phòng ưa
+  // thích) ở màn "Thông tin cá nhân" — dùng CHUNG GET /api/users/profile-options
+  // với web. Cache lại promise + giá trị; `force` để nạp lại. Lỗi thì KHÔNG cache
+  // để lần sau còn thử lại được.
+  userProfileOptions: (force?: boolean) => {
+    if (force) {
+      profileOptionsPromise = null;
+      profileOptionsValue = null;
+    }
+    if (!profileOptionsPromise) {
+      profileOptionsPromise = request<UserProfileOptions>(
+        "/users/profile-options",
+      )
+        .then((o) => {
+          profileOptionsValue = o;
+          return o;
+        })
+        .catch((e) => {
+          profileOptionsPromise = null;
+          throw e;
+        });
+    }
+    return profileOptionsPromise;
+  },
 
   // Lịch sắp tới cho Home: booking thành công & gần nhất trong tương lai.
   // { event: null } khi không có → frontend ẩn section.
