@@ -165,12 +165,18 @@ _STATIC_CORS_ORIGINS = ["https://h5.zdn.vn", "http://localhost:3000"]
 _cors_origins = [o.strip() for o in settings.frontend_url.split(",") if o.strip()]
 # Gộp với origin tĩnh, khử trùng lặp và giữ nguyên thứ tự.
 _cors_origins = list(dict.fromkeys(_cors_origins + _STATIC_CORS_ORIGINS))
+# Note: `https://h5.zdn.vn` is shared by ALL Zalo Mini Apps, so it can never be a
+# trust boundary. Auth never relies on Origin: the Mini App sends a Bearer token
+# in the Authorization header (not a cookie), and the manual/web cookie flow is
+# SameSite=lax (browsers don't attach it to cross-site fetch/XHR). We still scope
+# methods/headers explicitly (instead of "*") to shrink the surface exposed to
+# any page served from a shared origin.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 app.include_router(profiles_router)

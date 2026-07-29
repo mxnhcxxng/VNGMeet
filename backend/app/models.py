@@ -7,18 +7,31 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator
 
 ATTENDEE_EMAIL_DOMAIN = "@vng.com.vn"
+# Max length for a booking body/description. Bounds the payload we forward to
+# Microsoft Graph event creation and blocks oversized inputs.
+BOOKING_BODY_MAX_LEN = 1000
 
 
 def _normalize_attendees(values: list[str] | None) -> list[str]:
-    """The booking modal lets users type bare domains (e.g. "cuongdm4"); append
-    the org email suffix so we store and send full addresses. Entries that
-    already contain "@" are kept as-is. Blanks are dropped."""
+    """Normalize attendee entries and enforce the internal email domain.
+
+    The booking modal lets users type bare usernames (e.g. "cuongdm4"); append
+    the org suffix so we store/send full addresses. Entries that already contain
+    "@" must belong to the internal domain — arbitrary external recipients are
+    rejected so a booking (created from a real VNG mailbox via Graph) can't be
+    abused to invite/phish outside addresses. Blanks are dropped.
+    """
     normalized: list[str] = []
     for raw in values or []:
         value = (raw or "").strip()
         if not value:
             continue
-        normalized.append(value if "@" in value else f"{value}{ATTENDEE_EMAIL_DOMAIN}")
+        full = value if "@" in value else f"{value}{ATTENDEE_EMAIL_DOMAIN}"
+        if not full.lower().endswith(ATTENDEE_EMAIL_DOMAIN):
+            raise ValueError(
+                f"Chỉ chấp nhận email nội bộ ({ATTENDEE_EMAIL_DOMAIN}): {value}"
+            )
+        normalized.append(full)
     return normalized
 
 
@@ -32,7 +45,7 @@ class BookingRequest(BaseModel):
     method: Literal["manual", "chatbot"] = "manual"
     subject: str
     attendees: list[str] = []
-    body: str | None = None
+    body: str | None = Field(default=None, max_length=BOOKING_BODY_MAX_LEN)
 
     @field_validator("attendees")
     @classmethod
@@ -48,7 +61,7 @@ class UpdateBookingRequest(BaseModel):
     end_time: str | None = None  # "10:00"
     subject: str | None = None
     attendees: list[str] | None = None
-    body: str | None = None
+    body: str | None = Field(default=None, max_length=BOOKING_BODY_MAX_LEN)
 
     @field_validator("attendees")
     @classmethod
@@ -58,7 +71,9 @@ class UpdateBookingRequest(BaseModel):
 
 
 class ChatSendRequest(BaseModel):
-    content: str
+    # Cap input length: bounds LLM cost and the size of any prompt-injection
+    # payload. The endpoint still strips + rejects empty content separately.
+    content: str = Field(max_length=4000)
     thread_id: str | None = None
 
 

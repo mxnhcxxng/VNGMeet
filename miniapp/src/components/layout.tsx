@@ -16,9 +16,11 @@ import { AppProps } from "zmp-ui/app";
 
 import AppShell from "@/components/app-shell";
 import BlockScreen from "@/components/block-screen";
+import LinkConfirm from "@/components/link-confirm";
+import LinkError from "@/components/link-error";
 import LinkSuccess from "@/components/link-success";
 import PermissionScreen from "@/components/permission-screen";
-import { setToken, useToken } from "@/services/auth";
+import { getDisplayName, getPhone, setToken, useToken } from "@/services/auth";
 import { api, LinkRequiredError } from "@/services/api";
 import { errText, hasPhonePermission, requestPhoneNumber } from "@/services/phone";
 import { SettingsProvider, useSettings } from "@/services/settings";
@@ -139,6 +141,11 @@ function Gate() {
   const [phoneOk, setPhoneOk] = useState<boolean | null>(null);
   // Đã liên kết Zalo Bot xong → hiện màn "Liên kết chatbot thành công".
   const [botLinked, setBotLinked] = useState(false);
+  // Mã pairing đang CHỜ user xác nhận (deep-link ?bot_pair=<code>). Không auto-link
+  // im lặng nữa (chống F-02): user phải chủ động bấm "Liên kết" ở màn xác nhận.
+  const [pairPrompt, setPairPrompt] = useState<string | null>(null);
+  const [pairPending, setPairPending] = useState(false);
+  const [pairError, setPairError] = useState(false);
   const running = useRef(false);
   const pairHandled = useRef(false);
 
@@ -203,30 +210,44 @@ function Gate() {
     if (phoneOk === true && !token) void authenticate();
   }, [token, phoneOk]);
 
-  // Liên kết Zalo Bot: khi đã có session và deep-link kèm ?bot_pair=<code>, đổi mã
-  // lấy liên kết chat_id ↔ tài khoản VNG (chỉ chạy 1 lần).
+  // Liên kết Zalo Bot: khi đã có session và deep-link kèm ?bot_pair=<code>, MỞ MÀN
+  // XÁC NHẬN thay vì tự liên kết (chống hijack liên kết bot — F-02). User phải
+  // chủ động bấm "Liên kết". Chỉ chạy 1 lần cho mỗi lần mount.
   useEffect(() => {
     if (!token || pairHandled.current) return;
     const code = readBotPairCode();
     if (!code || wasPairHandled(code)) return;
     pairHandled.current = true;
-    void (async () => {
-      try {
-        await api.linkBot(code);
-        // Thành công → hiện màn "Liên kết chatbot thành công" (Figma 403-2707).
-        setBotLinked(true);
-      } catch {
-        openSnackbar({
-          text: t("gate.botLinkFailed"),
-          type: "error",
-        });
-      } finally {
-        // Đánh dấu đã xử lý (kể cả khi lỗi) để listener resume không reload lặp lại.
-        markPairHandled(code);
-        clearBotPairParam();
-      }
-    })();
-  }, [token, openSnackbar]);
+    setPairPrompt(code);
+  }, [token]);
+
+  // User bấm "Liên kết" ở màn xác nhận → mới thực sự redeem mã pairing.
+  const confirmPair = useCallback(async () => {
+    if (!pairPrompt) return;
+    const code = pairPrompt;
+    setPairPending(true);
+    try {
+      await api.linkBot(code);
+      setBotLinked(true); // Figma 403-2707: màn "Liên kết chatbot thành công".
+      setPairPrompt(null);
+    } catch {
+      setPairError(true); // Figma 438-3259: màn "Liên kết chatbot thất bại".
+      setPairPrompt(null);
+    } finally {
+      // Đánh dấu đã xử lý để listener resume không reload lặp lại với cùng mã.
+      markPairHandled(code);
+      clearBotPairParam();
+      setPairPending(false);
+    }
+  }, [pairPrompt]);
+
+  // User bấm "Thoát" → bỏ liên kết, về app. Đánh dấu đã xử lý mã này.
+  const cancelPair = useCallback(() => {
+    const code = pairPrompt;
+    if (code) markPairHandled(code);
+    clearBotPairParam();
+    setPairPrompt(null);
+  }, [pairPrompt]);
 
   // FIX luồng pair khi app đang mở: user vào bot → minimize app → bot trả link
   // ?bot_pair=<code> → mở lại app. Lúc này Zalo KHÔNG remount webview nên effect
@@ -294,6 +315,20 @@ function Gate() {
   // Đã có quyền SĐT. Gate luôn render BÊN TRONG ZMPRouter (xem Layout) nên <Page>
   // ở mọi nhánh đều có context router — không còn lỗi invariant của react-router.
   if (token) {
+    // Deep-link ?bot_pair=<code> → màn XÁC NHẬN trước khi liên kết (chống F-02).
+    if (pairPrompt) {
+      return (
+        <LinkConfirm
+          name={getDisplayName() || "bạn"}
+          phone={getPhone()}
+          pending={pairPending}
+          onConfirm={() => void confirmPair()}
+          onCancel={cancelPair}
+        />
+      );
+    }
+    // Redeem mã lỗi (mã sai/hết hạn) → màn "Liên kết chatbot thất bại".
+    if (pairError) return <LinkError onClose={() => setPairError(false)} />;
     // Vừa liên kết chatbot xong → màn thành công, "Trở về màn hình chính" đóng lại.
     if (botLinked) return <LinkSuccess onClose={() => setBotLinked(false)} />;
     return <AppShell />;

@@ -68,3 +68,23 @@ export function getDisplayName(): string | null {
 export function useDisplayName(): string | null {
   return useSyncExternalStore(subscribe, getDisplayName);
 }
+
+// Đọc claim `phone` từ session JWT và định dạng dạng nhóm 03X XXX XXXX (chỉ để
+// hiển thị ở màn xác nhận liên kết bot). Trả null nếu không có.
+export function getPhone(): string | null {
+  const token = getToken();
+  if (!token) return null;
+  try {
+    const claims = JSON.parse(atob(token.split(".")[1])) as Record<string, unknown>;
+    const raw = typeof claims.phone === "string" ? claims.phone.trim() : "";
+    if (!raw) return null;
+    const digits = raw.replace(/\D/g, "");
+    // 10 số VN (0xx xxx xxxx) → chèn khoảng trắng cho dễ đọc; khác thì trả nguyên.
+    if (digits.length === 10) {
+      return `${digits.slice(0, 3)} ${digits.slice(3, 6)} ${digits.slice(6)}`;
+    }
+    return raw;
+  } catch {
+    return null;
+  }
+}

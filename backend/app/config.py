@@ -69,7 +69,7 @@ class Settings(BaseSettings):
     # Zalo Mini App
     zalo_app_secret_key: str = ""          # secret_key của Zalo App (mini.zalo.me)
     miniapp_session_secret: str = ""       # khoá ký session JWT của VNGMeet cho Mini App
-    miniapp_session_ttl_seconds: int = 30 * 24 * 3600   # 30 ngày
+    miniapp_session_ttl_seconds: int = 24 * 3600   # 1 ngày (re-auth tự động, im lặng)
 
     # Zalo Bot Platform (chat bot — sản phẩm KHÁC Mini App, bot.zaloplatforms.com).
     # Bot nhận tin qua webhook và trả lời bằng chính agent chat của Mini App.
@@ -111,6 +111,15 @@ class Settings(BaseSettings):
     @property
     def supabase_enabled(self) -> bool:
         return bool(self.supabase_url and self.supabase_service_role_key)
+
+    # --- Rate limiting (defense-in-depth) --------------------------------- #
+    # Master switch for the in-process limiter (see ratelimit.py). Per-process,
+    # so with N workers the effective limit is ~N× the configured value.
+    rate_limit_enabled: bool = True
+    # When behind a trusted reverse proxy (e.g. AgentBase), read the client IP
+    # from the left-most X-Forwarded-For hop. Set False if the app is exposed
+    # directly, so a client can't spoof the header to dodge per-IP limits.
+    trust_forwarded_for: bool = True
 
     # Default business window shown in the grid
     timezone: str = "Asia/Ho_Chi_Minh"

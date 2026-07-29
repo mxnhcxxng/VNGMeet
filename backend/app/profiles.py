@@ -9,7 +9,7 @@ from uuid import UUID
 from fastapi import APIRouter, Body, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from . import auth, token_pool
+from . import auth, ratelimit, token_pool
 from .app_context import log, settings
 from .models import UserProfileUpdateRequest
 
@@ -355,6 +355,7 @@ async def set_token(request: Request, access_token: str = Body(..., embed=True))
     Token does not auto-refresh — paste again when it expires (~1h). Works without
     admin consent / Supabase.
     """
+    ratelimit.enforce("auth_token", ratelimit.client_ip(request), 15, 60)
     if not access_token or not access_token.strip():
         raise HTTPException(400, "access_token rỗng")
     claims = await auth.verify_manual_graph_token(access_token)
@@ -401,6 +402,7 @@ async def auth_zalo(
     tin nhắn sau này cần Graph token thì BE tự lấy qua Microsoft refresh_token đã
     lưu của chính user đó — với điều kiện user đã link Microsoft từ trước.
     """
+    ratelimit.enforce("auth_zalo", ratelimit.client_ip(request), 15, 60)
     phone = await auth.resolve_zalo_phone(token, access_token)
 
     profile = _lookup_profile_by_phone(phone)

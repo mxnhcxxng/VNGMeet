@@ -311,7 +311,14 @@ async def get_graph_token(user_id: str) -> str:
     async with httpx.AsyncClient() as client:
         resp = await client.post(s.token_endpoint, data=data)
     if resp.status_code != 200:
-        raise HTTPException(401, f"Could not refresh Microsoft token: {resp.text}")
+        # Don't surface Azure's raw error body to the client/logs — it can echo
+        # request parameters. Log the status only; return a generic 401.
+        import logging
+
+        logging.getLogger("vngmeet.auth").warning(
+            "Graph token refresh failed for %s: HTTP %s", user_id, resp.status_code
+        )
+        raise HTTPException(401, "Could not refresh Microsoft token. Please sign in again.")
     payload = resp.json()
 
     access_token = payload["access_token"]

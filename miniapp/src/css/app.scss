@@ -3135,3 +3135,27 @@ body[zaui-theme="dark"] {
   background: #d6e9ff;
   color: #006af5;
 }
+.link-ok__cta:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+// --- Biến thể cho màn xác nhận (link-confirm) & lỗi (link-error) ---------
+// Banner đỏ nhạt cho màn thất bại (Figma 438-3259).
+.link-ok__banner--error {
+  background: linear-gradient(180deg, #ff3b30 -85.28%, #ffffff 100%);
+}
+// Vòng tròn X đỏ cho màn thất bại.
+.link-ok__check--error {
+  background: linear-gradient(180deg, #ff3b30 0%, #ff7a72 100%);
+}
+// Vòng tròn nền xanh nhạt bọc avatar bot cho màn xác nhận (Figma 439-3472).
+.link-ok__check--soft {
+  background: var(--vm-accent-soft-bg);
+}
+.link-ok__check-img {
+  width: 80px;
+  height: 80px;
+  border-radius: 999px;
+  object-fit: cover;
+}

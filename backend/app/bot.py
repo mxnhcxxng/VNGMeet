@@ -31,7 +31,7 @@ import httpx
 from fastapi import APIRouter, BackgroundTasks, Body, HTTPException, Request
 from starlette.requests import Request as StarletteRequest
 
-from . import auth
+from . import auth, ratelimit
 from .app_context import log, settings
 from .models import BookingRequest, ChatBookingActionRequest, ChatSendRequest
 
@@ -596,7 +596,9 @@ async def _bot_api(method: str, payload: dict) -> httpx.Response | None:
         log.warning("Zalo bot %s request error: %s", method, e)
         return None
     if resp.status_code >= 400:
-        log.warning("Zalo bot %s failed: %s %s", method, resp.status_code, resp.text[:300])
+        # Log status only — the response body can echo the message payload we
+        # sent (user content). Keep it out of logs.
+        log.warning("Zalo bot %s failed: HTTP %s", method, resp.status_code)
     return resp
 
 
@@ -636,9 +638,7 @@ async def _send(chat_id: str, text: str, buttons: list[dict] | None = None) -> N
             payload["buttons"] = buttons
         resp = await _bot_api("sendMessage", payload)
         if buttons and i == last and resp is not None:
-            log.info(
-                "bot sendMessage(buttons) -> %s %s", resp.status_code, resp.text[:300]
-            )
+            log.info("bot sendMessage(buttons) -> HTTP %s", resp.status_code)
 
 
 async def _send_photo(chat_id: str, url: str, caption: str | None = None) -> None:
@@ -835,10 +835,17 @@ async def _handle_update(update: dict) -> None:
     chat_id = str(chat.get("id") or "")
     from_id = str(sender.get("id") or "") or None
     text = (message.get("text") or "").strip()
+    # Bound the forwarded input to the chat model's limit (ChatSendRequest caps at
+    # 4000) so an oversized message is truncated, not rejected mid-flow.
+    if len(text) > 4000:
+        text = text[:4000]
     if not chat_id or not text:
-        log.info("bot update skipped: chat_id=%r text_empty=%s", chat_id, not text)
+        log.info("bot update skipped: has_chat_id=%s text_empty=%s", bool(chat_id), not text)
         return
-    log.info("bot handling: chat_id=%s text=%r", chat_id, text[:80])
+    # Do NOT log message content or full chat_id (PII). A short suffix of the
+    # chat_id is enough to correlate a conversation in logs; length stands in for
+    # the text so we can still spot empty/oversized inputs.
+    log.info("bot handling: chat=…%s text_len=%d", chat_id[-4:], len(text))
 
     sb = _sb()
     link = _get_link(sb, chat_id)
@@ -903,15 +910,22 @@ async def bot_webhook(request: Request, background_tasks: BackgroundTasks):
     except Exception as e:  # noqa: BLE001
         log.warning("bot webhook: invalid JSON body")
         raise HTTPException(400, "Invalid JSON payload.") from e
-    # Diagnostic: dump the raw payload shape once so we can see exactly what Zalo
-    # sends (event_name / message structure). Trim to keep logs readable.
-    import json as _json
-
-    log.info("bot webhook raw: %s", _json.dumps(update, ensure_ascii=False)[:800])
+    # Diagnostic: log only the non-sensitive shape (event name). The raw payload
+    # carries user message text and chat/sender identifiers (PII) — never dump it.
+    body = update.get("result") if isinstance(update.get("result"), dict) else update
+    log.info("bot webhook received: event=%s", (body or {}).get("event_name"))
     # Ack fast so the webhook stays under Zalo's timeout; the LLM turn can be slow.
     # BackgroundTasks (not bare create_task) so Starlette holds the reference and
     # the handler reliably runs after the 200 is sent — a fire-and-forget task can
     # be garbage-collected before it writes to the DB.
+    # Per-conversation cost guard: cap how many updates from one chat we forward
+    # to the (slow, paid) agent per minute. Ack 200 regardless so Zalo doesn't
+    # retry; just skip enqueueing when the chat is over its budget.
+    body = update.get("result") if isinstance(update.get("result"), dict) else update
+    chat_id = str(((body or {}).get("message") or {}).get("chat", {}).get("id") or "")
+    if chat_id and not ratelimit.allowed("bot_chat", chat_id, 20, 60):
+        log.warning("bot webhook: chat …%s over rate limit, skipping", chat_id[-4:])
+        return {"ok": True}
     background_tasks.add_task(_handle_update_safe, update)
     return {"ok": True}
 
@@ -925,6 +939,8 @@ async def bot_link(request: Request, code: str = Body(..., embed=True)):
     """
     from .profiles import _claims_from_bearer
 
+    # Throttle pairing-code redemption per IP (brute-force defense-in-depth).
+    ratelimit.enforce("bot_link", ratelimit.client_ip(request), 10, 60)
     claims = _claims_from_bearer(request)
     sub = claims.get("sub")
     if not sub:

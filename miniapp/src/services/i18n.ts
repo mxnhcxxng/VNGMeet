@@ -60,6 +60,17 @@ const en = {
   "linkSuccess.gotoBot": "Go to chatbot",
   "linkSuccess.backHome": "Back to home",
 
+  // --- Chatbot link-confirm screen ----------------------------------------
+  "linkConfirm.title": "Confirm chatbot linking",
+  "linkConfirm.subtitle": "This account will be linked to the chatbot in your Zalo",
+  "linkConfirm.confirm": "Link",
+  "linkConfirm.cancel": "Exit",
+
+  // --- Chatbot link-error screen ------------------------------------------
+  "linkError.title": "Chatbot linking failed",
+  "linkError.subtitle": "The link may be invalid or expired. Please try again",
+  "linkError.backHome": "Back to home",
+
   // --- Bottom navigation --------------------------------------------------
   "nav.home": "Home",
   "nav.history": "History",
@@ -333,6 +344,17 @@ const vi: Partial<Record<TranslationKey, string>> = {
   "linkSuccess.direction": "Chỉ đường đến phòng họp",
   "linkSuccess.gotoBot": "Đi đến chat bot",
   "linkSuccess.backHome": "Trở về màn hình chính",
+
+  // --- Màn xác nhận liên kết chatbot --------------------------------------
+  "linkConfirm.title": "Xác nhận liên kết chatbot",
+  "linkConfirm.subtitle": "Tài khoản này sẽ được liên kết với chatbot trong Zalo của bạn",
+  "linkConfirm.confirm": "Liên kết",
+  "linkConfirm.cancel": "Thoát",
+
+  // --- Màn liên kết chatbot thất bại --------------------------------------
+  "linkError.title": "Liên kết chatbot thất bại",
+  "linkError.subtitle": "Đường dẫn liên kết có thể không hợp lệ hoặc đã hết hạn. Vui lòng thử lại",
+  "linkError.backHome": "Trở về màn hình chính",
 
   // --- Bottom navigation --------------------------------------------------
   "nav.home": "Trang chủ",
