@@ -7,6 +7,7 @@ import ClockArrowRotateLeft from "@gravity-ui/icons/ClockArrowRotateLeft";
 
 import MeetingDetail from "@/components/meeting-detail";
 import SwipeViews from "@/components/swipe-views";
+import EmptyIllustration from "@/components/empty-illustration";
 import { api, AuthError } from "@/services/api";
 import { roomFlag } from "@/services/room-flags";
 import { useT } from "@/services/settings";
@@ -173,7 +174,7 @@ export default function HistoryPage() {
     if (list.length === 0) {
       return (
         <div className="history__empty">
-          <ClockArrowRotateLeft width={40} height={40} />
+          <EmptyIllustration size={240} />
           <div className="history__empty-title">{t("history.empty")}</div>
           <div>{t("history.emptyHint")}</div>
         </div>

@@ -298,13 +298,23 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
   position: absolute;
   inset: 0;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 8px;
   padding: 0 24px;
   text-align: center;
   color: var(--vm-muted);
   font-size: 14px;
   line-height: 20px;
+}
+
+// Illustration lịch trống dùng chung cho các empty state.
+.empty-illus {
+  display: block;
+  object-fit: contain;
+  user-select: none;
+  pointer-events: none;
 }
 
 // --- Event card (Lịch sắp tới) ---

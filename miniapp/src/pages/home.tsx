@@ -12,6 +12,7 @@ import ArrowsRotateRight from "@gravity-ui/icons/ArrowsRotateRight";
 import logo from "@/static/logo.png";
 import MeetingDetail from "@/components/meeting-detail";
 import SwipeViews from "@/components/swipe-views";
+import EmptyIllustration from "@/components/empty-illustration";
 import BookingModal from "@/components/booking-modal";
 import FindRoom from "@/pages/find-room";
 import RoomScout from "@/pages/room-scout";
@@ -241,7 +242,14 @@ export default function HomePage({ me }: Props) {
         <div className="room-grid">{cells.map(renderRoomCell)}</div>
         {list.length === 0 && (
           <div className="room-panel__empty">
-            {refreshing ? t("home.loadingRooms") : t("home.noRooms")}
+            {refreshing ? (
+              t("home.loadingRooms")
+            ) : (
+              <>
+                <EmptyIllustration size={240} />
+                <span>{t("home.noRooms")}</span>
+              </>
+            )}
           </div>
         )}
       </div>
