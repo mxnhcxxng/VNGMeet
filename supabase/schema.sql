@@ -29,6 +29,13 @@ create table if not exists user_profiles (
 );
 -- Mobile phone from Graph `mobilePhone`, stored in local VN format (+84 trimmed to 0).
 alter table user_profiles add column if not exists phone text;
+-- Zalo Mini App app-scoped userId (from getUserID / webhook payload). Recorded at
+-- /api/auth/zalo so the "user.revoke.consent" webhook can locate and purge this
+-- user's data. See migrate_zalo_user_data_revoke.sql.
+alter table user_profiles add column if not exists zalo_user_id text;
+create index if not exists idx_user_profiles_zalo_user_id
+  on user_profiles (zalo_user_id)
+  where zalo_user_id is not null;
 alter table user_profiles add column if not exists office text;
 alter table user_profiles add column if not exists floor text;
 alter table user_profiles add column if not exists building text;
@@ -464,6 +471,24 @@ create policy "users can read own room scouts" on room_scouts
 create policy "users can stop own room scouts" on room_scouts
   for update to authenticated using ((select auth.uid()) = auth_user_id)
   with check ((select auth.uid()) = auth_user_id);
+
+-- Nhật ký xử lý webhook "user.revoke.consent" (Zalo Mini App) — bằng chứng đã xoá
+-- dữ liệu khi user rút lại sự đồng ý. Xem migrate_zalo_user_data_revoke.sql.
+-- Server-side only (service-role). RLS bật, không policy => chặn mọi client.
+create table if not exists zalo_data_revocations (
+  id uuid primary key default gen_random_uuid(),
+  event text not null,
+  app_id text,
+  zalo_user_id text not null,
+  event_timestamp bigint,
+  matched_profiles integer not null default 0,
+  purged boolean not null default false,
+  detail jsonb,
+  received_at timestamptz not null default now()
+);
+create index if not exists idx_zalo_data_revocations_user
+  on zalo_data_revocations (zalo_user_id, received_at desc);
+alter table zalo_data_revocations enable row level security;
 
 -- Supabase-native midnight seed job for room_availability.
 -- Runs at 17:00 UTC, which is 00:00 Asia/Ho_Chi_Minh (GMT+7). The function

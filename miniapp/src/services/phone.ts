@@ -1,4 +1,4 @@
-import { getAccessToken, getPhoneNumber, getSetting } from "zmp-sdk";
+import { getAccessToken, getPhoneNumber, getSetting, getUserID } from "zmp-sdk";
 
 // Xin quyền số điện thoại theo tài liệu Zalo:
 // https://docs.zaloplatforms.com/docs/MA/api/user/user-information/getPhoneNumber
@@ -21,6 +21,12 @@ export interface PhoneGrant {
   token: string;
   /** Access token của user để server gọi Zalo Open API. */
   accessToken: string;
+  /**
+   * Zalo userId (app-scoped) từ getUserID(). Trùng `userId` mà webhook
+   * `user.revoke.consent` gửi về, nên server lưu để khi user rút lại sự đồng ý
+   * còn tra ra và xoá đúng dữ liệu. Best-effort: undefined nếu SDK không trả.
+   */
+  zaloUserId?: string;
 }
 
 /**
@@ -91,7 +97,15 @@ export async function requestPhoneNumber(): Promise<PhoneGrant> {
     if (!token) {
       throw new Error("Không nhận được token số điện thoại từ Zalo.");
     }
-    return { token, accessToken };
+    // Lấy Zalo userId (best-effort, không popup, không cần quyền). Dùng để server
+    // lưu ánh xạ phục vụ webhook thu hồi dữ liệu. Lỗi ở đây KHÔNG chặn đăng nhập.
+    let zaloUserId: string | undefined;
+    try {
+      zaloUserId = await withTimeout(getUserID({}), 8000, "getUserID");
+    } catch (e) {
+      console.warn("[phone] getUserID lỗi (bỏ qua):", errText(e));
+    }
+    return { token, accessToken, zaloUserId };
   } catch (e) {
     console.error("[phone] getPhoneNumber lỗi:", e);
     throw new Error("getPhoneNumber → " + errText(e));

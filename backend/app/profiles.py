@@ -389,11 +389,29 @@ def _lookup_profile_by_phone(phone: str) -> dict | None:
     return res.data[0] if res.data else None
 
 
+def _attach_zalo_user_id(profile_id, zalo_user_id: str) -> None:
+    """Record the Zalo app-scoped userId on the profile so the
+    `user.revoke.consent` webhook can locate and purge this user's data later.
+    Best-effort: a failure here must not break login.
+    """
+    if not settings.supabase_enabled or not profile_id or not zalo_user_id:
+        return
+    try:
+        from .supabase_client import get_supabase
+
+        get_supabase().table("user_profiles").update(
+            {"zalo_user_id": zalo_user_id}
+        ).eq("id", str(profile_id)).execute()
+    except Exception as e:  # noqa: BLE001
+        log.warning("auth_zalo: could not store zalo_user_id: %s", e)
+
+
 @router.post("/api/auth/zalo")
 async def auth_zalo(
     request: Request,
     token: str = Body(..., embed=True),
     access_token: str = Body(..., embed=True),
+    zalo_user_id: str | None = Body(None, embed=True),
 ):
     """Mini App: đăng nhập bằng SĐT Zalo.
 
@@ -410,6 +428,10 @@ async def auth_zalo(
     # hiện màn "Vui lòng liên kết Microsoft trước".
     if not profile:
         raise HTTPException(403, "Số điện thoại chưa được đăng ký trong VNGMeet.")
+
+    # Lưu Zalo userId (app-scoped) để webhook user.revoke.consent xoá đúng dữ liệu.
+    if zalo_user_id and zalo_user_id.strip():
+        _attach_zalo_user_id(profile["id"], zalo_user_id.strip())
 
     email = profile.get("email") or ""
     session_claims = {

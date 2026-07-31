@@ -82,6 +82,7 @@ export const api = {
       body: JSON.stringify({
         token: grant.token,
         access_token: grant.accessToken,
+        zalo_user_id: grant.zaloUserId,
       }),
     });
     // 403 = SĐT chưa link tài khoản Microsoft → phân biệt để hiện đúng thông báo.
