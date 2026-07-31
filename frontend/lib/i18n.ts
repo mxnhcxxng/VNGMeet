@@ -120,6 +120,8 @@ const en = {
   "login.welcome": "Welcome to VNG Meet",
   "login.welcomeDesc":
     "Please read the instruction on the right side carefully to get the Microsoft Graph Access Token",
+  "login.welcomeDescMobile":
+    "Please read the instruction below carefully to get the Microsoft Graph Access Token",
   "login.withMicrosoft": "Sign in with Microsoft",
   "login.orPasteToken": "OR USE A TOKEN",
   "login.orSignInMicrosoft": "OR SIGN IN WITH MICROSOFT",
@@ -553,6 +555,8 @@ const vi: Partial<Record<TranslationKey, string>> = {
   "login.welcome": "Chào mừng đến với VNG Meet",
   "login.welcomeDesc":
     "Vui lòng đọc kỹ hướng dẫn bên phải để lấy Microsoft Graph Access Token",
+  "login.welcomeDescMobile":
+    "Vui lòng đọc kỹ hướng dẫn bên dưới để lấy Microsoft Graph Access Token",
   "login.withMicrosoft": "Đăng nhập với Microsoft",
   "login.orPasteToken": "HOẶC DÙNG TOKEN",
   "login.orSignInMicrosoft": "HOẶC ĐĂNG NHẬP VỚI MICROSOFT",

@@ -230,7 +230,7 @@ function CarouselArrow({
       type="button"
       aria-label={label}
       onClick={onPress}
-      className="flex size-14 shrink-0 items-center justify-center rounded-full border border-white/50 text-white transition hover:bg-white/10"
+      className="flex size-11 shrink-0 items-center justify-center rounded-full border border-white/50 text-white transition hover:bg-white/10 sm:size-14"
     >
       <ArrowIcon direction={direction} />
     </button>
@@ -279,8 +279,8 @@ function buildLoginSteps(t: TFunction): {
     {
       key: "graph",
       title: (
-        <>
-          {t("login.graphTitlePre")}{" "}
+        <span className="flex flex-col items-start">
+          <span>{t("login.graphTitlePre")}</span>
           <a
             href={GRAPH_EXPLORER_URL}
             target="_blank"
@@ -289,12 +289,12 @@ function buildLoginSteps(t: TFunction): {
           >
             {t("login.graphLinkText")}
           </a>
-        </>
+        </span>
       ),
       description: (
         <div className="flex flex-col gap-0.5">
-          <p>{t("login.graphFallback")}</p>
-          <div className="flex items-center gap-2">
+          <p className="hidden sm:block">{t("login.graphFallback")}</p>
+          <div className="hidden items-center gap-2 sm:flex">
             <span className="break-all font-semibold">{GRAPH_EXPLORER_URL}</span>
             <CopyLinkButton text={GRAPH_EXPLORER_URL} />
           </div>
@@ -316,11 +316,6 @@ function buildLoginSteps(t: TFunction): {
 
 function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
   const t = useT();
-  const pathname = usePathname();
-  // The Microsoft OAuth button is admin-only (rooms availability still relies on
-  // a pooled delegated token; regular users use the paste-token flow).
-  const isAdminRoute =
-    pathname === "/admin" || (pathname?.startsWith("/admin/") ?? false);
   const LOGIN_STEPS = buildLoginSteps(t);
   const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);
@@ -366,8 +361,8 @@ function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
 
   return (
     <div className="min-h-screen bg-white dark:bg-[#0c0e12]">
-      <main className="grid min-h-screen lg:grid-cols-[1fr_1.04fr]">
-        <section className="flex items-center justify-center px-8 py-12">
+      <main className="grid min-h-screen grid-cols-1 lg:grid-cols-[1fr_1.04fr]">
+        <section className="flex items-center justify-center px-5 py-10 sm:px-8 sm:py-12">
           <form
             className="flex w-full max-w-[480px] flex-col items-start gap-6"
             onSubmit={(event) => {
@@ -382,7 +377,10 @@ function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
                 {t("login.welcome")}
               </h1>
               <p className="text-base leading-6 text-[#535862] dark:text-[#94979c]">
-                {t("login.welcomeDesc")}
+                <span className="lg:hidden">{t("login.welcomeDescMobile")}</span>
+                <span className="hidden lg:inline">
+                  {t("login.welcomeDesc")}
+                </span>
               </p>
 
               <TextField fullWidth>
@@ -434,7 +432,7 @@ function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
                 </Chip>
               )}
 
-              {supabaseEnabled && isAdminRoute && (
+              {supabaseEnabled && (
                 <>
                   <div className="flex items-center gap-3 text-xs font-medium text-[#94979c]">
                     <div className="h-px flex-1 bg-black/10 dark:bg-white/10" />
@@ -457,6 +455,13 @@ function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
                         <rect x="11" y="11" width="9" height="9" fill="#ffb900" />
                       </svg>
                       {t("login.withMicrosoft")}
+                      <Chip
+                        size="sm"
+                        variant="soft"
+                        className="border-none bg-[#f05a22]/15 text-[#f05a22]"
+                      >
+                        beta
+                      </Chip>
                     </span>
                   </Button>
                 </>
@@ -465,29 +470,29 @@ function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
           </form>
         </section>
 
-        <section className="relative min-h-[520px] overflow-hidden bg-default-100 text-white lg:rounded-l-[80px]">
+        <section className="relative min-h-[220px] overflow-hidden bg-default-100 text-white sm:min-h-[420px] lg:min-h-[520px] lg:rounded-l-[80px]">
           <SlideBackground stepKey={currentStep.key} />
 
-          <div className="absolute inset-x-6 bottom-8 flex items-end justify-center gap-3 sm:inset-x-10 lg:inset-x-14 lg:bottom-14">
+          <div className="absolute inset-x-5 bottom-5 flex items-end justify-center gap-3 sm:inset-x-10 sm:bottom-8 lg:inset-x-14 lg:bottom-14">
             <div
               key={currentStep.key}
-              className="auth-caption-in flex min-w-0 flex-1 flex-col items-start gap-3"
+              className="auth-caption-in flex min-w-0 flex-1 flex-col items-start gap-1.5 sm:gap-3"
             >
-              <span className="inline-flex items-center rounded-full border border-white/40 bg-white/10 px-3 py-1 text-xs font-semibold text-white backdrop-blur-sm">
+              <span className="inline-flex items-center rounded-full border border-white/40 bg-white/10 px-2.5 py-0.5 text-[11px] font-semibold text-white backdrop-blur-sm sm:px-3 sm:py-1 sm:text-xs">
                 {t("login.stepOf", {
                   current: stepIndex + 1,
                   total: LOGIN_STEPS.length,
                 })}
               </span>
-              <h2 className="text-2xl font-semibold leading-8 text-white">
+              <h2 className="text-lg font-semibold leading-6 text-white sm:text-2xl sm:leading-8">
                 {currentStep.title}
               </h2>
-              <div className="text-sm font-medium leading-5 text-white">
+              <div className="text-xs font-medium leading-4 text-white sm:text-sm sm:leading-5">
                 {currentStep.description}
               </div>
             </div>
 
-            <div className="flex shrink-0 items-start gap-4">
+            <div className="flex shrink-0 items-start gap-2 sm:gap-4">
               <CarouselArrow
                 direction="left"
                 label={t("login.prevInstruction")}
@@ -960,6 +965,19 @@ export default function Home() {
     setError(null);
   }, []);
 
+  // Send any route (including a deep-linked one) back to the empty "/" login
+  // route on sign-out, so the address bar never lingers on a now-inaccessible
+  // in-app path. Resetting the sync guard makes the next login reconcile the
+  // URL with replaceState instead of pushing a spurious history entry.
+  const resetToLoginRoute = () => {
+    setView("chat");
+    setActiveThreadId(null);
+    urlSyncedRef.current = false;
+    if (window.location.pathname !== "/") {
+      window.history.replaceState(window.history.state, "", "/");
+    }
+  };
+
   const handleSessionExpiredLogin = async () => {
     try {
       await api.logout();
@@ -974,7 +992,7 @@ export default function Home() {
     setMe({ authenticated: false });
     setData(null);
     setChatThreads([]);
-    setActiveThreadId(null);
+    resetToLoginRoute();
   };
 
   const refreshMe = useCallback(async () => {
@@ -1166,7 +1184,7 @@ export default function Home() {
     setMe({ authenticated: false });
     setData(null);
     setChatThreads([]);
-    setActiveThreadId(null);
+    resetToLoginRoute();
   };
 
   const handleRenameThread = async (threadId: string, title: string) => {
