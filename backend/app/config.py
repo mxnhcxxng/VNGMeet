@@ -33,12 +33,14 @@ class Settings(BaseSettings):
     # Calendars.Read.Shared -> list meeting rooms via beta findRooms() and read
     #                          other people's / rooms' free-busy via getSchedule
     # Calendars.ReadWrite -> create events (book a room) on the signed-in user's calendar
-    # Mail.Send -> send Room Scout notifications from the signed-in user's mailbox
+    # NOTE: Mail.Send was dropped — Room Scout now auto-books via Calendars.ReadWrite
+    # instead of emailing, and requesting a scope the tenant admin hasn't consented to
+    # forces every login through the "Approval required" wall. Re-add it here (and admin
+    # must grant it) only if the email-notification path is re-enabled.
     scopes: list[str] = [
         "offline_access",
         "Calendars.Read.Shared",
         "Calendars.ReadWrite",
-        "Mail.Send",
         "User.Read",
     ]
 

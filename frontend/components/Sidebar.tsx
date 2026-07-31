@@ -247,13 +247,17 @@ function ChatThreadRow({
 // display; the shared provider owns the underlying expiry + help modal.
 function TokenExpiryBadge() {
   const t = useT();
-  const { expiresAt, openTokenModal } = useTokenExpiry();
+  const { expiresAt, autoRefresh, openTokenModal } = useTokenExpiry();
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
 
   useEffect(() => {
     const interval = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1000);
     return () => clearInterval(interval);
   }, []);
+
+  // Direct Microsoft logins silently auto-refresh the Graph token, so a
+  // countdown would only mislead — hide the badge entirely for them.
+  if (autoRefresh) return null;
 
   const remaining = expiresAt === null ? null : Math.max(0, expiresAt - now);
   const expired = remaining !== null && remaining <= 0;

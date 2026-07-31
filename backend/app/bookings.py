@@ -398,6 +398,7 @@ def _create_pending_scheduled_booking(
         graph_access_token,
         booking_schedule.next_fire_instant(now_local),
         blocked_action="Không thể tạo lịch đặt phòng (scheduled booking)",
+        auth_user_id=auth_user_id,
     )
 
     try:

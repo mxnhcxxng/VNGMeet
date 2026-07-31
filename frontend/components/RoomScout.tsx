@@ -591,7 +591,7 @@ function ScoutForm({
   onCancel?: () => void;
 }) {
   const t = useT();
-  const { ensureTokenTime } = useTokenExpiry();
+  const { ensureTokenTime, autoRefresh } = useTokenExpiry();
   const isEdit = mode === "edit";
   // In edit mode every field is seeded from the existing scout; in create mode
   // office defaults to the user's profile office.
@@ -917,10 +917,12 @@ function ScoutForm({
           </Select.Popover>
         </Select>
 
-        {/* The auto-stop-at-midnight caveat only matters when scouting a day
-            other than today (a future-dated scout still stops at midnight
-            tonight). Mirrors the same note on the active ScoutingCard. */}
-        {scoutDate !== today && (
+        {/* The auto-stop-at-midnight caveat is a manual-token limitation only.
+            Auto-refreshing (direct Microsoft) sessions instead run until the last
+            duration-fitting slot, so the note is hidden for them. Otherwise it
+            only matters when scouting a day other than today. Mirrors the same
+            note on the active ScoutingCard. */}
+        {!autoRefresh && scoutDate !== today && (
           <div className="flex items-start gap-2 rounded-xl bg-[#fff4ef] p-3 text-sm leading-5 text-[#535862] dark:bg-[#3B1202] dark:text-[#fee7de]">
             <CircleInfo className="mt-0.5 size-4 shrink-0 text-[#F05A22]" />
             <span>{t("scout.endsAtMidnightNote")}</span>
@@ -973,9 +975,11 @@ function ScoutingCard({
   onEdit?: () => void;
 }) {
   const t = useT();
+  const { autoRefresh } = useTokenExpiry();
   const [busy, setBusy] = useState<"cancel" | null>(null);
-  // The auto-stop-at-midnight caveat only matters when scouting a day other than
-  // today (a future-dated scout still stops at midnight tonight).
+  // The auto-stop-at-midnight caveat is a manual-token limitation and only matters
+  // when scouting a day other than today. Auto-refreshing (direct Microsoft)
+  // sessions run until the last duration-fitting slot, so it's hidden for them.
   const differentDay = Boolean(scout.scout_date) && scout.scout_date !== localDateAfter(0);
 
   // Random thumbnail that crossfades to another random one every 5s.
@@ -1092,7 +1096,7 @@ function ScoutingCard({
         <DetailRow label={t("scout.lastChecked")} value={formatLastChecked(scout.last_checked_at)} />
       </dl>
 
-      {differentDay && (
+      {!autoRefresh && differentDay && (
         <div className="mt-4 flex items-start gap-2 rounded-xl bg-[#fff4ef] p-3 text-sm leading-5 text-[#535862] dark:bg-[#3B1202] dark:text-[#fee7de]">
           <CircleInfo className="mt-0.5 size-4 shrink-0 text-[#F05A22]" />
           <span>{t("scout.endsAtMidnightNote")}</span>

@@ -150,17 +150,53 @@ async def verify_manual_graph_token(access_token: str) -> dict:
 # --------------------------------------------------------------------------- #
 # Supabase session (JWT) verification
 # --------------------------------------------------------------------------- #
+# Cache one PyJWKClient per JWKS url. The client caches the fetched JWK set
+# internally (default lifespan 300s), so we don't hit Supabase on every request.
+_jwks_clients: dict = {}
+
+
+def _get_jwks_client(jwks_url: str):
+    import jwt
+
+    client = _jwks_clients.get(jwks_url)
+    if client is None:
+        client = jwt.PyJWKClient(jwks_url)
+        _jwks_clients[jwks_url] = client
+    return client
+
+
 def verify_jwt(token: str) -> dict:
     import jwt  # imported lazily so the manual path works even if unused
 
     s = get_settings()
-    if not s.supabase_jwt_secret:
-        raise HTTPException(500, "Server missing SUPABASE_JWT_SECRET. Check .env")
     try:
+        alg = jwt.get_unverified_header(token).get("alg", "")
+    except jwt.PyJWTError as e:
+        raise HTTPException(401, f"Invalid session: {e}")
+
+    try:
+        if alg.startswith("HS"):
+            # Legacy Supabase tokens signed with the shared JWT secret.
+            if not s.supabase_jwt_secret:
+                raise HTTPException(500, "Server missing SUPABASE_JWT_SECRET. Check .env")
+            return jwt.decode(
+                token,
+                s.supabase_jwt_secret,
+                algorithms=["HS256"],
+                audience="authenticated",
+            )
+        # Supabase asymmetric JWT signing keys (ES256/RS256): verify against the
+        # project's public keys published at the JWKS endpoint.
+        if not s.supabase_url:
+            raise HTTPException(
+                500, "Server missing SUPABASE_URL for JWKS verification. Check .env"
+            )
+        jwks_url = f"{s.supabase_url.rstrip('/')}/auth/v1/.well-known/jwks.json"
+        signing_key = _get_jwks_client(jwks_url).get_signing_key_from_jwt(token)
         return jwt.decode(
             token,
-            s.supabase_jwt_secret,
-            algorithms=["HS256"],
+            signing_key.key,
+            algorithms=["ES256", "RS256"],
             audience="authenticated",
         )
     except jwt.PyJWTError as e:
@@ -249,7 +285,7 @@ def verify_bearer(token: str) -> dict:
     claims = _verify_zalo_session(token)
     if claims is not None:
         return claims
-    return verify_jwt(token)   # Supabase HS256 (đã có sẵn)
+    return verify_jwt(token)   # Supabase JWT (HS256 secret hoặc ES256/RS256 qua JWKS)
 
 
 # --------------------------------------------------------------------------- #

@@ -23,13 +23,17 @@ type ModalReason = "info" | "refresh";
 interface TokenExpiryValue {
   // Unix seconds the auth token expires at, or null when unknown.
   expiresAt: number | null;
+  // True when the session auto-refreshes (direct Microsoft login — a provider
+  // refresh token is stored). Such sessions never truly lapse before a task
+  // runs, so the countdown badge is hidden and `ensureTokenTime` never blocks.
+  autoRefresh: boolean;
   // Seconds remaining right now (clamped at 0), or null when unknown.
   getRemainingSeconds: () => number | null;
   // Opens the token help modal. `reason="refresh"` highlights the refresh steps.
   openTokenModal: (reason?: ModalReason) => void;
   // Returns true if there is enough token time to finish a task needing
   // `neededSeconds`. When not, opens the refresh modal and returns false.
-  // Unknown expiry never blocks.
+  // Unknown expiry and auto-refreshing sessions never block.
   ensureTokenTime: (neededSeconds: number) => boolean;
 }
 
@@ -43,10 +47,15 @@ export function useTokenExpiry(): TokenExpiryValue {
 
 export function TokenExpiryProvider({
   fallbackExpiresAt,
+  autoRefresh = false,
   onExpired,
   children,
 }: {
   fallbackExpiresAt?: number | null;
+  // True for a direct Microsoft login (Supabase Azure OAuth, provider refresh
+  // token stored). The Graph token silently auto-refreshes, so there's nothing
+  // meaningful to count down to and no reason to pre-emptively block tasks.
+  autoRefresh?: boolean;
   // Called once the token actually lapses (badge countdown hits zero). The app
   // uses this to show the "session expired" prompt and sign the user out.
   onExpired?: () => void;
@@ -77,6 +86,15 @@ export function TokenExpiryProvider({
   }, []);
 
   const expiresAt = sessionExpiresAt ?? fallbackExpiresAt ?? null;
+
+  // A live Supabase session means the user signed in directly with Microsoft
+  // (OAuth) — Supabase keeps that session, and the Graph token behind it, silently
+  // refreshed. So there's nothing meaningful to count down to. We detect it here
+  // on the client instead of relying solely on the backend's `graphLinked`, which
+  // can lag or be missing right after OAuth (the refresh token is stored via a
+  // best-effort `api.link` call). Either signal is enough to treat it as
+  // auto-refreshing.
+  const effectiveAutoRefresh = autoRefresh || sessionExpiresAt !== null;
 
   // Fire `onExpired` the moment the token reaches its expiry. Supabase
   // auto-refresh pushes `expiresAt` forward before it lapses (re-running this
@@ -113,6 +131,7 @@ export function TokenExpiryProvider({
 
   const ensureTokenTime = useCallback(
     (neededSeconds: number) => {
+      if (effectiveAutoRefresh) return true; // auto-refreshing session → never block
       const remaining = getRemainingSeconds();
       if (remaining === null) return true; // unknown → don't block
       if (neededSeconds + TOKEN_BUFFER_SECONDS > remaining) {
@@ -121,12 +140,18 @@ export function TokenExpiryProvider({
       }
       return true;
     },
-    [getRemainingSeconds],
+    [effectiveAutoRefresh, getRemainingSeconds],
   );
 
   const value = useMemo<TokenExpiryValue>(
-    () => ({ expiresAt, getRemainingSeconds, openTokenModal, ensureTokenTime }),
-    [expiresAt, getRemainingSeconds, openTokenModal, ensureTokenTime],
+    () => ({
+      expiresAt,
+      autoRefresh: effectiveAutoRefresh,
+      getRemainingSeconds,
+      openTokenModal,
+      ensureTokenTime,
+    }),
+    [expiresAt, effectiveAutoRefresh, getRemainingSeconds, openTokenModal, ensureTokenTime],
   );
 
   return (

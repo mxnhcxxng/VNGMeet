@@ -25,8 +25,12 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+// Mail.Send removed — Room Scout auto-books via Calendars.ReadWrite instead of
+// emailing. Requesting a scope the tenant admin hasn't consented to forces the
+// Microsoft "Approval required" wall on every login. Keep this list in sync with
+// backend/app/config.py `scopes`.
 const SCOPES =
-  "offline_access openid email profile Calendars.Read.Shared Calendars.ReadWrite Mail.Send User.Read";
+  "offline_access openid email profile Calendars.Read.Shared Calendars.ReadWrite User.Read";
 
 export interface Me {
   authenticated: boolean;

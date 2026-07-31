@@ -136,6 +136,37 @@ def _room_scout_token_for_create(token: str | None, auth_user_id: str | None) ->
     return _encrypt_scheduled_graph_token(token)
 
 
+def _scout_expiry(
+    scout_date,
+    *,
+    end_minutes: int,
+    duration_minutes: int,
+    local_today,
+    tz,
+    auto_refresh: bool,
+):
+    """When the scout stops auto-booking.
+
+    Direct Microsoft (auto-refreshing) sessions have no token-lifetime cap, so the
+    scout runs until the last start time that still fits the requested duration
+    inside the window — after that instant no full-duration booking can be placed,
+    so there's nothing left to hunt for (e.g. a 2h scout over 13:00–18:00 stops at
+    16:00). Manual pasted-token sessions keep the old cap: the encrypted Graph
+    token expires, so the scout can't outlive midnight after its creation day (or
+    the window end when scouting today, whichever is sooner)."""
+    midnight = datetime.min.time()
+    if auto_refresh:
+        last_start = max(0, end_minutes - duration_minutes)
+        return datetime.combine(scout_date, midnight, tzinfo=tz) + timedelta(minutes=last_start)
+    scout_end = datetime.combine(local_today + timedelta(days=1), midnight, tzinfo=tz)
+    if scout_date == local_today:
+        window_end = datetime.combine(local_today, midnight, tzinfo=tz) + timedelta(
+            minutes=end_minutes
+        )
+        scout_end = min(scout_end, window_end)
+    return scout_end
+
+
 def _has_free_block(slots: list, scan_start: int, scan_end: int, duration_slots: int) -> bool:
     """True when there's a free (all-zero) block of `duration_slots` consecutive
     slots somewhere inside [scan_start, scan_end)."""
@@ -397,8 +428,9 @@ async def process_room_scouts() -> dict:
     now_local = datetime.now(tz)
     avail = settings.availability_slot_minutes
 
-    # Auto-cancel scouts past their expiry (midnight of the creation day, or the
-    # scout end-time when scouting today — whichever is sooner, set at create time).
+    # Auto-cancel scouts past their expiry (set at create time by `_scout_expiry`:
+    # the last duration-fitting start for auto-refresh sessions, else the token-
+    # capped midnight/window-end).
     sb.table("room_scouts").update(
         {"status": "canceled", "updated_at": now.isoformat()}
     ).eq("status", "active").lte("expires_at", now.isoformat()).execute()
@@ -742,26 +774,28 @@ async def create_room_scout(request: Request, payload: RoomScoutRequest):
             422, "Scout date must be between today and 14 days from today."
         )
     now = datetime.now(timezone.utc).isoformat()
-    # The selected date controls which availability row is checked. A scout expires
-    # at midnight after the day it was created; when scouting *today*, it also can't
-    # outlive its own window, so it expires at scout_end_time (whichever is sooner).
-    scout_end_local = datetime.combine(
-        local_today + timedelta(days=1), datetime.min.time(), tzinfo=tz
+    # The selected date controls which availability row is checked. Expiry depends
+    # on whether the session auto-refreshes (see `_scout_expiry`).
+    auto_refresh = bool(auth_user_id) and auth.has_refresh_token(auth_user_id)
+    scout_end_local = _scout_expiry(
+        scout_date,
+        end_minutes=end_minutes,
+        duration_minutes=payload.duration_minutes,
+        local_today=local_today,
+        tz=tz,
+        auto_refresh=auto_refresh,
     )
-    if scout_date == local_today:
-        window_end_local = datetime.combine(
-            local_today, datetime.min.time(), tzinfo=tz
-        ) + timedelta(minutes=end_minutes)
-        scout_end_local = min(scout_end_local, window_end_local)
     # The scout keeps auto-booking until `scout_end_local`; block if the token
     # won't survive that long (covers the chat-bot flow too — there is no modal
-    # there). Mirrors the frontend gate in RoomScout.tsx.
+    # there). Mirrors the frontend gate in RoomScout.tsx. No-op for auto-refresh
+    # sessions.
     from .token_guard import ensure_token_survives_until
 
     ensure_token_survives_until(
         token,
         scout_end_local,
         blocked_action="Không thể bật Săn phòng (Room Scout)",
+        auth_user_id=auth_user_id,
     )
     row = {
         "user_id": user_profile_id,
@@ -786,7 +820,7 @@ async def create_room_scout(request: Request, payload: RoomScoutRequest):
 
 @router.patch("/api/room-scouts/{scout_id}")
 async def update_room_scout(request: Request, scout_id: str, payload: RoomScoutRequest):
-    _token, _auth_user_id, user_profile_id, email = await _booking_auth_context(request)
+    _token, auth_user_id, user_profile_id, email = await _booking_auth_context(request)
     if not settings.supabase_enabled or not user_profile_id or not email:
         raise HTTPException(503, "Room Scout requires Supabase and a user profile email.")
     from .supabase_client import get_supabase
@@ -825,16 +859,16 @@ async def update_room_scout(request: Request, scout_id: str, payload: RoomScoutR
         raise HTTPException(
             422, "Scout date must be between today and 14 days from today."
         )
-    # Recompute the expiry exactly like create_room_scout: midnight after today,
-    # clamped to scout_end_time when scouting today.
-    scout_end_local = datetime.combine(
-        local_today + timedelta(days=1), datetime.min.time(), tzinfo=tz
+    # Recompute the expiry exactly like create_room_scout.
+    auto_refresh = bool(auth_user_id) and auth.has_refresh_token(auth_user_id)
+    scout_end_local = _scout_expiry(
+        scout_date,
+        end_minutes=end_minutes,
+        duration_minutes=payload.duration_minutes,
+        local_today=local_today,
+        tz=tz,
+        auto_refresh=auto_refresh,
     )
-    if scout_date == local_today:
-        window_end_local = datetime.combine(
-            local_today, datetime.min.time(), tzinfo=tz
-        ) + timedelta(minutes=end_minutes)
-        scout_end_local = min(scout_end_local, window_end_local)
 
     from .token_guard import ensure_token_survives_until
 
@@ -842,6 +876,7 @@ async def update_room_scout(request: Request, scout_id: str, payload: RoomScoutR
         _token,
         scout_end_local,
         blocked_action="Không thể cập nhật phiên Săn phòng (Room Scout)",
+        auth_user_id=auth_user_id,
     )
 
     now = datetime.now(timezone.utc).isoformat()
