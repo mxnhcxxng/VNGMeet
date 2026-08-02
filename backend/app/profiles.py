@@ -480,6 +480,15 @@ async def link_microsoft(
         auth.invalidate_graph_token(auth_user_id)
         graph_token = await auth.get_graph_token(auth_user_id)
 
+    # Supabase JWT không mang mobilePhone, nên đường OAuth phải tự hỏi Graph /me
+    # để có SĐT lưu vào user_profiles.phone — đây là khóa mà Zalo Mini App dùng để
+    # map SĐT -> account. Không có bước này, user đăng nhập bằng OAuth sẽ có phone
+    # rỗng và luồng Zalo sẽ trả 403. Best-effort: thất bại thì bỏ qua, không chặn login.
+    if graph_token and not claims.get("phone"):
+        phone = await auth.fetch_graph_phone(graph_token)
+        if phone:
+            claims["phone"] = phone
+
     user_profile_id = _upsert_user_profile(claims)
     _update_pending_scheduled_graph_token(
         graph_token,

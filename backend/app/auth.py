@@ -147,6 +147,29 @@ async def verify_manual_graph_token(access_token: str) -> dict:
     return {key: value for key, value in claims.items() if value}
 
 
+async def fetch_graph_phone(access_token: str) -> str | None:
+    """Fetch `mobilePhone` from Graph /me, normalized to VN local format.
+
+    Best-effort: returns None on empty token, network error, non-200, or a
+    missing/blank phone. Callers use it to enrich claims for the Supabase OAuth
+    path (whose JWT carries no phone) without letting a phone lookup block login.
+    """
+    token = (access_token or "").strip()
+    if not token:
+        return None
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            resp = await client.get(
+                "https://graph.microsoft.com/v1.0/me", headers=headers
+            )
+    except httpx.HTTPError:
+        return None
+    if resp.status_code != 200:
+        return None
+    return normalize_vn_phone(resp.json().get("mobilePhone"))
+
+
 # --------------------------------------------------------------------------- #
 # Supabase session (JWT) verification
 # --------------------------------------------------------------------------- #
