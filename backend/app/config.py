@@ -30,8 +30,9 @@ class Settings(BaseSettings):
 
     # Delegated Microsoft Graph permissions. offline_access is required so Azure
     # issues a refresh token that the backend can store and re-exchange.
-    # Calendars.Read.Shared -> list meeting rooms via beta findRooms() and read
-    #                          other people's / rooms' free-busy via getSchedule
+    # Calendars.Read.Shared -> read rooms'/other people's free-busy via getSchedule
+    #   (the room LIST no longer uses Graph findRooms — it comes from the
+    #    meeting_room_metadata table; Exchange 403s findRooms for this app's appid)
     # Calendars.ReadWrite -> create events (book a room) on the signed-in user's calendar
     # NOTE: Mail.Send was dropped — Room Scout now auto-books via Calendars.ReadWrite
     # instead of emailing, and requesting a scope the tenant admin hasn't consented to

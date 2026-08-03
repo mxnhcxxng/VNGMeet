@@ -371,11 +371,28 @@ async def get_graph_token(user_id: str) -> str:
         resp = await client.post(s.token_endpoint, data=data)
     if resp.status_code != 200:
         # Don't surface Azure's raw error body to the client/logs — it can echo
-        # request parameters. Log the status only; return a generic 401.
+        # request parameters. Log the status plus only the safe diagnostic fields:
+        # `error` (a short slug like "invalid_grant") and `error_codes` (a list of
+        # numeric AADSTS codes). Neither echoes the token or request params, and the
+        # code pins down the root cause: 9002327 = redirect registered as SPA (can't
+        # redeem with a secret); 7000215/700016/90002 = bad secret/tenant; 70008/
+        # 700082 = refresh token expired or revoked. `error_description` is skipped
+        # on purpose — it can restate request context.
         import logging
 
+        error = error_codes = None
+        try:
+            body = resp.json()
+            error = body.get("error")
+            error_codes = body.get("error_codes")
+        except Exception:  # noqa: BLE001 - body may be empty/non-JSON
+            pass
         logging.getLogger("vngmeet.auth").warning(
-            "Graph token refresh failed for %s: HTTP %s", user_id, resp.status_code
+            "Graph token refresh failed for %s: HTTP %s error=%s error_codes=%s",
+            user_id,
+            resp.status_code,
+            error,
+            error_codes,
         )
         raise HTTPException(401, "Could not refresh Microsoft token. Please sign in again.")
     payload = resp.json()

@@ -7,44 +7,6 @@ import httpx
 from .config import get_settings
 
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"
-GRAPH_BETA = "https://graph.microsoft.com/beta"
-
-
-async def _list_rooms_findrooms(client: httpx.AsyncClient, headers: dict) -> list[dict]:
-    """Lightweight room list via beta findRooms() (only needs Calendars.Read, no admin)."""
-    url = f"{GRAPH_BETA}/me/microsoft.graph.findRooms()"
-    resp = await client.get(url, headers=headers)
-    resp.raise_for_status()
-    data = resp.json()
-    rooms = []
-    for r in data.get("value", []):
-        email = r.get("address")
-        rooms.append(
-            {
-                "id": email,
-                "name": r.get("name") or email,
-                "email": email,
-                "building": None,
-                "floor": None,
-                "capacity": None,
-            }
-        )
-    return rooms
-
-
-async def list_rooms(access_token: str) -> list[dict]:
-    """Return all rooms (meeting-room mailboxes) the signed-in user can see.
-
-    Uses beta findRooms(), which only needs the user-consentable
-    Calendars.Read.Shared permission (no admin-grade Place.Read.All). Richer
-    metadata (building/floor/capacity/zone) is layered on from the app's own DB
-    in room_resources._enrich_rooms().
-    """
-    headers = {"Authorization": f"Bearer {access_token}", "Accept": "application/json"}
-    async with httpx.AsyncClient(timeout=30) as client:
-        rooms = await _list_rooms_findrooms(client, headers)
-    # Only rooms with a real mailbox email can be queried for schedule.
-    return [r for r in rooms if r.get("email")]
 
 
 async def get_schedule(

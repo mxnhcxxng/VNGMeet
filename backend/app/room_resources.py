@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -15,6 +16,60 @@ from .app_context import AVAILABILITY_CACHE_TTL, log, settings
 from .profiles import _read_user_profile, _request_identity
 
 router = APIRouter()
+
+# Graph/Exchange diagnostic headers worth logging on a failed call. `x-ms-diagnostics`
+# (Exchange, which serves findRooms) carries the *real* reason behind a generic
+# ErrorAccessDenied — e.g. mailbox on-premise/soft-deleted, throttling, wrong
+# audience. request-id / client-request-id / date are what Microsoft support needs
+# to trace the call; www-authenticate spells out claim/consent gaps.
+_GRAPH_DIAG_HEADERS = (
+    "x-ms-diagnostics",
+    "www-authenticate",
+    "request-id",
+    "client-request-id",
+    "x-ms-ags-diagnostic",
+    "date",
+    "retry-after",
+)
+
+
+def _graph_error_detail(
+    logger_name: str, context: str, exc: httpx.HTTPStatusError, token: str
+) -> dict:
+    """Log a Graph HTTPStatusError and return a structured diagnostic dict.
+
+    Surfaces the response body, Exchange/Graph diagnostic headers, and the safe
+    identifying token claims (scopes, audience, tenant, user, app) so a generic
+    403 ErrorAccessDenied can be diagnosed straight from the logs OR the API
+    response. Never includes the raw token itself.
+    """
+    resp = exc.response
+    claims = auth.decode_jwt_claims(token)
+    diag = {h: resp.headers.get(h) for h in _GRAPH_DIAG_HEADERS if resp.headers.get(h)}
+    try:
+        graph_body = resp.json()
+    except Exception:  # noqa: BLE001 - body may be empty/non-JSON
+        graph_body = resp.text
+    detail = {
+        "context": context,
+        "status": resp.status_code,
+        "url": str(resp.request.url) if resp.request else None,
+        "graph": graph_body,
+        "diagnostics": diag,
+        "token": {
+            "scp": claims.get("scp"),
+            "aud": claims.get("aud"),
+            "tid": claims.get("tid"),
+            "upn": (
+                claims.get("upn")
+                or claims.get("unique_name")
+                or claims.get("preferred_username")
+            ),
+            "appid": claims.get("appid") or claims.get("azp"),
+        },
+    }
+    logging.getLogger(logger_name).warning("%s: %s", context, detail)
+    return detail
 _AVAILABILITY_REFRESH_LOCK = None
 ROOM_LAYOUT_COUNTS_BY_OFFICE = {
     # Hardcoded for the browse loading grid. Update these when room metadata
@@ -24,11 +79,41 @@ ROOM_LAYOUT_COUNTS_BY_OFFICE = {
     "tnr": 10,
 }
 
-def _room_metadata() -> dict[str, dict]:
-    """email (lowercased) -> row from `meeting_room_metadata`.
+def _rooms_from_metadata() -> list[dict]:
+    """In-use meeting rooms straight from `meeting_room_metadata` (Room shape).
 
+    This is the single source of truth for the room list — the same table the
+    availability cache, free-today, directory, and the background refresh job all
+    read from. Sourcing /api/rooms and /api/schedule here too means the app no
+    longer depends on Graph `findRooms`, which Exchange 403s for this app's
+    registration (its appid isn't Microsoft first-party). getSchedule still needs
+    a Graph token, but the room *list* never does.
+    """
+    if not settings.supabase_enabled:
+        return []
+    from .supabase_client import get_supabase
+
+    rows = (
+        get_supabase()
+        .table("meeting_room_metadata")
+        .select(
+            "id, name, email, building, floor, zone, capacity, "
+            "capacity_size, office, thumbnail_link, direction"
+        )
+        .eq("in_use", True)
+        .execute()
+        .data
+        or []
+    )
+    return [r for r in rows if r.get("email")]
+
+
+def _room_metadata() -> dict[str, dict]:
+    """email (lowercased) -> full `meeting_room_metadata` row (incl. map_link).
+
+    Keyed lookup for booking-history / detail enrichment (see bookings.py).
     Empty dict when Supabase isn't configured or the read fails — enrichment is
-    best-effort and must never block listing rooms.
+    best-effort and must never block a response.
     """
     if not settings.supabase_enabled:
         return {}
@@ -55,42 +140,18 @@ def _room_metadata() -> dict[str, dict]:
     return out
 
 
-def _enrich_rooms(rooms: list[dict]) -> list[dict]:
-    """Merge Supabase metadata onto Graph rooms (matched by email).
-
-    Graph values win when present; the table fills the gaps (notably the
-    findRooms() fallback, which returns null building/floor/capacity) and adds
-    zone/office, which Graph doesn't expose.
-    """
-    meta = _room_metadata()
-    if not meta:
-        return rooms
-    enriched: list[dict] = []
-    for r in rooms:
-        m = meta.get((r.get("email") or "").strip().lower())
-        if m:
-            r = {
-                **r,
-                "building": r.get("building") or m.get("building"),
-                "floor": r.get("floor") or m.get("floor"),
-                "capacity": r.get("capacity") or m.get("capacity"),
-                "capacity_size": m.get("capacity_size"),
-                "zone": m.get("zone"),
-                "office": m.get("office"),
-                "thumbnail_link": m.get("thumbnail_link"),
-                "direction": m.get("direction"),
-            }
-        enriched.append(r)
-    return enriched
-
-
 @router.get("/api/rooms")
 async def rooms(request: Request):
-    token, _ = await auth.resolve_token(request)
-    try:
-        return _enrich_rooms(await graph.list_rooms(token))
-    except httpx.HTTPStatusError as e:
-        raise HTTPException(e.response.status_code, e.response.text)
+    """Meeting-room list from `meeting_room_metadata` (no Graph token needed).
+
+    Previously went through Graph `findRooms`, which Exchange now 403s for this
+    app's registration. The table already holds every field the FE Room type
+    needs, and it's the same source the availability grid uses.
+    """
+    _require_auth(request)
+    if not settings.supabase_enabled:
+        raise HTTPException(503, "Room list requires Supabase configuration.")
+    return _rooms_from_metadata()
 
 
 @router.get("/api/room-layout")
@@ -118,11 +179,9 @@ async def schedule(
     token, _ = await auth.resolve_token(request)
     tz = ZoneInfo(settings.timezone)
 
-    # Resolve which rooms to query.
-    try:
-        all_rooms = _enrich_rooms(await graph.list_rooms(token))
-    except httpx.HTTPStatusError as e:
-        raise HTTPException(e.response.status_code, e.response.text)
+    # Room list comes from the table (not Graph findRooms); the token below is
+    # only for the live getSchedule free/busy reads.
+    all_rooms = _rooms_from_metadata()
 
     wanted = {e.strip().lower() for e in emails.split(",") if e.strip()}
     rooms_list = [r for r in all_rooms if not wanted or r["email"].lower() in wanted]
@@ -146,7 +205,8 @@ async def schedule(
                 token, room_emails, start_iso, end_iso, settings.timezone, settings.slot_minutes
             )
         except httpx.HTTPStatusError as e:
-            raise HTTPException(e.response.status_code, e.response.text)
+            detail = _graph_error_detail("vngmeet.schedule", "getSchedule failed", e, token)
+            raise HTTPException(e.response.status_code, detail)
         for email, view in views.items():
             if email not in grids:
                 continue
