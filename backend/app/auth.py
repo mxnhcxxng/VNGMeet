@@ -18,6 +18,7 @@ import json
 import re
 import time
 import uuid
+from datetime import datetime, timezone
 
 import httpx
 from fastapi import HTTPException, Request
@@ -317,8 +318,16 @@ def verify_bearer(token: str) -> dict:
 def store_refresh_token(user_id: str, refresh_token: str) -> None:
     from .supabase_client import get_supabase
 
+    # `updated_at` must be written explicitly. Its `default now()` only fires on
+    # INSERT, and on an upsert conflict PostgREST SETs only the columns present in
+    # the payload — so leaving it out froze the column at first-login time forever,
+    # making it look like the token had never been rotated even when it had.
     get_supabase().table("provider_tokens").upsert(
-        {"user_id": user_id, "refresh_token": refresh_token}
+        {
+            "user_id": user_id,
+            "refresh_token": refresh_token,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
     ).execute()
 
 

@@ -36,6 +36,7 @@ import {
 } from "@/lib/api";
 import { Check, Copy } from "@gravity-ui/icons";
 import { supabase, supabaseEnabled } from "@/lib/supabase";
+import { linkMicrosoft, relinkFromStoredSession } from "@/lib/linkMicrosoft";
 import { Sidebar, type View } from "@/components/Sidebar";
 import { TokenExpiryProvider } from "@/components/TokenExpiryProvider";
 import { BrowseRooms } from "@/components/BrowseRooms";
@@ -1024,28 +1025,62 @@ export default function Home() {
     }
   }, [me, setTheme, setLanguage]);
 
+  // Latest authenticated flag, read (not depended on) inside the auth-state
+  // listener so it can tell a routine hourly refresh from one that should
+  // un-stick the login screen — without re-subscribing on every `me` change.
+  const authedRef = useRef(false);
+  authedRef.current = Boolean(me?.authenticated);
+
   // Supabase OAuth flow (only when configured).
   useEffect(() => {
     if (!supabase) return;
     const { data: sub } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
+      (event, session) => {
         if (!session) return;
-        // Supabase exposes the Microsoft refresh token only right after OAuth.
-        if (session.provider_refresh_token) {
-          try {
-            await api.link(
-              session.provider_refresh_token,
-              session.provider_token,
-            );
-          } catch {
-            /* non-fatal */
-          }
+        // Supabase exposes the Microsoft refresh token only right after OAuth, and
+        // keeps it on the stored session only until the first background refresh.
+        // Storing it is what lets the backend mint Graph tokens by itself, so it
+        // retries rather than being fire-and-forget (see lib/linkMicrosoft.ts).
+        const refreshToken = session.provider_refresh_token;
+        const providerToken = session.provider_token;
+        if (refreshToken) {
+          // Deferred out of the callback on purpose: Supabase holds its auth lock
+          // while running listeners, and api.link -> req() reaches back into the
+          // auth client. Keeping the callback synchronous also stops a slow POST
+          // from delaying the refreshMe() below.
+          setTimeout(() => {
+            void linkMicrosoft(refreshToken, providerToken).then((ok) => {
+              if (ok) refreshMe(); // pick up graphLinked / tokenExpiresAt
+            });
+          }, 0);
         }
-        if (event !== "TOKEN_REFRESHED") refreshMe();
+        // Skip the full re-fetch on a routine background token refresh — UNLESS
+        // the UI is currently on the login screen. That happens when the initial
+        // mount ran with an expired JWT (bounced to login) and Supabase then
+        // silently refreshed it: without this, the freshly-valid session would
+        // never be picked up and the user would stay stuck on login after F5.
+        if (event !== "TOKEN_REFRESHED" || !authedRef.current) refreshMe();
       },
     );
     return () => sub.subscription.unsubscribe();
   }, [refreshMe]);
+
+  // Safety net for a link that never landed. `graphLinked === false` means the
+  // backend has no Microsoft refresh token for this account, so it can't mint Graph
+  // tokens — bookings 401 and the availability job starves. Supabase still holds
+  // the token on the stored session for about an hour after OAuth, so re-send it
+  // instead of making the user sign in again. Deps are primitives, so a failed
+  // attempt doesn't loop: it only re-runs once graphLinked actually flips.
+  useEffect(() => {
+    if (!supabase || !me?.authenticated || me.graphLinked !== false) return;
+    let cancelled = false;
+    void relinkFromStoredSession().then((ok) => {
+      if (ok && !cancelled) refreshMe();
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [me?.authenticated, me?.graphLinked, refreshMe]);
 
   const loadSchedule = useCallback(async (opts?: { force?: boolean }) => {
     setRefreshing(true);

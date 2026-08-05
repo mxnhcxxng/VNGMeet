@@ -7,6 +7,15 @@ refresh the shared room_availability cache, so no user request has to pay for
 the Graph round-trips. Tokens that Graph rejects are flipped to `invalid`
 (revoked / password change / missing scope) and the job moves on to the next
 candidate; expired rows are flipped to `expired` for observability.
+
+The pool alone is NOT enough to keep the cache warm, because it only ever holds
+Graph *access* tokens (~80 minutes) and `save_token` is only ever reached from a
+user request or a sign-in. Once everyone stops using the app, every row ages out
+within the hour and the cache freezes until the next sign-in. So when the pool
+runs dry the job mints its own token from `provider_tokens` — the long-lived
+Microsoft *refresh* tokens stored for every OAuth user — and that exchange
+re-seeds the pool, which is what makes the refresh loop self-sustaining
+overnight.
 """
 
 from __future__ import annotations
@@ -55,17 +64,27 @@ def save_token(
         if expires_at <= datetime.now(timezone.utc) + _EXPIRY_MARGIN:
             return
 
+        row = {
+            "owner_key": str(owner_key),
+            "token_encrypted": _encrypt_scheduled_graph_token(access_token),
+            "expires_at": expires_at.isoformat(),
+            "status": "active",
+            "last_error": None,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        # Only write user_email when we actually have one. Omitting the column
+        # from the upsert leaves any existing value untouched on conflict
+        # (PostgREST only SETs the columns present in the payload), so the
+        # hourly get_graph_token() refresh — whose email is decoded best-effort
+        # from the opaque Graph access token and is often empty — no longer
+        # wipes the address stored at login. The email-keyed pool lookups
+        # (get_active_token / get_active_token_exp) depend on it staying put.
+        email = (user_email or "").strip().lower()
+        if email:
+            row["user_email"] = email
+
         get_supabase().table("graph_token_pool").upsert(
-            {
-                "owner_key": str(owner_key),
-                "user_email": (user_email or "").strip().lower() or None,
-                "token_encrypted": _encrypt_scheduled_graph_token(access_token),
-                "expires_at": expires_at.isoformat(),
-                "status": "active",
-                "last_error": None,
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-            },
-            on_conflict="owner_key",
+            row, on_conflict="owner_key"
         ).execute()
     except Exception as e:  # noqa: BLE001 - never block auth on pool bookkeeping
         log.warning("could not save token to pool for %s: %s", owner_key, e)
@@ -191,13 +210,83 @@ async def _probe(token: str) -> bool:
         return False
 
 
+def _token_email(access_token: str) -> str | None:
+    """Best-effort sign-in name out of a Graph access token, for the pool's
+    `user_email` column (which the email-keyed pool lookups match on)."""
+    from .auth import decode_jwt_claims
+
+    claims = decode_jwt_claims(access_token)
+    for c in ("upn", "unique_name", "email"):
+        if claims.get(c):
+            return str(claims[c])
+    return None
+
+
+async def _mint_from_provider_tokens(skip: set[str]) -> str | None:
+    """Mint a fresh delegated Graph token from a stored Microsoft refresh token.
+
+    The last-resort path for the availability job when `graph_token_pool` has no
+    usable access token left (everyone idle for ~80 minutes). `provider_tokens`
+    holds a long-lived refresh token per OAuth user, so the job can mint its own
+    token instead of waiting for someone to sign in. `get_graph_token` also feeds
+    the result back through `save_token`, so a successful mint re-seeds the pool
+    and the next run takes the cheap path again.
+
+    `skip` holds owner_keys already tried this run, so a pool row that Graph just
+    rejected isn't immediately retried through its refresh token.
+    """
+    try:
+        from .auth import get_graph_token
+        from .supabase_client import get_supabase
+
+        rows = (
+            get_supabase()
+            .table("provider_tokens")
+            .select("user_id")
+            .order("updated_at", desc=True)
+            .limit(_MAX_CANDIDATES + len(skip))
+            .execute()
+            .data
+            or []
+        )
+    except Exception as e:  # noqa: BLE001
+        log.warning("could not read provider_tokens: %s", e)
+        return None
+
+    tried = 0
+    for row in rows:
+        user_id = str(row.get("user_id") or "")
+        if not user_id or user_id in skip:
+            continue
+        if tried >= _MAX_CANDIDATES:
+            break
+        tried += 1
+        try:
+            # Exchanges the refresh token at Azure (or returns the process-local
+            # cache) and upserts the result into the pool via save_token.
+            token = await get_graph_token(user_id)
+        except Exception as e:  # noqa: BLE001 - revoked / rotated-away / network
+            log.warning("could not mint pool token from provider_tokens for %s: %s", user_id, e)
+            continue
+        if token:
+            # get_graph_token only calls save_token on an actual Azure exchange —
+            # a hit on its in-process cache would leave the pool row `expired` and
+            # send every later run down this fallback again. Re-seed explicitly so
+            # the next run takes the cheap pool path.
+            save_token(user_id, token, user_email=_token_email(token))
+            log.info("minted a fresh Graph token from provider_tokens (user %s)", user_id)
+            return token
+    return None
+
+
 async def refresh_availability_from_pool() -> dict | None:
     """Refresh room_availability using the freshest active pool token.
 
     Tries up to _MAX_CANDIDATES tokens newest-first. A token Graph rejects is
-    marked invalid and the next one is tried. Returns the refresh summary, or
-    None when no usable token exists (logged — the cache then ages until a user
-    signs in again and reseeds the pool).
+    marked invalid and the next one is tried. When no pool token works, falls
+    back to minting one from `provider_tokens` (see `_mint_from_provider_tokens`)
+    so the cache keeps refreshing while nobody is using the app. Returns the
+    refresh summary, or None when even that fails.
     """
     settings = get_settings()
     if not settings.supabase_enabled:
@@ -233,15 +322,13 @@ async def refresh_availability_from_pool() -> dict | None:
         log.warning("could not read graph_token_pool: %s", e)
         return None
 
-    if not rows:
-        log.warning(
-            "refresh_availability_from_pool: no active token in pool; "
-            "cache will age until a user signs in again."
-        )
-        return None
+    # owner_keys tried from the pool this run, so the provider_tokens fallback
+    # doesn't immediately re-try a user Graph just rejected.
+    tried: set[str] = set()
 
     for row in rows:
         owner_key = row["owner_key"]
+        tried.add(str(owner_key))
         try:
             token = _decrypt_scheduled_graph_token(row.get("token_encrypted"))
         except RuntimeError as e:
@@ -273,5 +360,29 @@ async def refresh_availability_from_pool() -> dict | None:
         log.info("availability refreshed from pool (owner %s): %s", owner_key, summary)
         return summary
 
-    log.warning("refresh_availability_from_pool: all %d candidates failed", len(rows))
-    return None
+    # Pool empty (everyone idle > token lifetime) or every candidate rejected.
+    # Mint our own token from a stored Microsoft refresh token rather than let the
+    # cache freeze until the next sign-in.
+    if rows:
+        log.info(
+            "refresh_availability_from_pool: all %d pool candidates failed; "
+            "falling back to provider_tokens",
+            len(rows),
+        )
+    minted = await _mint_from_provider_tokens(tried)
+    if not minted:
+        log.warning(
+            "refresh_availability_from_pool: no usable token in graph_token_pool "
+            "nor provider_tokens; cache will age until a user signs in again."
+        )
+        return None
+
+    summary = await availability.refresh_availability_delegated(minted)
+    if summary.get("rows", 0) == 0 and summary.get("errors", 0) > 0:
+        log.warning(
+            "refresh_availability_from_pool: minted token failed getSchedule "
+            "(likely missing Calendars.Read.Shared): %s", summary
+        )
+        return None
+    log.info("availability refreshed from a minted provider token: %s", summary)
+    return summary
