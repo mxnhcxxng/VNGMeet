@@ -33,6 +33,10 @@ log = logging.getLogger("vngmeet.token_pool")
 _EXPIRY_MARGIN = timedelta(minutes=2)
 # How many pool candidates one job run tries before giving up.
 _MAX_CANDIDATES = 3
+# Re-mint a pooled token once it has less than this left. Graph access tokens live
+# ~80 minutes, so this renews each user roughly hourly — comfortably before expiry
+# rather than after it, which is what keeps a row from ever reaching `expired`.
+_RENEW_MARGIN = timedelta(minutes=15)
 
 
 def save_token(
@@ -208,6 +212,78 @@ async def _probe(token: str) -> bool:
         # Network hiccup, not a token verdict — treat as unusable this run but
         # don't invalidate the row.
         return False
+
+
+async def renew_pool_tokens() -> int:
+    """Re-mint every OAuth user's pooled Graph token BEFORE it lapses.
+
+    `refresh_availability_from_pool` only ever needs one working token, so on its
+    own it lets every other user's row expire — and an expired row means
+    /api/auth/me has no expiry to show and the booking fallback
+    (`get_active_token`) finds nothing for that user. This walks `provider_tokens`
+    and renews anyone whose pooled token is missing, not `active`, or inside
+    `_RENEW_MARGIN`, so a row should never be observed `expired` again.
+
+    Returns how many users were renewed. Best-effort per user: one failure (revoked
+    grant, network) never stops the rest.
+    """
+    settings = get_settings()
+    if not settings.supabase_enabled:
+        return 0
+    try:
+        from .auth import get_graph_token, invalidate_graph_token
+        from .supabase_client import get_supabase
+
+        sb = get_supabase()
+        user_ids = [
+            str(r["user_id"])
+            for r in (sb.table("provider_tokens").select("user_id").execute().data or [])
+            if r.get("user_id")
+        ]
+        if not user_ids:
+            return 0
+
+        # One read for the whole pool state, so the common case (nothing due) costs
+        # two queries and zero Azure round-trips.
+        pooled = {
+            str(r["owner_key"]): r
+            for r in (
+                sb.table("graph_token_pool")
+                .select("owner_key, status, expires_at")
+                .in_("owner_key", user_ids)
+                .execute()
+                .data
+                or []
+            )
+        }
+    except Exception as e:  # noqa: BLE001 - a bookkeeping job must never crash the scheduler
+        log.warning("renew_pool_tokens: could not read state: %s", e)
+        return 0
+
+    deadline = datetime.now(timezone.utc) + _RENEW_MARGIN
+    renewed = 0
+    for user_id in user_ids:
+        row = pooled.get(user_id)
+        if row and row.get("status") == "active":
+            try:
+                if datetime.fromisoformat(row["expires_at"]) > deadline:
+                    continue  # still comfortably valid
+            except (KeyError, ValueError, TypeError):
+                pass  # unreadable expiry -> treat as due
+        try:
+            # get_graph_token short-circuits on its in-process cache while the token
+            # has >60s left, which at _RENEW_MARGIN it always does — so it would hand
+            # back the same near-dead token and save_token would just rewrite the old
+            # expiry. Drop the cache entry to force a real exchange with Azure.
+            invalidate_graph_token(user_id)
+            await get_graph_token(user_id)  # exchanges, then save_token()s the result
+            renewed += 1
+        except Exception as e:  # noqa: BLE001 - revoked grant, network, rotated away
+            log.warning("renew_pool_tokens: could not renew %s: %s", user_id, e)
+
+    if renewed:
+        log.info("renew_pool_tokens: renewed %d/%d pooled token(s)", renewed, len(user_ids))
+    return renewed
 
 
 def _token_email(access_token: str) -> str | None:

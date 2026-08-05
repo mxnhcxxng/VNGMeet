@@ -60,6 +60,12 @@ import { usePathname } from "next/navigation";
 // Keep the browse range aligned with backend availability_days.
 const RANGE_DAYS = 16;
 const BROWSE_REFRESH_INTERVAL_MS = 2 * 60 * 1000;
+// Retries of /api/auth/me before conceding that a session is really gone. Only
+// used while Supabase still reports a session, to ride out the window where its
+// access token has lapsed but the refresh hasn't landed — that window is what made
+// the login screen flash before the app snapped back to home.
+const ME_RETRY_ATTEMPTS = 2;
+const ME_RETRY_DELAY_MS = 600;
 const ROOM_LAYOUT_COUNTS_BY_OFFICE = {
   campus: 32,
   sala: 4,
@@ -997,12 +1003,32 @@ export default function Home() {
   };
 
   const refreshMe = useCallback(async () => {
-    try {
-      setMe(await api.me());
-    } catch {
-      setMe({ authenticated: false });
-    } finally {
-      setLoading(false);
+    // /api/auth/me can 401 transiently on a cold load: the stored Supabase access
+    // token has lapsed and its refresh round-trip hasn't landed yet, so the request
+    // goes out with a stale (or no) bearer. Flipping straight to `authenticated:
+    // false` there is what made the app bounce to the login screen and then snap
+    // back to home a moment later, once TOKEN_REFRESHED arrived.
+    //
+    // So on failure, ask Supabase whether it still holds a session — getSession()
+    // forces the pending refresh — and if it does, stay on the loading skeleton and
+    // try again instead of rendering login. Bounded, so a genuinely dead session
+    // still reaches the login screen quickly and can never hang here.
+    for (let attempt = 0; ; attempt++) {
+      try {
+        setMe(await api.me());
+        setLoading(false);
+        return;
+      } catch {
+        const recoverable = supabase
+          ? Boolean((await supabase.auth.getSession()).data.session)
+          : false;
+        if (!recoverable || attempt >= ME_RETRY_ATTEMPTS) {
+          setMe({ authenticated: false });
+          setLoading(false);
+          return;
+        }
+        await new Promise((r) => setTimeout(r, ME_RETRY_DELAY_MS));
+      }
     }
   }, []);
 

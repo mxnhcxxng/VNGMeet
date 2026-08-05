@@ -93,6 +93,21 @@ async def lifespan(app: FastAPI):
             coalesce=True,
             misfire_grace_time=55,
         )
+        # Keep every OAuth user's pooled Graph token ahead of its own expiry.
+        # Without this the pool is only ever topped up reactively — by a user
+        # request, or by the availability job once the pool has already run dry —
+        # so rows sat `expired` overnight and /api/auth/me had no expiry to show.
+        # Every 5 minutes is just the polling grain; a user is only re-exchanged
+        # when their token is inside _RENEW_MARGIN, i.e. roughly once an hour.
+        scheduler.add_job(
+            _safe_renew_pool_tokens,
+            CronTrigger(minute="*/5", timezone=settings.timezone),
+            id="renew_pool_tokens",
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=240,
+        )
+        scheduler.add_job(_safe_renew_pool_tokens, "date", run_date=None)
         scheduler.add_job(_safe_refresh_from_pool, "date", run_date=None)
         scheduler.start()
         log.warning(
@@ -123,6 +138,16 @@ async def _safe_refresh_from_pool() -> None:
         await token_pool.refresh_availability_from_pool()
     except Exception as e:  # noqa: BLE001
         log.exception("refresh_availability_from_pool failed: %s", e)
+
+
+async def _safe_renew_pool_tokens() -> None:
+    """Scheduler entry point for the proactive pooled-token renewal."""
+    try:
+        from . import token_pool
+
+        await token_pool.renew_pool_tokens()
+    except Exception as e:  # noqa: BLE001
+        log.exception("renew_pool_tokens failed: %s", e)
 
 
 async def _safe_process_scheduled_bookings() -> None:
