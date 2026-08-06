@@ -17,6 +17,7 @@ Cache layout (room_availability):
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from datetime import datetime, timedelta
@@ -138,6 +139,11 @@ def _merge_attendee_ids_with_slots(existing_attendee_ids: list | None, slots: li
 # delegated /me path queries all in-use rooms at once in groups of this size.
 SCHEDULE_BATCH = 20
 
+# Rows per room_availability upsert. Each row carries three 96-element arrays, so
+# rooms x availability_days in a single request is a multi-megabyte body that both
+# stalls and occasionally times out. Chunks go up concurrently.
+UPSERT_CHUNK = 250
+
 
 async def refresh_availability_delegated(token: str) -> dict:
     """Refresh room_availability using a DELEGATED Graph token (signed-in user).
@@ -147,6 +153,15 @@ async def refresh_availability_delegated(token: str) -> dict:
     rooms' free/busy. Rooms are queried in batches (one getSchedule call per batch)
     and the returned availabilityView is sliced into per-day rows of 96 15-min
     slots. This is the only availability-refresh path.
+
+    Runs on a one-minute cron, so it MUST finish inside a minute: APScheduler is
+    configured with max_instances=1, and an overrun silently drops the next tick —
+    which is what turned this job's real-world cadence into two minutes. Hence the
+    concurrent batches, the shared HTTP connection, and the chunked upsert.
+
+    Every Supabase call here goes through asyncio.to_thread: supabase-py is
+    synchronous, and this job's payloads are large enough that running them inline
+    would block the whole event loop — including the scheduled-booking countdown.
     """
     settings = get_settings()
     if not settings.supabase_enabled:
@@ -154,12 +169,13 @@ async def refresh_availability_delegated(token: str) -> dict:
 
     from .supabase_client import get_supabase
 
+    t_start = time.perf_counter()
     tz = ZoneInfo(settings.timezone)
     today = datetime.now(tz).date()
     days = settings.availability_days
     day_list = [today + timedelta(days=i) for i in range(days)]
 
-    rooms = _in_use_rooms()
+    rooms = await asyncio.to_thread(_in_use_rooms)
     if not rooms:
         log.warning("refresh_availability_delegated: no in_use rooms found")
         return {"rooms": 0, "rows": 0, "errors": 0}
@@ -171,33 +187,49 @@ async def refresh_availability_delegated(token: str) -> dict:
     by_email = {r["email"].lower(): r for r in rooms}
     emails = [r["email"] for r in rooms]
     sb = get_supabase()
-    existing_meta = _read_existing_slot_meta(sb, room_ids, day_list)
 
-    upserts: list[dict] = []
-    errors = 0
-    now_iso = datetime.now(tz).isoformat()
+    batches = [emails[i : i + SCHEDULE_BATCH] for i in range(0, len(emails), SCHEDULE_BATCH)]
 
-    for i in range(0, len(emails), SCHEDULE_BATCH):
-        batch = emails[i : i + SCHEDULE_BATCH]
+    async def _fetch(client: httpx.AsyncClient, batch: list[str]) -> dict[str, str] | None:
         try:
-            views = await graph.get_schedule(
+            return await graph.get_schedule(
                 token,
                 batch,
                 start_iso,
                 end_iso,
                 settings.timezone,
                 settings.availability_slot_minutes,
+                client=client,
             )
         except httpx.HTTPStatusError as e:
-            errors += len(batch)
             log.warning(
                 "getSchedule(delegated) failed for %s: %s %s",
                 batch, e.response.status_code, e.response.text[:200],
             )
-            continue
         except Exception as e:  # noqa: BLE001 - one batch must not kill the rest
-            errors += len(batch)
             log.warning("getSchedule(delegated) error for %s: %s", batch, e)
+        return None
+
+    # The existing-meta read and every getSchedule batch are independent: overlap
+    # them instead of paying for them one after another.
+    async with httpx.AsyncClient(
+        timeout=60,
+        limits=httpx.Limits(max_keepalive_connections=len(batches) or 1,
+                            max_connections=max(len(batches) * 2, 4)),
+    ) as client:
+        existing_meta, *view_sets = await asyncio.gather(
+            asyncio.to_thread(_read_existing_slot_meta, sb, room_ids, day_list),
+            *(_fetch(client, b) for b in batches),
+        )
+    t_fetched = time.perf_counter()
+
+    upserts: list[dict] = []
+    errors = 0
+    now_iso = datetime.now(tz).isoformat()
+
+    for batch, views in zip(batches, view_sets):
+        if views is None:
+            errors += len(batch)
             continue
 
         for email, view in views.items():
@@ -229,14 +261,40 @@ async def refresh_availability_delegated(token: str) -> dict:
                     }
                 )
 
-    if upserts:
-        sb.table("room_availability").upsert(
-            upserts, on_conflict="room_id,date"
-        ).execute()
-    sb.table("room_availability").delete().lt("date", today.isoformat()).execute()
+    def _upsert(chunk: list[dict]) -> None:
+        sb.table("room_availability").upsert(chunk, on_conflict="room_id,date").execute()
 
-    summary = {"rooms": len(rooms), "rows": len(upserts), "errors": errors}
-    log.info("refresh_availability_delegated done: %s", summary)
+    def _prune() -> None:
+        sb.table("room_availability").delete().lt("date", today.isoformat()).execute()
+
+    chunks = [upserts[i : i + UPSERT_CHUNK] for i in range(0, len(upserts), UPSERT_CHUNK)]
+    writes = await asyncio.gather(
+        *(asyncio.to_thread(_upsert, c) for c in chunks),
+        asyncio.to_thread(_prune),
+        return_exceptions=True,
+    )
+    for outcome in writes:
+        if isinstance(outcome, BaseException):
+            errors += 1
+            log.warning("room_availability write failed: %s", outcome)
+
+    total_ms = (time.perf_counter() - t_start) * 1000
+    summary = {
+        "rooms": len(rooms),
+        "rows": len(upserts),
+        "errors": errors,
+        "fetch_ms": round((t_fetched - t_start) * 1000),
+        "total_ms": round(total_ms),
+    }
+    # WARNING, not INFO: this job has a hard one-minute budget (max_instances=1
+    # means an overrun eats the next tick), so a slow run needs to be visible.
+    if total_ms > 30_000:
+        log.warning(
+            "refresh_availability_delegated SLOW (%.1fs of its 60s budget): %s",
+            total_ms / 1000, summary,
+        )
+    else:
+        log.info("refresh_availability_delegated done: %s", summary)
     return summary
 
 

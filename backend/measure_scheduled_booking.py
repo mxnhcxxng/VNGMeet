@@ -142,14 +142,22 @@ async def _stage(tl: Timeline, sb, row: dict) -> dict:
     return item
 
 
-async def _busy_wait_to(target: datetime) -> None:
-    """The exact busy-wait from fire_scheduled_bookings: coarse sleep to ~30ms out,
-    then 1ms steps for precision."""
-    coarse = (target - datetime.now(TZ)).total_seconds() - 0.03
-    if coarse > 0:
-        await asyncio.sleep(coarse)
-    while datetime.now(TZ) < target:
-        await asyncio.sleep(0.001)
+def _busy_wait_to(target: datetime) -> None:
+    """The exact countdown from bookings._sleep_until: coarse sleep to
+    SPIN_WINDOW_SECONDS out, then a tight spin so we land within tens of us.
+
+    Blocking (not async) on purpose — in production this runs on the fire thread's
+    private event loop, which has nothing else to do.
+    """
+    target_ts = target.timestamp()
+    spin = booking_schedule.SPIN_WINDOW_SECONDS
+    while True:
+        remaining = target_ts - time.time()
+        if remaining <= spin:
+            break
+        time.sleep(min(remaining - spin, 1.0))
+    while time.time() < target_ts:
+        pass
 
 
 async def run(activity_id: str, *, real: bool, samples: int, warm: int) -> None:
@@ -185,7 +193,7 @@ async def run(activity_id: str, *, real: bool, samples: int, warm: int) -> None:
     tl.fire_instant = fire_instant
     print(f"\nsimulated fire_instant = {fire_instant.strftime('%H:%M:%S.%f')[:-3]} "
           f"(busy-waiting {(fire_instant - now).total_seconds():.2f}s)")
-    await _busy_wait_to(fire_instant)
+    _busy_wait_to(fire_instant)
     tl.mark("fire: reached fire_instant (post busy-wait)")
 
     async def one_shot() -> dict:

@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import gc
 import hashlib
+import json
+import sys
+import threading
 import time
 from datetime import date as date_cls, datetime, timedelta, timezone
 from typing import Literal
@@ -1173,13 +1177,28 @@ async def delete_booking(request: Request, booking_id: str):
 # --------------------------------------------------------------------------- #
 # Scheduled-booking midnight race: prep (warm) -> fire (00:00:00.000) -> catch-up
 # --------------------------------------------------------------------------- #
-# Populated by prepare_scheduled_bookings() ~30s before midnight and drained by
-# fire_scheduled_bookings() at the stroke of midnight. Keeping the heavy work
-# (DB read, token refresh, TLS handshake) off the 00:00:00 critical path is what
-# lets the booking POST land within a few ms of midnight instead of ~0.7s late.
+# Populated by prepare_scheduled_bookings() ~30s before midnight. Keeping the heavy
+# work (DB read, token refresh, TLS handshake, JSON serialisation) off the 00:00:00
+# critical path is what lets the booking POST leave within a few ms of the target.
+#
+# WHY A DEDICATED THREAD
+# ----------------------
+# Everything else in this process shares one asyncio event loop, and every Supabase
+# call uses the *synchronous* supabase-py client — so any of the minutely jobs can
+# block that loop for a second or more. When that happened across midnight the fire
+# job's busy-wait never got scheduled, APScheduler ran it inside its misfire grace
+# instead, `wait` came out negative, and the POST left at ~00:00:02 — losing the room.
+#
+# So prep hands the staged batch to its own OS thread with its own event loop and
+# its own httpx client. A blocked main loop can no longer delay the send: the only
+# coupling left is the GIL, which blocking socket I/O releases and which we shorten
+# via sys.setswitchinterval() for the last couple of seconds.
 _PREPARED_BOOKINGS: list[dict] = []
 _PREPARED_FOR_DATE: str | None = None
-_GRAPH_WARM_CLIENT: httpx.AsyncClient | None = None
+
+_FIRE_THREAD: threading.Thread | None = None
+_FIRE_ABORT = threading.Event()   # tells a live fire thread to stand down
+_FIRE_LOCK = threading.Lock()
 
 
 def _new_graph_client(pool_size: int) -> httpx.AsyncClient:
@@ -1214,22 +1233,24 @@ async def _warm_graph_connections(client: httpx.AsyncClient, count: int) -> None
 
 
 async def _reset_prepared_state() -> None:
-    """Drop any staged batch and close the warm client."""
-    global _PREPARED_BOOKINGS, _PREPARED_FOR_DATE, _GRAPH_WARM_CLIENT
-    if _GRAPH_WARM_CLIENT is not None:
-        try:
-            await _GRAPH_WARM_CLIENT.aclose()
-        except Exception:  # noqa: BLE001
-            pass
-    _GRAPH_WARM_CLIENT = None
+    """Drop any staged batch and stand down a fire thread that is still counting."""
+    global _PREPARED_BOOKINGS, _PREPARED_FOR_DATE, _FIRE_THREAD
+    thread = _FIRE_THREAD
+    if thread is not None and thread.is_alive():
+        _FIRE_ABORT.set()
+        # Never block the caller for long: the thread checks the flag between
+        # sleeps and closes its own client.
+        await asyncio.to_thread(thread.join, 2.0)
+    _FIRE_THREAD = None
     _PREPARED_BOOKINGS = []
     _PREPARED_FOR_DATE = None
 
 
 async def prepare_scheduled_bookings() -> int:
     """Stage the upcoming midnight's bookings: read pending rows, warm each user's
-    Graph token, pre-build the event body, and warm the HTTPS connection pool."""
-    global _PREPARED_BOOKINGS, _PREPARED_FOR_DATE, _GRAPH_WARM_CLIENT
+    Graph token, pre-serialise the exact request bytes, then hand the batch to a
+    dedicated fire thread that counts down to the send moment on its own."""
+    global _PREPARED_BOOKINGS, _PREPARED_FOR_DATE
     await _reset_prepared_state()
     if not settings.supabase_enabled:
         return 0
@@ -1278,6 +1299,8 @@ async def prepare_scheduled_bookings() -> int:
             "payload": None,
             "token": None,
             "body": None,
+            "content": None,
+            "headers": None,
             "error": None,
         }
         try:
@@ -1291,7 +1314,7 @@ async def prepare_scheduled_bookings() -> int:
             if not token:
                 raise RuntimeError("missing graph access token")
             item["token"] = token
-            item["body"] = graph.build_event_body(
+            body = graph.build_event_body(
                 payload.subject,
                 f"{payload.date}T{payload.start_time}:00",
                 f"{payload.date}T{payload.end_time}:00",
@@ -1301,6 +1324,11 @@ async def prepare_scheduled_bookings() -> int:
                 payload.attendees,
                 payload.body,
             )
+            item["body"] = body
+            # Serialise here, not at fire time: at the send moment the only work
+            # left should be handing already-encoded bytes to a warm socket.
+            item["content"] = json.dumps(body, separators=(",", ":")).encode()
+            item["headers"] = graph._event_headers(token, settings.timezone)
         except Exception as e:  # noqa: BLE001 - staging failures surface at fire time
             item["error"] = str(e)
             log.warning("prepare scheduled booking %s failed: %s", item["activity_id"], e)
@@ -1308,11 +1336,6 @@ async def prepare_scheduled_bookings() -> int:
 
     prepared = list(await asyncio.gather(*(_stage_one(row) for row in rows)))
 
-    # Warm a dedicated client + connections so midnight only pays the POST round-trip.
-    client = _new_graph_client(len(prepared))
-    await _warm_graph_connections(client, len(prepared))
-
-    _GRAPH_WARM_CLIENT = client
     _PREPARED_BOOKINGS = prepared
     _PREPARED_FOR_DATE = fire_date.isoformat()
     ready = sum(1 for p in prepared if not p["error"])
@@ -1323,7 +1346,212 @@ async def prepare_scheduled_bookings() -> int:
         _PREPARED_FOR_DATE,
         horizon_end.isoformat(),
     )
+
+    # Hand the batch to its own thread. It warms the connections, counts down and
+    # sends without ever touching this event loop.
+    _start_fire_thread(prepared, booking_schedule.next_fire_instant(now))
     return ready
+
+
+# --------------------------------------------------------------------------- #
+# The fire thread
+# --------------------------------------------------------------------------- #
+
+
+def _start_fire_thread(prepared: list[dict], fire_at: datetime) -> None:
+    """Spawn the countdown thread for one staged batch (idempotent per prep run)."""
+    global _FIRE_THREAD
+    with _FIRE_LOCK:
+        if _FIRE_THREAD is not None and _FIRE_THREAD.is_alive():
+            log.warning("_start_fire_thread: a fire thread is already running; skipping")
+            return
+        _FIRE_ABORT.clear()
+        _FIRE_THREAD = threading.Thread(
+            target=_fire_thread_main,
+            args=(prepared, fire_at),
+            name="scheduled-booking-fire",
+            daemon=True,
+        )
+        _FIRE_THREAD.start()
+    log.warning(
+        "fire thread started for %s booking(s); slot opens %s, send_lead=%dms",
+        len(prepared),
+        fire_at.isoformat(),
+        booking_schedule.SEND_LEAD_MS,
+    )
+
+
+def _fire_thread_main(prepared: list[dict], fire_at: datetime) -> None:
+    """Thread entry point: own event loop, own httpx client, own countdown."""
+    try:
+        asyncio.run(_fire_thread_async(prepared, fire_at))
+    except Exception as e:  # noqa: BLE001 - a dead thread must not kill the process
+        log.exception("fire thread crashed: %s", e)
+
+
+def _sleep_until(target_ts: float) -> bool:
+    """Block this thread until `target_ts` (Unix seconds), landing within ~50us.
+
+    Coarse-sleeps in 1s chunks so an abort is noticed quickly, then spins for the
+    final SPIN_WINDOW_SECONDS because sleep() routinely overshoots by 1-15ms and
+    that overshoot is exactly what we are trying to eliminate. Returns False if
+    the batch was aborted while waiting.
+    """
+    spin = booking_schedule.SPIN_WINDOW_SECONDS
+    while True:
+        remaining = target_ts - time.time()
+        if remaining <= spin:
+            break
+        if _FIRE_ABORT.is_set():
+            return False
+        time.sleep(min(remaining - spin, 1.0))
+    while time.time() < target_ts:
+        pass
+    return not _FIRE_ABORT.is_set()
+
+
+async def _fire_thread_async(prepared: list[dict], fire_at: datetime) -> None:
+    tz = ZoneInfo(settings.timezone)
+    fire_ts = fire_at.timestamp()
+    send_ts = fire_ts - max(0, booking_schedule.SEND_LEAD_MS) / 1000.0
+    live = [it for it in prepared if not it.get("error") and it.get("content")]
+    if not live:
+        log.warning("fire thread: nothing sendable in the staged batch; standing down")
+        await asyncio.gather(
+            *(asyncio.to_thread(
+                _finalize_booking_result,
+                {"item": it, "ok": False, "error": it.get("error") or "not staged"},
+            ) for it in prepared),
+            return_exceptions=True,
+        )
+        return
+
+    client = _new_graph_client(len(live))
+    switch_interval = sys.getswitchinterval()
+    gc_was_enabled = gc.isenabled()
+    try:
+        await _warm_graph_connections(client, len(live))
+
+        # Re-ping shortly before the send: an idle keep-alive connection can be
+        # dropped by Graph's load balancer in the 30s since prep, and paying a TLS
+        # handshake at 00:00:00 is exactly the ~300ms we cannot afford.
+        # Blocking sleeps are deliberate: this loop is private to the thread and has
+        # nothing else to run, and going through to_thread would add a cross-thread
+        # loop wake-up right at the moment we are trying to be precise.
+        if not _sleep_until(send_ts - booking_schedule.REWARM_LEAD_SECONDS):
+            log.warning("fire thread aborted before re-warm")
+            return
+        await _warm_graph_connections(client, len(live))
+
+        # Build the httpx.Request objects now so the send moment does no URL
+        # parsing, header merging or encoding.
+        url = f"{graph.GRAPH_BASE}/me/events"
+        requests = [
+            client.build_request(
+                "POST", url, headers=it["headers"], content=it["content"]
+            )
+            for it in live
+        ]
+
+        # Last two seconds: keep the GIL turning over fast and stop a gen-2
+        # collection from stalling the send.
+        sys.setswitchinterval(0.0005)
+        gc.collect()
+        gc.freeze()
+        gc.disable()
+
+        if not _sleep_until(send_ts):
+            log.warning("fire thread aborted at the send moment")
+            return
+
+        async def fire_one(item: dict, request: httpx.Request) -> dict:
+            t_send = datetime.now(tz)
+            p0 = time.perf_counter()
+            offset_ms = (t_send.timestamp() - fire_ts) * 1000
+            try:
+                resp = await client.send(request)
+                resp.raise_for_status()
+                ev = graph._event_result(resp.json())
+                dur_ms = (time.perf_counter() - p0) * 1000
+                log.warning(
+                    "scheduled booking %s POST sent %+.1fms (rel slot-open), ok in %.0fms (room=%s)",
+                    item["activity_id"],
+                    offset_ms,
+                    dur_ms,
+                    item["payload"].room_email,
+                )
+                return {"item": item, "ok": True, "event": ev,
+                        "offset_ms": offset_ms, "dur_ms": dur_ms}
+            except Exception as e:  # noqa: BLE001 - keep firing the rest of the batch
+                dur_ms = (time.perf_counter() - p0) * 1000
+                log.warning(
+                    "scheduled booking %s POST sent %+.1fms (rel slot-open), FAILED in %.0fms: %s",
+                    item["activity_id"],
+                    offset_ms,
+                    dur_ms,
+                    e,
+                )
+                return {"item": item, "ok": False, "error": str(e),
+                        "offset_ms": offset_ms, "dur_ms": dur_ms}
+
+        batch0 = time.perf_counter()
+        if len(live) == 1:
+            results = [await fire_one(live[0], requests[0])]
+        else:
+            results = list(
+                await asyncio.gather(*(fire_one(i, r) for i, r in zip(live, requests)))
+            )
+        batch_ms = (time.perf_counter() - batch0) * 1000
+
+        # Race is over — restore the runtime before touching the database.
+        gc.enable()
+        gc.unfreeze()
+        sys.setswitchinterval(switch_interval)
+
+        # Rows that never made it out still need their status flipped, or the user
+        # is left with a pending booking forever.
+        sent_ids = {id(it) for it in live}
+        for item in prepared:
+            if id(item) not in sent_ids:
+                results.append(
+                    {"item": item, "ok": False, "error": item.get("error") or "not staged"}
+                )
+
+        # Concurrent, and in worker threads: 4 sequential Supabase writes per booking
+        # used to sit on the fire path and were most of the "finished at 00:00:02".
+        finalized = await asyncio.gather(
+            *(asyncio.to_thread(_finalize_booking_result, r) for r in results),
+            return_exceptions=True,
+        )
+        for r, outcome in zip(results, finalized):
+            if isinstance(outcome, BaseException):
+                log.warning(
+                    "could not persist scheduled booking %s: %s",
+                    r["item"].get("activity_id"),
+                    outcome,
+                )
+        processed = sum(1 for o in finalized if o is True)
+        offsets = [r["offset_ms"] for r in results if "offset_ms" in r]
+        log.warning(
+            "fire thread finished: processed=%s failed=%s "
+            "(first POST %+.1fms, last POST %+.1fms, batch=%.0fms)",
+            processed,
+            len(results) - processed,
+            min(offsets) if offsets else 0.0,
+            max(offsets) if offsets else 0.0,
+            batch_ms,
+        )
+    finally:
+        # An early return (abort) must not leave the process with GC off or every
+        # object permanently frozen.
+        gc.unfreeze()
+        if gc_was_enabled and not gc.isenabled():
+            gc.enable()
+        sys.setswitchinterval(switch_interval)
+        try:
+            await client.aclose()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def _finalize_booking_result(result: dict) -> bool:
@@ -1381,114 +1609,70 @@ def _finalize_booking_result(result: dict) -> bool:
 
 
 async def fire_scheduled_bookings() -> dict:
-    """At 00:00:00.000, POST every pre-staged booking over the warm client, then
-    persist results. Falls back to the inline path if no batch was staged."""
-    tz = ZoneInfo(settings.timezone)
-    prepared = _PREPARED_BOOKINGS
-    client = _GRAPH_WARM_CLIENT
-    prepared_for = _PREPARED_FOR_DATE
+    """Watchdog, scheduled FIRE_LEAD_SECONDS before the slot opens.
 
-    # Busy-wait to the send moment. We deliberately send SEND_LEAD_MS *before* the
-    # slot opens so the request lands in the room mailbox right as it becomes
-    # bookable (the network transit is paid on the way there). The fire job is
-    # scheduled a few seconds early; coarse-sleep to ~30ms before the send moment,
-    # then 1ms steps for precision.
+    The send itself is done by the thread that prepare_scheduled_bookings() armed
+    30s earlier — deliberately NOT on this event loop, which any of the minutely
+    Supabase jobs can block for a second or more. All this job does is confirm the
+    thread is armed for tonight's batch. If prep never ran (backend restarted
+    inside the last 30s) it falls back to the inline path so the bookings still go
+    out, just without the sub-millisecond landing.
+    """
+    tz = ZoneInfo(settings.timezone)
     now = datetime.now(tz)
     fire_at = booking_schedule.next_fire_instant(now)  # slot-open instant (e.g. 00:00:00)
-    lead = timedelta(milliseconds=max(0, booking_schedule.SEND_LEAD_MS))
-    send_at = fire_at - lead
-    wait = (send_at - now).total_seconds()
-    target = send_at if 0 < wait <= 120 else None  # None => already at/past send time: fire now
-    if target is not None:
-        coarse = (target - datetime.now(tz)).total_seconds() - 0.03
-        if coarse > 0:
-            await asyncio.sleep(coarse)
-        while datetime.now(tz) < target:
-            await asyncio.sleep(0.001)
-    # Offsets are measured against the slot-open instant, so an early send shows as
-    # a NEGATIVE offset (e.g. "-59.4ms" = the POST left 59ms before the slot opened).
-    fire_instant = fire_at
-    send_moment = target or datetime.now(tz)
+    fire_date = fire_at.date()
+    thread = _FIRE_THREAD
 
-    # Match the staged batch to the calendar day the SLOT opens on — not
-    # datetime.now(), which is still the previous day when we send early.
-    today_iso = fire_at.date().isoformat()
-    if not prepared or client is None or prepared_for != today_iso:
+    if thread is not None and thread.is_alive() and _PREPARED_FOR_DATE == fire_date.isoformat():
         log.warning(
-            "fire_scheduled_bookings: no staged batch for %s (prepared_for=%s) "
-            "-> falling back to inline processing",
-            today_iso,
-            prepared_for,
+            "fire_scheduled_bookings: fire thread armed for %s with %s booking(s), "
+            "send_lead=%dms — event loop stays out of the way",
+            fire_date.isoformat(),
+            len(_PREPARED_BOOKINGS),
+            booking_schedule.SEND_LEAD_MS,
         )
-        await _reset_prepared_state()
-        return await process_scheduled_bookings()
-
-    async def fire_one(item: dict) -> dict:
-        if item.get("error") or not item.get("body"):
-            return {"item": item, "ok": False, "error": item.get("error") or "not staged"}
-        t_send = datetime.now(tz)
-        p0 = time.perf_counter()
-        offset_ms = (t_send - fire_instant).total_seconds() * 1000
-        try:
-            ev = await graph.post_event(client, item["token"], item["body"], settings.timezone)
-            dur_ms = (time.perf_counter() - p0) * 1000
-            log.warning(
-                "scheduled booking %s POST sent %+.1fms (rel slot-open), ok in %.0fms (room=%s)",
-                item["activity_id"],
-                offset_ms,
-                dur_ms,
-                item["payload"].room_email,
-            )
-            return {"item": item, "ok": True, "event": ev, "offset_ms": offset_ms, "dur_ms": dur_ms}
-        except Exception as e:  # noqa: BLE001 - keep firing the rest of the batch
-            dur_ms = (time.perf_counter() - p0) * 1000
-            log.warning(
-                "scheduled booking %s POST sent %+.1fms (rel slot-open), FAILED in %.0fms: %s",
-                item["activity_id"],
-                offset_ms,
-                dur_ms,
-                e,
-            )
-            return {"item": item, "ok": False, "error": str(e), "offset_ms": offset_ms, "dur_ms": dur_ms}
+        return {"ok": True, "delegated": True, "count": len(_PREPARED_BOOKINGS)}
 
     log.warning(
-        "fire_scheduled_bookings: firing %s booking(s), send_lead=%dms, "
-        "send_at=%s (slot opens %s)",
-        len(prepared),
-        booking_schedule.SEND_LEAD_MS,
-        send_moment.isoformat(),
-        fire_instant.isoformat(),
+        "fire_scheduled_bookings: no armed fire thread for %s (prepared_for=%s, "
+        "alive=%s) -> falling back to inline processing",
+        fire_date.isoformat(),
+        _PREPARED_FOR_DATE,
+        thread is not None and thread.is_alive(),
     )
-    batch0 = time.perf_counter()
-    results = await asyncio.gather(*(fire_one(it) for it in prepared))
-    batch_ms = (time.perf_counter() - batch0) * 1000
-
-    processed = sum(1 for r in results if _finalize_booking_result(r))
-    failed = len(results) - processed
     await _reset_prepared_state()
 
-    offsets = [r["offset_ms"] for r in results if "offset_ms" in r]
-    log.warning(
-        "fire_scheduled_bookings finished: processed=%s failed=%s "
-        "(first POST %+.1fms, last POST %+.1fms, batch=%.0fms)",
-        processed,
-        failed,
-        min(offsets) if offsets else 0.0,
-        max(offsets) if offsets else 0.0,
-        batch_ms,
-    )
-    return {"ok": True, "processed": processed, "failed": failed}
+    # Still respect the send moment rather than firing FIRE_LEAD_SECONDS early.
+    send_at = fire_at - timedelta(milliseconds=max(0, booking_schedule.SEND_LEAD_MS))
+    wait = (send_at - datetime.now(tz)).total_seconds()
+    if 0 < wait <= 120:
+        coarse = wait - 0.03
+        if coarse > 0:
+            await asyncio.sleep(coarse)
+        while datetime.now(tz) < send_at:
+            await asyncio.sleep(0.001)
+
+    # as_of must be the day the SLOT opens on, not datetime.now() — we are still on
+    # the previous calendar day here, which would shrink the horizon by one day and
+    # skip exactly the rows that just became eligible.
+    return await process_scheduled_bookings(as_of=fire_date)
 
 
-async def process_scheduled_bookings() -> dict:
-    """Book pending scheduled requests once their target date enters the live window."""
+async def process_scheduled_bookings(as_of: date_cls | None = None) -> dict:
+    """Book pending scheduled requests once their target date enters the live window.
+
+    `as_of` overrides the calendar day used to compute the live-availability
+    horizon; the fire-path fallback passes the slot-open day because it runs a few
+    hundred milliseconds before midnight.
+    """
     if not settings.supabase_enabled:
         return {"ok": False, "processed": 0, "failed": 0, "reason": "supabase_disabled"}
 
     from .supabase_client import get_supabase
 
     tz = ZoneInfo(settings.timezone)
-    today = datetime.now(tz).date()
+    today = as_of or datetime.now(tz).date()
     # The final cache day remains scheduled. Process it only after it rolls into
     # the first (availability_days - 1) live/instant days.
     horizon_end = _live_availability_horizon_end(today)

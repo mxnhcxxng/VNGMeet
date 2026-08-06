@@ -16,11 +16,16 @@ async def get_schedule(
     end_iso: str,
     timezone: str,
     interval_minutes: int,
+    client: httpx.AsyncClient | None = None,
 ) -> dict[str, str]:
     """Call /me/calendar/getSchedule and return {email: availabilityView}.
 
     availabilityView is a string of digits, one per interval:
       0 = free, 1 = tentative, 2 = busy, 3 = out-of-office, 4 = working elsewhere.
+
+    Pass `client` when issuing several batches: creating an AsyncClient per call
+    costs a fresh DNS lookup + TCP + TLS handshake to graph.microsoft.com every
+    time, which dominates the refresh job once there is more than one batch.
     """
     if not emails:
         return {}
@@ -36,10 +41,15 @@ async def get_schedule(
         "availabilityViewInterval": interval_minutes,
     }
     url = f"{GRAPH_BASE}/me/calendar/getSchedule"
-    async with httpx.AsyncClient(timeout=60) as client:
+    if client is not None:
         resp = await client.post(url, headers=headers, json=body)
         resp.raise_for_status()
         data = resp.json()
+    else:
+        async with httpx.AsyncClient(timeout=60) as owned:
+            resp = await owned.post(url, headers=headers, json=body)
+            resp.raise_for_status()
+            data = resp.json()
 
     result: dict[str, str] = {}
     for item in data.get("value", []):

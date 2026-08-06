@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -46,6 +48,10 @@ async def lifespan(app: FastAPI):
             coalesce=True,
             misfire_grace_time=55,
         )
+        # Leave the fire thread ~5s to spin up, warm and arm even if prep misfires.
+        prep_grace = max(
+            5, booking_schedule.PREP_LEAD_SECONDS - booking_schedule.FIRE_LEAD_SECONDS - 5
+        )
         prep_h, prep_m, prep_s = booking_schedule.shifted_hms(-booking_schedule.PREP_LEAD_SECONDS)
         fire_h, fire_m, fire_s = booking_schedule.shifted_hms(-booking_schedule.FIRE_LEAD_SECONDS)
         cu_h, cu_m, cu_s = booking_schedule.shifted_hms(booking_schedule.CATCHUP_DELAY_SECONDS)
@@ -55,7 +61,10 @@ async def lifespan(app: FastAPI):
             id="prepare_scheduled_bookings",
             max_instances=1,
             coalesce=True,
-            misfire_grace_time=15,
+            # Prep arming the fire thread even a few seconds late is far better than
+            # it being dropped — a dropped prep means the watchdog has to fall back
+            # to the (much less precise) inline path.
+            misfire_grace_time=prep_grace,
         )
         scheduler.add_job(
             _safe_fire_scheduled_bookings,
@@ -75,12 +84,15 @@ async def lifespan(app: FastAPI):
         )
         log.warning(
             "Scheduled-booking jobs registered (fire_time=%s, send_lead=%dms): "
-            "prep=%02d:%02d:%02d, fire=%02d:%02d:%02d, catchup=%02d:%02d:%02d",
+            "prep=%02d:%02d:%02d, fire=%02d:%02d:%02d, catchup=%02d:%02d:%02d; "
+            "other jobs blacked out from -%ds to +%ds around fire_time",
             booking_schedule.FIRE_TIME,
             booking_schedule.SEND_LEAD_MS,
             prep_h, prep_m, prep_s,
             fire_h, fire_m, fire_s,
             cu_h, cu_m, cu_s,
+            booking_schedule.BLACKOUT_LEAD_SECONDS,
+            booking_schedule.BLACKOUT_TRAIL_SECONDS,
         )
         # Runs every minute, ~30s after the :00 availability poll, so it auto-books
         # against a freshly refreshed cache. Kept a separate job so its per-scout
@@ -130,8 +142,27 @@ async def lifespan(app: FastAPI):
             scheduler.shutdown(wait=False)
 
 
+def _fire_blackout(job: str) -> bool:
+    """Skip a routine job that would otherwise start inside the midnight quiet window.
+
+    supabase-py is synchronous, so these jobs block the single event loop for as
+    long as their round-trips take — the availability refresh upserts
+    rooms x AVAILABILITY_DAYS rows in one call. Landing that on 23:59:00 or
+    00:00:00 used to starve the scheduled-booking countdown and push the POST out
+    to ~00:00:02. Each of these runs every minute or every five, so losing one
+    tick a day costs nothing.
+    """
+    now = datetime.now(ZoneInfo(settings.timezone))
+    if not booking_schedule.in_fire_blackout(now):
+        return False
+    log.warning("%s skipped: inside the scheduled-booking blackout (now=%s)", job, now.isoformat())
+    return True
+
+
 async def _safe_refresh_from_pool() -> None:
     """Scheduler entry point for the delegated token-pool refresh."""
+    if _fire_blackout("refresh_availability_from_pool"):
+        return
     try:
         from . import token_pool
 
@@ -142,6 +173,8 @@ async def _safe_refresh_from_pool() -> None:
 
 async def _safe_renew_pool_tokens() -> None:
     """Scheduler entry point for the proactive pooled-token renewal."""
+    if _fire_blackout("renew_pool_tokens"):
+        return
     try:
         from . import token_pool
 
@@ -176,6 +209,8 @@ async def _safe_fire_scheduled_bookings() -> None:
 
 async def _safe_process_room_scouts() -> None:
     """Scheduler entry point for Room Scout notifications."""
+    if _fire_blackout("process_room_scouts"):
+        return
     try:
         await process_room_scouts()
     except Exception as e:  # noqa: BLE001
