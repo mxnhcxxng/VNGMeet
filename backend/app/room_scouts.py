@@ -16,10 +16,10 @@ from pydantic import BaseModel, Field
 from . import auth, availability, graph
 from .app_context import log, settings
 from .bookings import (
-    _encrypt_scheduled_graph_token,
     _log_user_booking_activity,
     _mark_room_availability_owner,
     _release_room_availability_owner,
+    background_token_for_create,
     resolve_background_graph_token,
 )
 from .chat import _effective_capacity_size
@@ -129,11 +129,9 @@ MAIL_SEND_REQUIRED_MESSAGE = (
 
 
 def _room_scout_token_for_create(token: str | None, auth_user_id: str | None) -> str | None:
-    # Supabase/Azure users can be refreshed from provider_tokens. Manual-token
-    # users need an encrypted copy so the scheduler can send mail later.
-    if auth_user_id:
-        return None
-    return _encrypt_scheduled_graph_token(token)
+    # Cùng quy tắc với scheduled booking: OAuth để rỗng (job tự lấy token của chính
+    # user lúc chạy), luồng dán token giữ bản mã hoá vì đó là credential duy nhất.
+    return background_token_for_create(token, auth_user_id)
 
 
 def _scout_expiry(

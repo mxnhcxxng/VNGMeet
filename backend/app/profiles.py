@@ -21,6 +21,13 @@ def _update_pending_scheduled_graph_token(*args, **kwargs) -> None:
 
     update(*args, **kwargs)
 
+
+def _clear_pending_scheduled_graph_token(auth_user_id: str | None) -> None:
+    from .bookings import clear_pending_scheduled_graph_token as clear
+
+    clear(auth_user_id)
+
+
 def _profile_email(claims: dict) -> str | None:
     for key in ("email", "upn", "preferred_username", "unique_name", "name"):
         value = claims.get(key)
@@ -489,12 +496,12 @@ async def link_microsoft(
         if phone:
             claims["phone"] = phone
 
-    user_profile_id = _upsert_user_profile(claims)
-    _update_pending_scheduled_graph_token(
-        graph_token,
-        user_profile_id=user_profile_id,
-        auth_user_id=auth_user_id,
-    )
+    _upsert_user_profile(claims)
+    # Luồng OAuth KHÔNG đóng băng access token lên scheduled booking / room scout:
+    # tới lúc tác vụ chạy nó đã hết hạn. Chỉ nạp token vào pool, rồi
+    # resolve_background_graph_token lấy token của chính user khi cần. Đồng thời dọn
+    # token cũ mà các bản trước đã ghi lên row.
+    _clear_pending_scheduled_graph_token(auth_user_id)
     token_pool.save_token(auth_user_id, graph_token, user_email=_profile_email(claims))
     return {"ok": True}
 

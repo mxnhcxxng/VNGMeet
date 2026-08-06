@@ -279,7 +279,10 @@ create table if not exists user_activity (
 alter table user_activity add column if not exists auth_user_id uuid references auth.users on delete set null;
 alter table user_activity add column if not exists graph_access_token text;
 comment on column user_activity.graph_access_token is
-  'Latest encrypted Graph access token for pending scheduled bookings. Values must use fernet:<ciphertext>.';
+  'Encrypted Graph access token for pending scheduled bookings created via the '
+  'paste-token flow (auth_user_id is null). Values must use fernet:<ciphertext>. '
+  'NULL for Microsoft OAuth rows: the scheduler mints a fresh token for that user '
+  'from provider_tokens / graph_token_pool when the booking fires.';
 alter table user_activity add column if not exists subject text;
 alter table user_activity add column if not exists attendees text[] not null default '{}';
 alter table user_activity add column if not exists body text;
@@ -419,6 +422,9 @@ alter table room_scouts
   alter column scout_date set default ((now() at time zone 'Asia/Ho_Chi_Minh')::date);
 alter table room_scouts alter column scout_date set not null;
 alter table room_scouts add column if not exists graph_access_token text;
+comment on column room_scouts.graph_access_token is
+  'Same rule as user_activity.graph_access_token: encrypted token only for '
+  'paste-token scouts (auth_user_id is null), NULL for Microsoft OAuth scouts.';
 alter table room_scouts add column if not exists office text;
 alter table room_scouts add column if not exists last_notified_signature text;
 alter table room_scouts add column if not exists capacity_size text;

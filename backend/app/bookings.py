@@ -160,6 +160,25 @@ def _pooled_email_for(
     return None
 
 
+def _pooled_token_for(
+    auth_user_id: str | None, user_profile_id: str | None
+) -> str | None:
+    """Token Graph ACTIVE của CHÍNH user này trong ``graph_token_pool``, hoặc None.
+
+    Tra lần lượt theo auth_user_id → user_profiles.id → email. Pool row của luồng
+    OAuth được key bằng auth_user_id, của luồng dán token bằng user_profiles.id —
+    nên bước tra theo email là thứ nối hai key đó lại khi row nền chỉ có một trong
+    hai. KHÔNG BAO GIỜ khớp sang user khác.
+    """
+    from .token_pool import get_active_token
+
+    return (
+        (get_active_token(auth_user_id, None) if auth_user_id else None)
+        or (get_active_token(user_profile_id, None) if user_profile_id else None)
+        or get_active_token(None, _pooled_email_for(user_profile_id, auth_user_id))
+    )
+
+
 async def resolve_background_graph_token(
     auth_user_id: str | None,
     stored_encrypted: object,
@@ -168,78 +187,123 @@ async def resolve_background_graph_token(
 ) -> str:
     """Graph token cho tác vụ chạy nền (scheduled booking / room scout).
 
-    Cùng fallback với luồng đặt phòng trực tiếp (``_booking_auth_context``):
-      1) OAuth refresh qua ``get_graph_token(auth_user_id)``.
-      2) Gặp 401 (user CHƯA link Microsoft — vd profile Zalo đăng nhập bằng SĐT rồi
-         paste Graph token) → dùng token pool ACTIVE của CHÍNH user này
-         (auth_user_id → profile id → email). KHÔNG BAO GIỜ mượn token user khác.
-      3) Token đã lưu trên row lúc tạo tác vụ (paste token, có thể đã hết hạn).
+    Token được lấy TẠI LÚC CHẠY, không dùng lại token có ở lúc tạo tác vụ:
+      1) OAuth refresh qua ``get_graph_token(auth_user_id)`` — mint token mới từ
+         refresh token của chính user.
+      2) Token ACTIVE của CHÍNH user này trong token pool (auth_user_id → profile
+         id → email). KHÔNG BAO GIỜ mượn token của user khác.
+      3) Token đã mã hoá lưu trên row lúc tạo tác vụ. Chỉ luồng dán token mới có —
+         luồng OAuth cố tình để rỗng (xem ``background_token_for_create``).
 
     Ném lại 401/RuntimeError khi không còn token nào dùng được — để job đánh dấu
     booking/scout đó lỗi thay vì âm thầm bỏ qua.
     """
-    auth_user_id = str(auth_user_id or "").strip()
+    auth_user_id = str(auth_user_id or "").strip() or None
     user_profile_id = str(user_profile_id or "").strip() or None
     if auth_user_id:
         try:
             return await auth.get_graph_token(auth_user_id)
         except HTTPException as e:
+            # 401 = user CHƯA link Microsoft (vd profile Zalo đăng nhập bằng SĐT
+            # rồi dán Graph token) hoặc refresh token đã bị thu hồi.
             if e.status_code != 401:
                 raise
-            from .token_pool import get_active_token
-
-            email = _pooled_email_for(user_profile_id, auth_user_id)
-            pooled = (
-                get_active_token(auth_user_id, None)
-                or (get_active_token(user_profile_id, None) if user_profile_id else None)
-                or get_active_token(None, email)
-            )
+            pooled = _pooled_token_for(auth_user_id, user_profile_id)
             if pooled:
                 return pooled
             stored = _decrypt_scheduled_graph_token(stored_encrypted)
             if stored:
                 return stored
             raise
+    # Row của luồng dán token (không có auth_user_id). Vẫn ưu tiên pool: nếu sau đó
+    # user có đăng nhập Microsoft thì pool giữ token còn hạn của chính họ, trong khi
+    # token dán trên row đã chết từ lâu.
+    pooled = _pooled_token_for(None, user_profile_id)
+    if pooled:
+        return pooled
     stored = _decrypt_scheduled_graph_token(stored_encrypted)
     if not stored:
         raise RuntimeError("missing graph access token")
     return stored
 
 
+def background_token_for_create(
+    graph_access_token: str | None, auth_user_id: str | None
+) -> str | None:
+    """Giá trị cột ``graph_access_token`` khi TẠO tác vụ nền (scheduled booking /
+    room scout).
+
+    Luồng OAuth Microsoft: None. Tới lúc tác vụ chạy,
+    ``resolve_background_graph_token`` tự mint token mới từ refresh token / token
+    pool của chính user, nên đóng băng access token của hôm nay lên row chỉ là lưu
+    thêm một secret mà lúc cần thì đã hết hạn.
+
+    Luồng dán token: bản mã hoá của token đó — đây là credential DUY NHẤT job sẽ có.
+    """
+    if auth_user_id:
+        return None
+    return _encrypt_scheduled_graph_token(graph_access_token)
+
+
 def _update_pending_scheduled_graph_token(
     graph_access_token: str,
     *,
     user_profile_id: str | None = None,
-    auth_user_id: str | None = None,
 ) -> None:
-    """Store the latest login token on this user's pending scheduled bookings."""
-    if not settings.supabase_enabled or not graph_access_token:
+    """Đẩy token vừa dán lên các scheduled booking đang pending của luồng DÁN TOKEN.
+
+    Chỉ chạm tới row không có ``auth_user_id`` — row của luồng OAuth cố tình để
+    trống cột này và tự lấy token lúc chạy (xem ``background_token_for_create``).
+    """
+    if not settings.supabase_enabled or not graph_access_token or not user_profile_id:
         return
-    encrypted_token = _encrypt_scheduled_graph_token(graph_access_token)
+    try:
+        from .supabase_client import get_supabase
+
+        (
+            get_supabase()
+            .table("user_activity")
+            .update({"graph_access_token": _encrypt_scheduled_graph_token(graph_access_token)})
+            .eq("booking_type", "scheduled")
+            .eq("status", "pending")
+            .eq("user_id", user_profile_id)
+            .is_("auth_user_id", "null")
+            .execute()
+        )
+    except Exception as e:  # noqa: BLE001 - token mirroring must not block login
+        log.warning("could not update pending scheduled booking token: %s", e)
+
+
+def clear_pending_scheduled_graph_token(auth_user_id: str | None) -> None:
+    """Xoá token đã đóng băng trên các tác vụ nền đang chờ của một user OAuth.
+
+    Gọi khi user đăng nhập Microsoft: từ nay tác vụ tự lấy token lúc chạy, nên bản
+    sao trên row vừa thừa vừa là secret chết. Best-effort, không được chặn login.
+    """
+    auth_user_id = str(auth_user_id or "").strip()
+    if not settings.supabase_enabled or not auth_user_id:
+        return
     try:
         from .supabase_client import get_supabase
 
         sb = get_supabase()
-        if auth_user_id:
-            (
-                sb.table("user_activity")
-                .update({"graph_access_token": encrypted_token})
-                .eq("booking_type", "scheduled")
-                .eq("status", "pending")
-                .eq("auth_user_id", auth_user_id)
-                .execute()
-            )
-        if user_profile_id:
-            (
-                sb.table("user_activity")
-                .update({"graph_access_token": encrypted_token})
-                .eq("booking_type", "scheduled")
-                .eq("status", "pending")
-                .eq("user_id", user_profile_id)
-                .execute()
-            )
-    except Exception as e:  # noqa: BLE001 - token mirroring must not block login
-        log.warning("could not update pending scheduled booking token: %s", e)
+        (
+            sb.table("user_activity")
+            .update({"graph_access_token": None})
+            .eq("booking_type", "scheduled")
+            .eq("status", "pending")
+            .eq("auth_user_id", auth_user_id)
+            .execute()
+        )
+        (
+            sb.table("room_scouts")
+            .update({"graph_access_token": None})
+            .eq("status", "active")
+            .eq("auth_user_id", auth_user_id)
+            .execute()
+        )
+    except Exception as e:  # noqa: BLE001 - cleanup must not block login
+        log.warning("could not clear pending background task token: %s", e)
 
 
 def _set_active_booking(user_profile_id: str | None, active: bool) -> None:
@@ -411,8 +475,10 @@ def _create_pending_scheduled_booking(
                 {
                     "user_id": user_profile_id,
                     "auth_user_id": auth_user_id,
-                    "graph_access_token": _encrypt_scheduled_graph_token(
-                        graph_access_token
+                    # Luồng OAuth để rỗng: lúc booking chạy sẽ tự lấy token của
+                    # chính user từ refresh token / token pool.
+                    "graph_access_token": background_token_for_create(
+                        graph_access_token, auth_user_id
                     ),
                     "room_email": payload.room_email,
                     "room_name": payload.room_name,
