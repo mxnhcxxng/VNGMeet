@@ -312,6 +312,23 @@ def verify_bearer(token: str) -> dict:
     return verify_jwt(token)   # Supabase JWT (HS256 secret hoặc ES256/RS256 qua JWKS)
 
 
+def is_zalo_session_request(request) -> bool:
+    """True nếu request đến từ Mini App (session JWT do chính BE ký).
+
+    Dựa trên CHỮ KÝ + claim `iss`, không dựa vào Origin — `https://h5.zdn.vn` là
+    origin dùng chung của mọi Zalo Mini App nên không bao giờ là ranh giới tin cậy.
+    Chỉ dùng để chọn HÌNH THỨC dữ liệu trả về cho client cũ, không dùng để phân
+    quyền.
+    """
+    bearer = request.headers.get("Authorization", "")
+    if not bearer.startswith("Bearer "):
+        return False   # web cookie flow / Supabase JWT
+    try:
+        return _verify_zalo_session(bearer[len("Bearer ") :]) is not None
+    except Exception:  # noqa: BLE001 - nhận diện client không được làm hỏng request
+        return False
+
+
 # --------------------------------------------------------------------------- #
 # Supabase: provider (Graph) refresh-token storage
 # --------------------------------------------------------------------------- #

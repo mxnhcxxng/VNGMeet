@@ -20,7 +20,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from datetime import datetime, timedelta
+from datetime import date as date_cls, datetime, time as time_cls, timedelta
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -52,6 +52,51 @@ def should_sync_calendar(profile_id: str | None, force: bool = False) -> bool:
         return False
     _last_calendar_sync[profile_id] = now
     return True
+
+
+# --------------------------------------------------------------------------- #
+# Room-usage lifecycle
+# --------------------------------------------------------------------------- #
+# Once the room mailbox accepts an invite (status "success") the room's OWN
+# free/busy — which this module already refreshes every minute — is the only
+# signal that says what happened next. Outlook flips the room's *response* to
+# "declined" both when it auto-releases an un-checked-in booking and when someone
+# checks out early, so the response alone cannot tell those apart. The release
+# time can: what distinguishes the cases is WHEN the room first stops holding the
+# slot, relative to the meeting's own start.
+#
+#   released before start                     -> canceled  (canceled_outlook)
+#   released within AUTO_RELEASE_MINUTES      -> canceled  (canceled_outlook)
+#   released on the first check past that     -> canceled  (room_auto_canceled)
+#   released later, still before end_time     -> finished  ("finished_at HH:MM")
+#   still held at end_time                    -> finished  ("finished_at <end>")
+#
+# Statuses this reconcile owns. A row leaves the set for good once it lands on a
+# terminal status, so the per-minute scan stays small.
+USAGE_STATUSES = ("success", "ongoing")
+
+# How long Outlook lets an un-checked-in booking hold the room before releasing it.
+AUTO_RELEASE_MINUTES = 15
+
+# Slack after the auto-release mark in which a release still reads as
+# "the room let it go", not "the meeting ended early". Wide enough that a dropped
+# cron tick (this job has a hard one-minute budget) doesn't reclassify a no-show
+# as an early finish.
+AUTO_RELEASE_DETECT_MINUTES = 5
+
+# Same propagation guard the calendar sync uses: a booking whose event Graph has
+# not published to the room's free/busy yet must not read as released. Measured
+# from max(created_at, processed_at) — processed_at is stamped both when a
+# scheduled booking fires and when the calendar sync promotes a row to `success`,
+# so the grace always covers the moment this reconcile took the row over.
+USAGE_GRACE_MINUTES = 5
+
+# How far back to sweep rows that never reached a terminal status (server restart,
+# a missed tick, or the midnight scheduled-booking blackout). Older rows are left
+# alone — room_availability is pruned daily, so there is nothing left to verify
+# them against and rewriting months of history on the first run would be worse
+# than leaving it.
+USAGE_SWEEP_DAYS = 7
 
 
 def _av_char_to_status(ch: str, *, scheduled_day: bool = False) -> int:
@@ -224,6 +269,9 @@ async def refresh_availability_delegated(token: str) -> dict:
     t_fetched = time.perf_counter()
 
     upserts: list[dict] = []
+    # This tick's room free/busy, keyed (room_id, date) — handed to the room-usage
+    # reconcile so it verifies bookings against exactly what was just fetched.
+    room_slots: dict[tuple[str, str], list[int]] = {}
     errors = 0
     now_iso = datetime.now(tz).isoformat()
 
@@ -247,6 +295,7 @@ async def refresh_availability_delegated(token: str) -> dict:
                 if len(slots) < SLOTS_PER_DAY:
                     pad_value = -1 if scheduled_day else 0
                     slots += [pad_value] * (SLOTS_PER_DAY - len(slots))
+                room_slots[(room["id"], day.isoformat())] = slots
                 meta = existing_meta.get((room["id"], day.isoformat())) or {}
                 slot_owner_ids = _merge_owner_ids_with_slots(meta.get("owner"), slots)
                 slot_attendee_ids = _merge_attendee_ids_with_slots(meta.get("attendees"), slots)
@@ -278,11 +327,29 @@ async def refresh_availability_delegated(token: str) -> dict:
             errors += 1
             log.warning("room_availability write failed: %s", outcome)
 
+    # Read the fresh room free/busy back into booking history: accepted bookings
+    # become ongoing / finished / canceled here, once a minute, for every user.
+    # Best-effort — the availability cache is this job's real contract.
+    usage: dict[str, int] = {}
+    try:
+        usage = await asyncio.to_thread(
+            _reconcile_room_usage,
+            sb,
+            tz,
+            room_slots,
+            {email: room["id"] for email, room in by_email.items()},
+            (today - timedelta(days=USAGE_SWEEP_DAYS)).isoformat(),
+            day_list[-1].isoformat(),
+        )
+    except Exception as e:  # noqa: BLE001 - history must not break the cache refresh
+        log.warning("reconcile_room_usage skipped: %s", e)
+
     total_ms = (time.perf_counter() - t_start) * 1000
     summary = {
         "rooms": len(rooms),
         "rows": len(upserts),
         "errors": errors,
+        "usage": usage,
         "fetch_ms": round((t_fetched - t_start) * 1000),
         "total_ms": round(total_ms),
     }
@@ -340,6 +407,178 @@ def _time_to_slot_index(time_value: str | None) -> int | None:
         return None
     idx = hour * 4 + minute // 15
     return idx if 0 <= idx < SLOTS_PER_DAY else None
+
+
+def _end_time_to_slot_bound(time_value: str | None) -> int | None:
+    """"HH:MM" -> EXCLUSIVE 15-min slot bound (first slot after the booking).
+
+    Rounds up, so a booking ending 14:50 still counts the 14:45 slot as its own.
+    "24:00" maps to SLOTS_PER_DAY (ran to midnight).
+    """
+    if not time_value:
+        return None
+    try:
+        hour, minute = (int(p) for p in str(time_value).split(":")[:2])
+    except (TypeError, ValueError):
+        return None
+    bound = hour * 4 + (minute + 14) // 15
+    return bound if 1 <= bound <= SLOTS_PER_DAY else None
+
+
+def _local_dt(day: date_cls, time_value: str, tz: ZoneInfo) -> datetime | None:
+    """(date, "HH:MM") -> tz-aware local datetime; "24:00" rolls to next midnight."""
+    try:
+        hour, minute = (int(p) for p in str(time_value).split(":")[:2])
+    except (TypeError, ValueError):
+        return None
+    if hour == 24 and minute == 0:
+        return datetime.combine(day + timedelta(days=1), time_cls(0, 0), tzinfo=tz)
+    if not (0 <= hour < 24 and 0 <= minute < 60):
+        return None
+    return datetime.combine(day, time_cls(hour, minute), tzinfo=tz)
+
+
+def _reconcile_room_usage(
+    sb,
+    tz: ZoneInfo,
+    room_slots: dict[tuple[str, str], list[int]],
+    room_id_by_email: dict[str, str],
+    sweep_from: str,
+    window_end: str,
+) -> dict:
+    """Drive accepted bookings through the room-usage lifecycle from room free/busy.
+
+    Runs inside the one-minute availability job, against the slot arrays that job
+    just wrote — so a room releasing a slot is picked up within a minute, for every
+    user, instead of whenever the organizer next happens to open the app.
+
+    `room_slots` is keyed (room_id, "YYYY-MM-DD") and holds this tick's freshly
+    fetched arrays. A room missing from it was not polled this tick (its
+    getSchedule batch failed, or the room is no longer in use), which is unknown —
+    not "released" — so its rows are left untouched.
+
+    Synchronous by design: supabase-py is blocking and the caller runs this in a
+    worker thread.
+    """
+    now = datetime.now(tz)
+    today = now.date()
+    cutoff = now - timedelta(minutes=USAGE_GRACE_MINUTES)
+
+    rows = (
+        sb.table("user_activity")
+        .select(
+            "id, room_email, date, start_time, end_time, status, "
+            "graph_event_id, created_at, processed_at"
+        )
+        .in_("status", list(USAGE_STATUSES))
+        .gte("date", sweep_from)
+        .lte("date", window_end)
+        .execute()
+        .data
+        or []
+    )
+
+    # row id -> {"status", "note"}; note None means "leave the column alone".
+    updates: dict[str, dict] = {}
+    for r in rows:
+        row_id = r.get("id")
+        if not row_id or not r.get("graph_event_id"):
+            continue  # nothing on the calendar to verify against
+        date_str = str(r.get("date") or "")
+        start_time = str(r.get("start_time") or "")[:5]
+        end_time = str(r.get("end_time") or "")[:5]
+        try:
+            day = date_cls.fromisoformat(date_str)
+        except ValueError:
+            continue
+        start_idx = _time_to_slot_index(start_time)
+        end_bound = _end_time_to_slot_bound(end_time)
+        start_dt = _local_dt(day, start_time, tz)
+        end_dt = _local_dt(day, end_time, tz)
+        if (
+            start_idx is None
+            or end_bound is None
+            or end_bound <= start_idx
+            or start_dt is None
+            or end_dt is None
+        ):
+            continue
+
+        # Past days: room_availability has been pruned, so nothing is left to check.
+        # Close the row out and flag in the note that the outcome was inferred.
+        if day < today:
+            updates[row_id] = {
+                "status": "finished",
+                "note": f"finished_unverified {end_time}",
+            }
+            continue
+
+        room_id = room_id_by_email.get((r.get("room_email") or "").strip().lower())
+        slots = room_slots.get((room_id, date_str)) if room_id else None
+        if slots is None:
+            continue  # room not polled this tick -> unknown, never assume released
+        # 1 = busy. 0 and -1 are both free (-1 marks the still-scheduled final day).
+        held = any(slots[i] == 1 for i in range(start_idx, min(end_bound, len(slots))))
+
+        if held:
+            if now >= end_dt:
+                # Ran to its end with the room still holding it: used in full.
+                updates[row_id] = {"status": "finished", "note": f"finished_at {end_time}"}
+            elif now >= start_dt and r.get("status") != "ongoing":
+                updates[row_id] = {"status": "ongoing", "note": None}
+            continue
+
+        # The room no longer holds any of the booking's slots.
+        stamps = [
+            s
+            for s in (
+                _parse_iso_aware(r.get("created_at")),
+                _parse_iso_aware(r.get("processed_at")),
+            )
+            if s is not None
+        ]
+        if stamps and max(stamps) > cutoff:
+            continue  # too fresh to trust as released (Graph propagation lag)
+
+        auto_release_at = start_dt + timedelta(minutes=AUTO_RELEASE_MINUTES)
+        if now < auto_release_at:
+            # Gone before Outlook could have auto-released it -> the meeting itself
+            # was cancelled (in Outlook, or by whoever owned the event).
+            updates[row_id] = {"status": "canceled", "note": "canceled_outlook"}
+        elif now < auto_release_at + timedelta(minutes=AUTO_RELEASE_DETECT_MINUTES):
+            # First check past the auto-release mark: nobody ever checked in.
+            updates[row_id] = {"status": "canceled", "note": "room_auto_canceled"}
+        elif now < end_dt:
+            # Held past check-in, released before end_time -> checked out early.
+            updates[row_id] = {
+                "status": "finished",
+                "note": f"finished_at {now.strftime('%H:%M')}",
+            }
+        elif r.get("status") == "ongoing":
+            # Seen in use, then the event was gone by the time we looked again.
+            updates[row_id] = {
+                "status": "finished",
+                "note": f"finished_unverified {end_time}",
+            }
+        else:
+            # Never observed in use and gone by end_time: released at some point we
+            # did not watch (missed ticks / downtime). Cancelled, moment unknown.
+            updates[row_id] = {"status": "canceled", "note": "canceled_unverified"}
+
+    # Group identical outcomes so a batch of rows costs one UPDATE, not one each.
+    grouped: dict[tuple[str, str | None], list[str]] = {}
+    for row_id, upd in updates.items():
+        grouped.setdefault((upd["status"], upd["note"]), []).append(row_id)
+    counts: dict[str, int] = {}
+    for (status, note), ids in grouped.items():
+        payload: dict = {"status": status}
+        if note is not None:
+            payload["note"] = note
+        sb.table("user_activity").update(payload).in_("id", ids).execute()
+        counts[status] = counts.get(status, 0) + len(ids)
+    if counts:
+        log.info("reconcile_room_usage applied: %s", counts)
+    return counts
 
 
 def _profile_ids_by_email(sb, emails: set[str]) -> dict[str, str]:
@@ -689,11 +928,20 @@ async def sync_my_calendar(
             upserts, on_conflict="room_id,date"
         ).execute()
 
-    # 3) Reconcile booking-history rows against the live calendar, by start slot:
-    #      - room accepted      -> promote pending/ok to success (success stays success)
+    # 3) Reconcile booking-history rows against the live calendar, by start slot.
+    #    This step only decides whether the room EVER granted the booking:
+    #      - room accepted      -> promote pending/ok to success
     #      - room still awaiting -> keep pending / keep ok (never downgrade)
     #      - room declined       -> failed (room_declined)
     #      - event gone          -> canceled (grace-gated; see below)
+    #    Everything that happens to a booking AFTER the room accepted it (used,
+    #    checked out early, auto-released, cancelled in Outlook) is deliberately NOT
+    #    decided here: a `success` row's status belongs to _reconcile_room_usage,
+    #    which watches the room's own free/busy every minute. This function only runs
+    #    when its user opens the app, and by then Outlook reports an auto-released or
+    #    checked-out room the same way it reports a genuine rejection ("declined") —
+    #    which is exactly how normal room usage used to land in history as `failed`.
+    #    Declined `success` rows still get their orphaned event cleaned up below.
     #    Only rows with a real graph_event_id are touched, so scheduled bookings that
     #    haven't fired yet (pending, no event) are left alone. Using the slot (not
     #    graph_event_id matching) avoids id-encoding mismatches. Rooms not in_use
@@ -705,7 +953,7 @@ async def sync_my_calendar(
                 sb.table("user_activity")
                 .select("id, room_email, date, start_time, status, graph_event_id, created_at, processed_at")
                 .eq("user_id", me)
-                .in_("status", ["ok", "pending", "success"])
+                .in_("status", ["ok", "pending", "success", "ongoing"])
                 .gte("date", window_dates[0])
                 .lte("date", window_dates[-1])
                 .execute()
@@ -713,8 +961,9 @@ async def sync_my_calendar(
                 or []
             )
             # Grace period: a just-created/just-fired event may not be in calendarView
-            # yet (Graph propagation lag). processed_at covers scheduled bookings that
-            # fired into a real event only at midnight, long after created_at. The
+            # yet (Graph propagation lag). processed_at covers rows advanced long after
+            # created_at — a scheduled booking that fired into a real event only at
+            # midnight, or a row promoted to success by this very function. The
             # grace gates ONLY the "canceled" transition (the destructive one); accept
             # / decline outcomes are sticky and may apply immediately.
             cutoff = datetime.now(tz) - timedelta(minutes=5)
@@ -731,15 +980,21 @@ async def sync_my_calendar(
                     continue  # can't verify -> leave as-is
                 key = (room_id, str(r.get("date")), start_idx)
                 cur = r.get("status")
+                # A row the room already accepted is owned by the room-usage
+                # reconcile from here on; this pass must not restate its outcome.
+                settled = cur in ("success", "ongoing")
                 if key in mine_owner_now:
                     # Alive (accepted or awaiting). Promote pending/ok->success on
                     # accept; never downgrade a confirmed success.
                     if key in mine_accepted_now and cur in ("pending", "ok"):
                         success_ids.append(r["id"])
                 elif key in mine_declined_now:
-                    declined_ids.append(r["id"])
+                    # Always clean up the orphaned event (see the delete loop below),
+                    # but only call it a failure while the room had yet to accept.
                     declined_event_ids.append(r["graph_event_id"])
-                else:
+                    if not settled:
+                        declined_ids.append(r["id"])
+                elif not settled:
                     # Event no longer on the calendar -> canceled, unless too fresh.
                     stamps = [
                         s
@@ -753,29 +1008,42 @@ async def sync_my_calendar(
                         continue  # too fresh to trust as deleted (propagation lag)
                     cancel_ids.append(r["id"])
             if success_ids:
-                sb.table("user_activity").update({"status": "success"}).in_(
-                    "id", success_ids
-                ).execute()
+                # Stamp the promotion. processed_at is this row's "backend last
+                # advanced it" marker, and it is what gives _reconcile_room_usage
+                # its propagation grace: the moment a row becomes `success` that
+                # reconcile starts judging it by the room's getSchedule free/busy,
+                # which is a different Graph surface from the calendarView that
+                # just reported the accept. Without this stamp a row promoted long
+                # after it was created — a Room Scout booking re-checked cycle
+                # after cycle — would be graded on the very next minute tick with
+                # no grace at all, and one lagging free/busy read would cancel a
+                # perfectly good booking.
+                sb.table("user_activity").update(
+                    {"status": "success", "processed_at": now_iso}
+                ).in_("id", success_ids).execute()
                 promoted = len(success_ids)
             if cancel_ids:
-                sb.table("user_activity").update({"status": "canceled"}).in_(
-                    "id", cancel_ids
-                ).execute()
+                sb.table("user_activity").update(
+                    {"status": "canceled", "note": "canceled_outlook"}
+                ).in_("id", cancel_ids).execute()
                 canceled = len(cancel_ids)
+            # A declined room leaves an orphaned event (now with no room) sitting on
+            # the organizer's Outlook calendar. Cancel it for real via Graph so the
+            # user isn't left with dead meetings to clean up. This runs for released
+            # rooms too (an accepted booking that was auto-released or checked out
+            # reads as "declined" here), even though those rows' statuses belong to
+            # the room-usage reconcile. Best-effort per event — a Graph hiccup must
+            # not block the status flip, and delete_event already treats 404 as OK.
+            for ev_id in declined_event_ids:
+                try:
+                    await graph.delete_event(token, ev_id)
+                except Exception as e:  # noqa: BLE001 - status flip must still apply
+                    log.warning(
+                        "sync_my_calendar: could not delete declined event %s: %s",
+                        ev_id, e,
+                    )
             if declined_ids:
-                # The room rejected the invite, leaving an orphaned event (now with no
-                # room) sitting on the organizer's Outlook calendar. Cancel it for real
-                # via Graph so the user isn't left with dead meetings to clean up, then
-                # mark the row failed. Best-effort per event — a Graph hiccup must not
-                # block the status flip, and delete_event already treats 404 as success.
-                for ev_id in declined_event_ids:
-                    try:
-                        await graph.delete_event(token, ev_id)
-                    except Exception as e:  # noqa: BLE001 - status flip must still apply
-                        log.warning(
-                            "sync_my_calendar: could not delete declined event %s: %s",
-                            ev_id, e,
-                        )
+                # Declined before the room ever accepted -> the booking really failed.
                 sb.table("user_activity").update(
                     {"status": "failed", "error_message": "room_declined"}
                 ).in_("id", declined_ids).execute()

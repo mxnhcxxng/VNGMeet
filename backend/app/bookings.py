@@ -34,11 +34,53 @@ from .profiles import (
 )
 from .room_resources import (
     _availability_slot_index,
+    _profile_email_by_id,
     _room_metadata,
     _sync_calendar_after_response,
 )
 
 router = APIRouter()
+
+# Booking statuses that still represent a live reservation: the room is (or may yet
+# be) held, so the row can be cancelled/edited and counts as "upcoming". "ongoing"
+# is a meeting in progress — still cancellable, unlike the terminal "finished".
+# See availability._reconcile_room_usage for the full lifecycle.
+ACTIVE_BOOKING_STATUSES = ("ok", "pending", "success", "ongoing")
+
+# Terminal statuses: the reservation is over, nothing left to change on it.
+CLOSED_BOOKING_STATUSES = ("failed", "canceled", "finished")
+
+# --------------------------------------------------------------------------- #
+# TEMPORARY — Mini App backwards compatibility
+# --------------------------------------------------------------------------- #
+# The Zalo Mini App live in production predates the room-usage lifecycle and only
+# knows ok/pending/success/failed/canceled. Its status chip is a lookup with a
+# `?? STATUS_META.pending` fallback, so an unknown status renders as "Đang chờ" —
+# a finished meeting would read as still waiting for the room. A Mini App release
+# has to clear Zalo's review before it can ship, so the backend cannot assume the
+# client moved with it.
+#
+# Both new statuses mean "the room was secured and the booking is real", which is
+# exactly what `success` meant to the old client, so collapsing them restores the
+# pre-change behaviour precisely: a used-in-full meeting used to sit at `success`
+# forever. canceled/failed are untouched — the old client already renders those.
+#
+# Scope: display only, Mini App callers only (identified by the signed session
+# JWT, not by Origin). The DB and the web app keep the real status.
+#
+# REMOVE THIS, together with the commented-out `ongoing`/`finished` entries in
+# miniapp/src/{types.ts,pages/history.tsx,components/meeting-detail.tsx,
+# services/i18n.ts}, once the Mini App build that understands them is live.
+LEGACY_MINIAPP_STATUS = {"ongoing": "success", "finished": "success"}
+
+
+def _apply_legacy_miniapp_status(rows: list[dict]) -> None:
+    """Rewrite new statuses to their pre-lifecycle equivalent, in place."""
+    for row in rows:
+        legacy = LEGACY_MINIAPP_STATUS.get(row.get("status"))
+        if legacy:
+            row["status"] = legacy
+
 
 def _log_user_booking_activity(
     user_profile_id: str | None,
@@ -737,6 +779,10 @@ async def list_my_bookings(request: Request, background_tasks: BackgroundTasks):
         r["image"] = (meta or {}).get("thumbnail_link")
         r["office"] = (meta or {}).get("office")
         r["map"] = (meta or {}).get("map_link")
+    # TEMPORARY: see LEGACY_MINIAPP_STATUS. The live Mini App build cannot render
+    # ongoing/finished yet, so it keeps seeing the pre-lifecycle statuses.
+    if auth.is_zalo_session_request(request):
+        _apply_legacy_miniapp_status(rows)
     return {"bookings": rows}
 
 
@@ -765,8 +811,9 @@ async def upcoming_booking(request: Request):
     được phòng) và gần nhất trong tương lai. Trả {"event": null} nếu không có —
     frontend sẽ ẩn hẳn section 'Lịch sắp tới'.
 
-    - success = status ∈ {"ok", "success"} (instant/scheduled dùng "ok", room
-      scout dùng "success"). Bỏ "pending"/"failed"/"canceled".
+    - success = status ∈ {"ok", "success", "ongoing"} (instant/scheduled dùng "ok",
+      room scout dùng "success", "ongoing" là cuộc đang diễn ra). Bỏ
+      "pending"/"failed"/"canceled"/"finished".
     - "trong tương lai" = còn diễn ra: date ở tương lai, hoặc hôm nay nhưng chưa
       kết thúc (end_time > giờ hiện tại) nên cuộc họp đang diễn ra vẫn hiện.
     - Ảnh nền + location lấy từ meeting_room_metadata (thumbnail_link, floor/building).
@@ -799,7 +846,7 @@ async def upcoming_booking(request: Request):
             "booking_type, method, subject, status, attendees, body"
         )
         .eq("user_id", user_profile_id)
-        .in_("status", ["ok", "success"])
+        .in_("status", ["ok", "success", "ongoing"])
         .gte("date", today)
         .order("date", desc=False)
         .order("start_time", desc=False)
@@ -927,8 +974,9 @@ async def create_booking(request: Request, payload: BookingRequest):
         raise
 
     # Start as "pending" (yellow): the event exists, but the room mailbox processes
-    # the invite asynchronously. The calendar sync promotes this to "ok" once the
-    # room accepts, or to "failed" (room_declined) if it declines.
+    # the invite asynchronously. The calendar sync promotes this to "success" once
+    # the room accepts, or to "failed" (room_declined) if it declines. ("ok" is not
+    # part of this path — only a fired scheduled booking passes through it.)
     _log_user_booking_activity(
         user_profile_id,
         payload,
@@ -1002,6 +1050,8 @@ async def update_booking(request: Request, booking_id: str, payload: UpdateBooki
     row = _fetch_own_booking(user_profile_id, booking_id)
     if row.get("status") == "failed":
         raise HTTPException(400, "Không thể sửa booking đã thất bại.")
+    if row.get("status") == "finished":
+        raise HTTPException(400, "Không thể sửa booking đã kết thúc.")
 
     # Resolve the new values, falling back to the existing ones.
     new_date = (payload.date or row["date"]).strip()
@@ -1135,7 +1185,7 @@ async def delete_booking(request: Request, booking_id: str):
 
     row = _fetch_own_booking(user_profile_id, booking_id)
     is_scheduled = _booking_type_for_db(row.get("booking_type") or "") == "scheduled"
-    is_active = row.get("status") in ("ok", "pending", "success")
+    is_active = row.get("status") in ACTIVE_BOOKING_STATUSES
     event_id = (row.get("graph_event_id") or "").strip()
 
     # Actually on the calendar → cancel the real event first. A real event exists
@@ -1150,16 +1200,17 @@ async def delete_booking(request: Request, booking_id: str):
 
     from .supabase_client import get_supabase
 
-    # Keep the history row — just mark it canceled instead of deleting it.
+    # Keep the history row — just mark it canceled instead of deleting it. The note
+    # records who ended it, so this is never confused with a room auto-release.
     try:
         get_supabase().table("user_activity").update(
-            {"status": "canceled"}
+            {"status": "canceled", "note": "canceled_by_user"}
         ).eq("id", booking_id).eq("user_id", user_profile_id).execute()
     except Exception as e:  # noqa: BLE001
         raise HTTPException(500, f"Could not cancel booking: {e}")
 
     # Release the slots this booking occupied in the availability cache.
-    if row.get("status") in ("ok", "pending", "success"):
+    if is_active:
         _release_room_availability_owner(
             user_profile_id,
             row["room_email"],
@@ -1790,3 +1841,119 @@ async def process_scheduled_bookings(as_of: date_cls | None = None) -> dict:
         failed,
     )
     return {"ok": True, "processed": processed, "failed": failed}
+
+
+# How many organizers' calendars the response catch-up syncs at once. Each
+# sync_my_calendar is a Graph calendarView call plus a room_availability upsert, and
+# supabase-py is synchronous — a wide fan-out here would just queue on the GIL. This
+# runs once a day with no user traffic, so a modest width is plenty.
+RESPONSE_CATCHUP_CONCURRENCY = 3
+
+
+async def catchup_scheduled_booking_responses(as_of: date_cls | None = None) -> dict:
+    """Promote fired scheduled bookings past "ok" without waiting for their owner.
+
+    A scheduled booking lands on the calendar at FIRE_TIME with status "ok" and then
+    stops moving: the only code that reads the room's answer is
+    availability.sync_my_calendar, which needs the ORGANIZER's delegated token and so
+    only ever runs off that user's own requests. A booking fired at midnight
+    therefore reads "Chờ phản hồi" until its owner next opens the app — overnight,
+    all night, and forever for a Zalo user who never linked Microsoft.
+
+    This mints each owner's own token the same way the midnight fire does
+    (resolve_background_graph_token — never borrows another user's) and runs the
+    existing sync for them, so the promotion path is the proven one: no guessing at
+    the room's answer from free/busy. It only looks at scheduled bookings, because
+    "ok" is written nowhere else.
+
+    Idempotent: a user with nothing left to reconcile just costs one Graph call.
+    """
+    if not settings.supabase_enabled:
+        return {"ok": False, "users": 0, "reason": "supabase_disabled"}
+
+    from .supabase_client import get_supabase
+
+    sb = get_supabase()
+    tz = ZoneInfo(settings.timezone)
+    today = as_of or datetime.now(tz).date()
+
+    rows = (
+        sb.table("user_activity")
+        .select("id, user_id, auth_user_id, graph_access_token, graph_event_id, date")
+        .eq("booking_type", "scheduled")
+        .eq("status", "ok")
+        .gte("date", today.isoformat())
+        .execute()
+        .data
+        or []
+    )
+
+    # One sync per OWNER, not per booking: sync_my_calendar reconciles every row that
+    # user has in the availability window in a single pass.
+    by_owner: dict[str, dict] = {}
+    for row in rows:
+        if not row.get("graph_event_id"):
+            continue  # not actually on the calendar yet -> nothing to read a response from
+        owner = str(row.get("user_id") or "").strip()
+        if not owner:
+            continue
+        entry = by_owner.setdefault(
+            owner, {"auth_user_id": None, "graph_access_token": None, "bookings": 0}
+        )
+        entry["bookings"] += 1
+        # The paste-token flow stores its credential per row; keep the first non-empty
+        # of each so the token resolver has every fallback available.
+        if not entry["auth_user_id"] and row.get("auth_user_id"):
+            entry["auth_user_id"] = str(row["auth_user_id"])
+        if not entry["graph_access_token"] and row.get("graph_access_token"):
+            entry["graph_access_token"] = row["graph_access_token"]
+
+    if not by_owner:
+        log.warning("catchup_scheduled_booking_responses: no fired bookings awaiting a room response")
+        return {"ok": True, "users": 0, "synced": 0, "skipped": 0}
+
+    email_by_owner = _profile_email_by_id(sb, set(by_owner))
+    sem = asyncio.Semaphore(RESPONSE_CATCHUP_CONCURRENCY)
+
+    async def sync_one(user_profile_id: str, entry: dict) -> bool:
+        async with sem:
+            try:
+                token = await resolve_background_graph_token(
+                    entry["auth_user_id"],
+                    entry["graph_access_token"],
+                    user_profile_id=user_profile_id,
+                )
+            except Exception as e:  # noqa: BLE001 - one owner must not stop the rest
+                # Usually a user who never linked Microsoft, or a revoked refresh
+                # token. Their rows stay "ok" until they open the app themselves.
+                log.warning(
+                    "response catch-up: no usable token for %s (%s booking(s)): %s",
+                    user_profile_id, entry["bookings"], e,
+                )
+                return False
+            try:
+                summary = await availability.sync_my_calendar(
+                    token, user_profile_id, email_by_owner.get(user_profile_id)
+                )
+                log.info("response catch-up synced %s: %s", user_profile_id, summary)
+                return True
+            except Exception as e:  # noqa: BLE001
+                log.warning("response catch-up sync failed for %s: %s", user_profile_id, e)
+                return False
+
+    log.warning(
+        "catchup_scheduled_booking_responses: syncing %s owner(s) of %s fired booking(s)",
+        len(by_owner), sum(e["bookings"] for e in by_owner.values()),
+    )
+    results = await asyncio.gather(
+        *(sync_one(pid, entry) for pid, entry in by_owner.items())
+    )
+    synced = sum(results)
+    summary = {
+        "ok": True,
+        "users": len(by_owner),
+        "synced": synced,
+        "skipped": len(results) - synced,
+    }
+    log.warning("catchup_scheduled_booking_responses finished: %s", summary)
+    return summary

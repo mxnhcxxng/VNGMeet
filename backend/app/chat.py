@@ -2034,7 +2034,7 @@ async def _tool_list_bookings(
         )
         .eq("user_id", user_profile_id)
         .gte("date", today)
-        .in_("status", ["ok", "pending", "success"])
+        .in_("status", ["ok", "pending", "success", "ongoing"])
         .order("date", desc=False)
         .order("start_time", desc=False)
         .limit(50)

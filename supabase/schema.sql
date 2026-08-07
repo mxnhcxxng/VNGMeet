@@ -268,13 +268,16 @@ create table if not exists user_activity (
   body text,
   status text not null,
   error_message text,
+  note text,
   graph_event_id text,
   web_link text,
   processed_at timestamptz,
   created_at timestamptz not null default now(),
   constraint user_activity_booking_type_check check (booking_type in ('instant', 'scheduled', 'scout')),
   constraint user_activity_method_check check (method in ('manual', 'chatbot')),
-  constraint user_activity_status_check check (status in ('ok', 'failed', 'pending', 'canceled', 'success'))
+  constraint user_activity_status_check check (
+    status in ('ok', 'failed', 'pending', 'canceled', 'success', 'ongoing', 'finished')
+  )
 );
 alter table user_activity add column if not exists auth_user_id uuid references auth.users on delete set null;
 alter table user_activity add column if not exists graph_access_token text;
@@ -289,6 +292,12 @@ alter table user_activity add column if not exists body text;
 alter table user_activity add column if not exists graph_event_id text;
 alter table user_activity add column if not exists web_link text;
 alter table user_activity add column if not exists processed_at timestamptz;
+alter table user_activity add column if not exists note text;
+comment on column user_activity.note is
+  'Backend-only diagnostic breadcrumb for the room-usage lifecycle (see '
+  'availability._reconcile_room_usage). Machine-readable English codes, never '
+  'shown in the UI: canceled_outlook | room_auto_canceled | canceled_by_user | '
+  'canceled_unverified | "finished_at HH:MM" | "finished_unverified HH:MM".';
 alter table user_activity alter column attendees set default '{}';
 update user_activity set attendees = '{}' where attendees is null;
 alter table user_activity alter column attendees set not null;
@@ -302,12 +311,20 @@ alter table user_activity
 alter table user_activity
   drop constraint if exists user_activity_status_check;
 alter table user_activity
-  add constraint user_activity_status_check check (status in ('ok', 'failed', 'pending', 'canceled', 'success'));
+  add constraint user_activity_status_check check (
+    status in ('ok', 'failed', 'pending', 'canceled', 'success', 'ongoing', 'finished')
+  );
 create index if not exists idx_user_activity_user_created_at
   on user_activity (user_id, created_at desc);
 create index if not exists idx_user_activity_scheduled_pending
   on user_activity (status, date, created_at)
   where booking_type = 'scheduled';
+-- The one-minute room-usage reconcile scans exactly this: rows the room accepted
+-- (or that are running) inside the availability window. Partial so it stays tiny —
+-- rows leave it as soon as they reach a terminal status.
+create index if not exists idx_user_activity_room_usage
+  on user_activity (date, status)
+  where status in ('success', 'ongoing');
 alter table user_activity enable row level security;
 
 -- Phòng yêu thích (client tự quản qua anon key + RLS).

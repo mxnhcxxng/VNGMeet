@@ -162,7 +162,17 @@ export interface Booking {
   subject?: string | null;
   attendees?: string[] | null;
   body?: string | null;
-  status: "ok" | "failed" | "pending" | "canceled" | "success";
+  // Room-usage lifecycle (backend availability._reconcile_room_usage):
+  // pending -> ok -> success -> ongoing -> finished, with canceled/failed as the
+  // other terminal outcomes.
+  status:
+    | "ok"
+    | "failed"
+    | "pending"
+    | "canceled"
+    | "success"
+    | "ongoing"
+    | "finished";
   web_link?: string | null;
   created_at: string;
 }

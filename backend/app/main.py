@@ -13,6 +13,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from . import booking_schedule
 from .app_context import log, settings
 from .bookings import (
+    catchup_scheduled_booking_responses,
     fire_scheduled_bookings,
     prepare_scheduled_bookings,
     process_scheduled_bookings,
@@ -55,6 +56,9 @@ async def lifespan(app: FastAPI):
         prep_h, prep_m, prep_s = booking_schedule.shifted_hms(-booking_schedule.PREP_LEAD_SECONDS)
         fire_h, fire_m, fire_s = booking_schedule.shifted_hms(-booking_schedule.FIRE_LEAD_SECONDS)
         cu_h, cu_m, cu_s = booking_schedule.shifted_hms(booking_schedule.CATCHUP_DELAY_SECONDS)
+        rc_h, rc_m, rc_s = booking_schedule.shifted_hms(
+            booking_schedule.RESPONSE_CATCHUP_DELAY_SECONDS
+        )
         scheduler.add_job(
             _safe_prepare_scheduled_bookings,
             CronTrigger(hour=prep_h, minute=prep_m, second=prep_s, timezone=settings.timezone),
@@ -82,15 +86,29 @@ async def lifespan(app: FastAPI):
             coalesce=True,
             misfire_grace_time=600,
         )
+        # Once a day, right after the bookings land: read each organizer's own
+        # calendar so a fired booking moves off "ok" (-> success, or failed if the
+        # room declined) without waiting for that user to open the app. Only
+        # scheduled bookings ever hold "ok", so a single daily pass covers it.
+        scheduler.add_job(
+            _safe_catchup_scheduled_booking_responses,
+            CronTrigger(hour=rc_h, minute=rc_m, second=rc_s, timezone=settings.timezone),
+            id="catchup_scheduled_booking_responses",
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=600,
+        )
         log.warning(
             "Scheduled-booking jobs registered (fire_time=%s, send_lead=%dms): "
-            "prep=%02d:%02d:%02d, fire=%02d:%02d:%02d, catchup=%02d:%02d:%02d; "
+            "prep=%02d:%02d:%02d, fire=%02d:%02d:%02d, catchup=%02d:%02d:%02d, "
+            "response_catchup=%02d:%02d:%02d; "
             "other jobs blacked out from -%ds to +%ds around fire_time",
             booking_schedule.FIRE_TIME,
             booking_schedule.SEND_LEAD_MS,
             prep_h, prep_m, prep_s,
             fire_h, fire_m, fire_s,
             cu_h, cu_m, cu_s,
+            rc_h, rc_m, rc_s,
             booking_schedule.BLACKOUT_LEAD_SECONDS,
             booking_schedule.BLACKOUT_TRAIL_SECONDS,
         )
@@ -205,6 +223,14 @@ async def _safe_fire_scheduled_bookings() -> None:
         await fire_scheduled_bookings()
     except Exception as e:  # noqa: BLE001
         log.exception("fire_scheduled_bookings failed: %s", e)
+
+
+async def _safe_catchup_scheduled_booking_responses() -> None:
+    """Scheduler entry point: read the room's answer for last night's bookings."""
+    try:
+        await catchup_scheduled_booking_responses()
+    except Exception as e:  # noqa: BLE001
+        log.exception("catchup_scheduled_booking_responses failed: %s", e)
 
 
 async def _safe_process_room_scouts() -> None:

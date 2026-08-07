@@ -26,6 +26,9 @@ const STATUS_CHIP: Record<
   success: { labelKey: "status.success", className: "history-chip--success" },
   ok: { labelKey: "status.awaiting", className: "history-chip--pending" },
   pending: { labelKey: "status.pending", className: "history-chip--pending" },
+  // Tạm comment cùng BookingStatus trong types.ts — xem chú thích ở đó.
+  // ongoing: { labelKey: "status.ongoing", className: "history-chip--success" },
+  // finished: { labelKey: "status.finished", className: "history-chip--canceled" },
   failed: { labelKey: "status.failed", className: "history-chip--failed" },
   canceled: { labelKey: "status.canceled", className: "history-chip--canceled" },
 };

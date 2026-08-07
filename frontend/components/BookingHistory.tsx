@@ -42,6 +42,10 @@ const STATUS_COLOR: Record<
   success: "success",
   ok: "warning",
   pending: "warning",
+  // A meeting in progress reads as live-and-well, same as a confirmed booking.
+  // Once it's over there is nothing to act on, so it drops to neutral.
+  ongoing: "success",
+  finished: "default",
   failed: "danger",
   canceled: "default",
 };
@@ -50,6 +54,8 @@ const STATUS_LABEL_KEY: Record<Booking["status"], TranslationKey> = {
   success: "bh.statusSuccess",
   ok: "bh.statusAwaiting",
   pending: "bh.statusPending",
+  ongoing: "bh.statusOngoing",
+  finished: "bh.statusFinished",
   failed: "bh.statusFailed",
   canceled: "bh.statusCanceled",
 };
@@ -199,6 +205,8 @@ export function BookingHistory() {
     { value: "success", label: t("bh.statusSuccess") },
     { value: "ok", label: t("bh.statusAwaiting") },
     { value: "pending", label: t("bh.statusPending") },
+    { value: "ongoing", label: t("bh.statusOngoing") },
+    { value: "finished", label: t("bh.statusFinished") },
     { value: "failed", label: t("bh.statusFailed") },
     { value: "canceled", label: t("bh.statusCanceled") },
   ];
@@ -673,6 +681,7 @@ export function BookingHistory() {
                           const actionsDisabled =
                             b.status === "failed" ||
                             b.status === "canceled" ||
+                            b.status === "finished" ||
                             isPastBooking(b);
                           return (
                         <div className="flex items-center gap-1">

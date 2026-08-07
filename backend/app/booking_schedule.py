@@ -45,6 +45,17 @@ PREP_LEAD_SECONDS = 30       # prep runs this long BEFORE FIRE_TIME
 FIRE_LEAD_SECONDS = 3        # fire job is scheduled this long BEFORE FIRE_TIME, then busy-waits
 CATCHUP_DELAY_SECONDS = 120  # catch-up runs this long AFTER FIRE_TIME
 
+# When the room-RESPONSE catch-up runs (also after FIRE_TIME). A fired booking sits
+# at "ok" until someone reads the organizer's calendar and sees the room's answer,
+# and only the organizer's own delegated token can do that — so without this pass a
+# booking stays "ok" until its owner next opens the app.
+#
+# MUST stay above CATCHUP_DELAY_SECONDS: the booking catch-up can still be creating
+# events at +120s, and a booking it rescues is only readable as "ok" after that. Both
+# jobs also carry a 600s misfire grace, so after a restart across midnight APScheduler
+# may run them in either order — the gap is what keeps this one second.
+RESPONSE_CATCHUP_DELAY_SECONDS = 180
+
 # Send the POST this many milliseconds BEFORE FIRE_TIME so our meeting-request
 # LANDS in the room mailbox right as the slot opens. The room is grabbed by the
 # order requests arrive in ITS mailbox, not by when our POST returns — and the
@@ -57,11 +68,18 @@ CATCHUP_DELAY_SECONDS = 120  # catch-up runs this long AFTER FIRE_TIME
 # So the lead should cover that whole pipeline (~450-500ms), not just network
 # transit. Measured evidence (one sample): the room's RBA evaluates asynchronously
 # ~8s later and checks the booking-window policy at THAT time, so landing the
-# invite a little early appears safe. This is UNVERIFIED at real midnight under
-# contention — sweep leads (0/150/300/450/600) at the 14-day edge and watch the
-# room's accepted/declined + status.time to find the real safe ceiling before
-# trusting a large value. 0 disables early sending (fire exactly at FIRE_TIME).
-SEND_LEAD_MS = 100
+# invite a little early appears safe. 0 disables early sending (fire exactly at
+# FIRE_TIME).
+#
+# Currently 1000ms: the invite lands roughly half a second BEFORE the slot opens.
+# This is deliberately past the 0-600ms range the original sweep proposed, and the
+# safe ceiling is still UNVERIFIED at real midnight under contention. The failure
+# mode to watch for is the room DECLINING at the far edge of its booking window
+# (e.g. a 14-day-out booking evaluated while it is still 14 days + 0.5s out).
+# If declines start showing up at the window edge but not at nearer dates, that is
+# this value — walk it back toward 450. Watch the room's accepted/declined and
+# status.time on bookings for the furthest bookable day.
+SEND_LEAD_MS = 1000
 
 # Quiet window around FIRE_TIME in which the OTHER background jobs (availability
 # refresh, pool-token renewal, room scouts) refuse to start.
