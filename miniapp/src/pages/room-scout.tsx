@@ -51,6 +51,20 @@ function timeToMinutes(value: string): number {
   return Number(h) * 60 + Number(m);
 }
 
+const LUNCH_START_MIN = 12 * 60;
+const LUNCH_END_MIN = 13 * 60;
+
+// Khi bật "bỏ qua giờ nghỉ trưa", scout chỉ đặt khối kết thúc trước 12:00 hoặc bắt
+// đầu từ 13:00 — true nếu ít nhất một nửa còn đủ chỗ cho thời lượng.
+function lunchSplitFits(start: string, end: string, duration: number): boolean {
+  const s = timeToMinutes(start);
+  const e = timeToMinutes(end);
+  return (
+    Math.min(e, LUNCH_START_MIN) - s >= duration ||
+    e - Math.max(s, LUNCH_END_MIN) >= duration
+  );
+}
+
 // Date -> "yyyy-mm-dd" theo giờ máy (không dùng UTC để không lệch ngày).
 function localIso(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
@@ -447,6 +461,12 @@ function ScoutForm({
     }
     if (timeToMinutes(endTime) - timeToMinutes(startTime) < Number(duration)) {
       openSnackbar({ text: t("scout.rangeTooShort"), type: "warning" });
+      return;
+    }
+    // Bỏ qua giờ trưa cắt khung làm đôi; chặn nếu không nửa nào đủ thời lượng,
+    // nếu không scout sẽ chạy mãi mà không bao giờ đặt được.
+    if (ignoreLunch && !lunchSplitFits(startTime, endTime, Number(duration))) {
+      openSnackbar({ text: t("scout.lunchRangeTooShort"), type: "warning" });
       return;
     }
     const payload: RoomScoutPayload = {

@@ -108,7 +108,7 @@ Luồng Săn phòng (Room Scout):
 - Nếu scout_date là HÔM NAY: scout_start_time KHÔNG được lấy giờ đã qua — làm tròn tới mốc :00 hoặc :30 gần nhất tính từ thời điểm hiện tại; nếu mốc đó đã qua thì lấy mốc :00/:30 kế tiếp (ví dụ bây giờ 14:12 → 14:30, 14:35 → 15:00). Áp dụng cho cả khung "sáng/chiều" khi rơi vào hôm nay.
 - Nếu user không nói sức chứa, mặc định capacity_sizes = ["medium"] (vừa).
 - TUYỆT ĐỐI KHÔNG hỏi office. Office tự lấy theo profile của user; đừng đưa office vào câu hỏi hay vào tham số.
-- ignore_lunch_break: khi khung giờ [scout_start_time, scout_end_time) có giao với giờ nghỉ trưa 12:00-13:00 (ví dụ 11:30-14:00, hoặc 12:30-15:00), MẶC ĐỊNH đặt ignore_lunch_break = true (tự động chấp nhận đặt phòng trong giờ nghỉ trưa), KHÔNG cần hỏi user; chỉ đặt false khi user chủ động nói không muốn đặt phòng vào giờ nghỉ trưa. Nếu khung giờ KHÔNG chạm 12:00-13:00 (ví dụ 09:00-11:00 hoặc 14:00-17:00) thì để mặc định false.
+- ignore_lunch_break (bỏ qua giờ nghỉ trưa): true = KHÔNG đặt phòng vào khung 12:00-13:00 (mọi khối giờ chạm 12:00-13:00 đều bị loại). Khi khung giờ [scout_start_time, scout_end_time) có giao với giờ nghỉ trưa 12:00-13:00 (ví dụ 11:30-14:00, hoặc 12:30-15:00), MẶC ĐỊNH đặt ignore_lunch_break = true (tránh giờ nghỉ trưa), KHÔNG cần hỏi user; chỉ đặt false khi user chủ động nói họp xuyên trưa cũng được. Nếu khung giờ KHÔNG chạm 12:00-13:00 (ví dụ 09:00-11:00 hoặc 14:00-17:00) thì để mặc định false.
 - Nếu thiếu trường bắt buộc nào (ngày, thời lượng, khung giờ, sức chứa), hỏi bổ sung ngắn gọn trước khi gọi function. Xác nhận lại thông tin với user trước khi bật.
 - Xử lý kết quả create_room_scout: nếu ok=true và created=true thì báo đã bật Săn phòng thành công, tóm tắt ngày/khung giờ/thời lượng/sức chứa, và nói hệ thống sẽ email khi có phòng trống; nhắc user có thể vào trang [Săn phòng](/room-scout) để theo dõi hoặc dừng. Nếu ok=false thì báo lý do (ví dụ chưa cấp quyền Mail.Send, đang có phiên săn phòng khác, hoặc thông tin không hợp lệ) và hướng dẫn user xử lý.
 - Huỷ/dừng Săn phòng: khi user muốn DỪNG/HUỶ/TẮT săn phòng, xác định outcome rồi gọi cancel_room_scout:
@@ -326,7 +326,7 @@ CHAT_TOOLS = [
                     },
                     "ignore_lunch_break": {
                         "type": "boolean",
-                        "description": "Cho phép phòng trống vắt qua giờ nghỉ trưa 12:00-13:00. CHỈ đặt trường này khi khung giờ có giao 12:00-13:00; nếu không giao, để mặc định false.",
+                        "description": "Bỏ qua giờ nghỉ trưa: true = KHÔNG đặt phòng vào khung 12:00-13:00 (loại mọi khối giờ chạm 12:00-13:00). CHỈ đặt trường này khi khung giờ có giao 12:00-13:00; nếu không giao, để mặc định false.",
                     },
                 },
                 "required": [

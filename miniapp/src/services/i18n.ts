@@ -269,6 +269,8 @@ const en = {
   "scout.chooseDuration": "Please choose a duration.",
   "scout.chooseCapacity": "Please choose a capacity.",
   "scout.rangeTooShort": "Scout range must be at least as long as the duration.",
+  "scout.lunchRangeTooShort":
+    "Skipping the lunch break leaves no slot long enough. Widen the range or uncheck the lunch option.",
   // Snackbars
   "scout.started": "Scouting started",
   "scout.startedDesc": "We'll book a room as soon as a match appears.",
@@ -555,6 +557,8 @@ const vi: Partial<Record<TranslationKey, string>> = {
   "scout.chooseDuration": "Vui lòng chọn thời lượng.",
   "scout.chooseCapacity": "Vui lòng chọn sức chứa.",
   "scout.rangeTooShort": "Khung giờ tìm phòng phải dài ít nhất bằng thời lượng.",
+  "scout.lunchRangeTooShort":
+    "Bỏ qua giờ nghỉ trưa thì không còn khung nào đủ dài. Hãy mở rộng khung giờ hoặc bỏ chọn tuỳ chọn giờ trưa.",
   // Snackbar
   "scout.started": "Đã bắt đầu săn phòng",
   "scout.startedDesc": "Chúng tôi sẽ đặt phòng ngay khi tìm được phòng phù hợp.",

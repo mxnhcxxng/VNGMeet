@@ -47,6 +47,7 @@ class RoomScoutRequest(BaseModel):
     )
     scout_start_time: str | None = None  # "HH:MM"
     scout_end_time: str | None = None  # "HH:MM"
+    # "Bỏ qua giờ nghỉ trưa": true = không đặt phòng vào khung 12:00-13:00.
     ignore_lunch_break: bool = False
     office: str | None = None
 
@@ -169,6 +170,32 @@ def _scout_expiry(
     return scout_end
 
 
+LUNCH_START_MIN = 12 * 60  # 12:00
+LUNCH_END_MIN = 13 * 60  # 13:00
+
+
+def _lunch_slots() -> range:
+    """Slot indices covering 12:00-13:00 — [48, 52) at 15-min granularity."""
+    avail = settings.availability_slot_minutes
+    return range(LUNCH_START_MIN // avail, LUNCH_END_MIN // avail)
+
+
+def _apply_lunch_break(slots: list, skip_lunch: bool) -> list:
+    """Copy of `slots` with the lunch window marked busy when the scout opted to
+    skip it.
+
+    `ignore_lunch_break` means "bỏ qua giờ nghỉ trưa": the scout must not land on
+    a block that touches 12:00-13:00. Marking those slots busy is enough — both
+    `_has_free_block` and `_earliest_free_block` only accept all-free runs, so no
+    candidate block can span or start inside lunch any more."""
+    if not skip_lunch:
+        return list(slots)
+    blocked = list(slots)
+    for idx in _lunch_slots():
+        blocked[idx] = 1
+    return blocked
+
+
 def _has_free_block(slots: list, scan_start: int, scan_end: int, duration_slots: int) -> bool:
     """True when there's a free (all-zero) block of `duration_slots` consecutive
     slots somewhere inside [scan_start, scan_end)."""
@@ -237,10 +264,7 @@ def _available_room_scout_matches(sb, scout: dict, day: str) -> tuple[list[dict]
     if not rooms:
         return [], start_time, end_time
 
-    # Lunch break 12:00-13:00 → slot indices [48, 52) at 15-min granularity.
-    ignore_lunch = bool(scout.get("ignore_lunch_break"))
-    avail = settings.availability_slot_minutes
-    lunch_slots = range((12 * 60) // avail, (13 * 60) // avail)
+    skip_lunch = bool(scout.get("ignore_lunch_break"))
 
     cache = _read_availability_cache(sb, [r["id"] for r in rooms], [day])
     matches: list[dict] = []
@@ -249,11 +273,7 @@ def _available_room_scout_matches(sb, scout: dict, day: str) -> tuple[list[dict]
         slots = row.get("slots") if row else []
         if len(slots) != availability.SLOTS_PER_DAY:
             continue
-        if ignore_lunch:
-            # Treat the lunch window as free/skippable so a block may span it.
-            slots = list(slots)
-            for idx in lunch_slots:
-                slots[idx] = 0
+        slots = _apply_lunch_break(slots, skip_lunch)
         if _has_free_block(slots, scan_start, scan_end, duration_slots):
             matches.append(room)
     return matches, start_time, end_time
@@ -450,7 +470,6 @@ async def process_room_scouts() -> dict:
         if room_id and start_idx is not None and end_idx is not None:
             reserved.get((room_id, day), set()).difference_update(range(start_idx, end_idx))
 
-    lunch_slots = range((12 * 60) // avail, (13 * 60) // avail)
     booked = 0
     pending = 0
     errors = 0
@@ -529,16 +548,14 @@ async def process_room_scouts() -> dict:
 
             rooms = _scout_rooms_in_browse_order(sb, scout)
             cache = _read_availability_cache(sb, [r["id"] for r in rooms], [scout_day]) if rooms else {}
-            ignore_lunch = bool(scout.get("ignore_lunch_break"))
+            skip_lunch = bool(scout.get("ignore_lunch_break"))
             outcome = None
             for room in rooms:
                 row = cache.get((room["id"], scout_day))
                 slots = list(row.get("slots") or []) if row else []
                 if len(slots) != availability.SLOTS_PER_DAY:
                     continue
-                if ignore_lunch:
-                    for idx in lunch_slots:
-                        slots[idx] = 0
+                slots = _apply_lunch_break(slots, skip_lunch)
                 block = _earliest_free_block(
                     slots, scan_start, scan_end, duration_slots,
                     reserved.get((room["id"], scout_day)),

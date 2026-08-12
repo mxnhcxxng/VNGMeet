@@ -87,6 +87,20 @@ function timeToMinutes(value: string) {
   return Number(h) * 60 + Number(m);
 }
 
+const LUNCH_START_MIN = 12 * 60;
+const LUNCH_END_MIN = 13 * 60;
+
+// With "skip lunch" on, the scout only books blocks that end by 12:00 or start at
+// 13:00 — true when at least one of those halves still fits the duration.
+function lunchSplitFits(start: string, end: string, duration: number) {
+  const s = timeToMinutes(start);
+  const e = timeToMinutes(end);
+  return (
+    Math.min(e, LUNCH_START_MIN) - s >= duration ||
+    e - Math.max(s, LUNCH_END_MIN) >= duration
+  );
+}
+
 function formatLocalDate(value: Date) {
   return [
     value.getFullYear(),
@@ -675,6 +689,12 @@ function ScoutForm({
     }
     if (timeToMinutes(endTime) - timeToMinutes(startTime) < Number(duration)) {
       toast.warning(t("scout.rangeTooShort"));
+      return;
+    }
+    // Skipping lunch cuts the range in two; block the scout when neither half can
+    // hold the duration, otherwise it would run forever without ever booking.
+    if (ignoreLunch && !lunchSplitFits(startTime, endTime, Number(duration))) {
+      toast.warning(t("scout.lunchRangeTooShort"));
       return;
     }
     // The backend keeps the scout alive until its `expires_at`: the scout's
