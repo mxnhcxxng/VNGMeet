@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import html
 from datetime import date as date_cls, datetime, timedelta, timezone
@@ -19,7 +18,9 @@ from .bookings import (
     _log_user_booking_activity,
     _mark_room_availability_owner,
     _release_room_availability_owner,
+    SCOUT_SYNC_OFFSETS_SECONDS,
     background_token_for_create,
+    poll_booking_room_response,
     resolve_background_graph_token,
 )
 from .chat import _effective_capacity_size
@@ -29,10 +30,13 @@ from .room_resources import _read_availability_cache, _require_auth
 
 router = APIRouter()
 
-# After booking a scout room we poll the room's accept/decline response by syncing
-# the organizer's calendar a few times; auto-accept rooms usually answer in seconds.
-SCOUT_SYNC_TRIES = 3
-SCOUT_SYNC_DELAY_SECONDS = 4
+# After booking a scout room we poll the room's accept/decline response with
+# bookings.poll_booking_room_response. That poll is shared with every other booking
+# path now; the scout is just the one caller that AWAITS it, because its next step
+# (notify the user, or move on to the next candidate room) depends on the answer —
+# which is also why it stays on the short SCOUT_SYNC_OFFSETS_SECONDS burst instead
+# of the 90-second schedule the detached re-check uses.
+
 
 class RoomScoutRequest(BaseModel):
     scout_date: date_cls | None = None
@@ -382,39 +386,6 @@ def _scout_rooms_in_browse_order(sb, scout: dict) -> list[dict]:
     return rooms
 
 
-async def _poll_scout_room_response(
-    token: str, user_profile_id: str | None, email: str, activity_id: str, sb
-) -> str:
-    """Confirmation state of the scout booking `activity_id`: 'success' (room
-    accepted), 'failed' (declined), or 'pending' (no answer yet).
-
-    Syncs the organizer's calendar up to SCOUT_SYNC_TRIES times — sync_my_calendar
-    reconciles the booking row (accept -> success, decline -> failed + delete).
-    """
-    for attempt in range(SCOUT_SYNC_TRIES):
-        try:
-            await availability.sync_my_calendar(token, user_profile_id, email)
-        except Exception as e:  # noqa: BLE001 - a sync hiccup shouldn't abort the scout
-            log.warning("scout sync_my_calendar failed: %s", e)
-        rows = (
-            sb.table("user_activity")
-            .select("status")
-            .eq("id", activity_id)
-            .limit(1)
-            .execute()
-            .data
-            or []
-        )
-        status = rows[0].get("status") if rows else None
-        if status == "success":
-            return "success"
-        if status == "failed":
-            return "failed"
-        if attempt < SCOUT_SYNC_TRIES - 1:
-            await asyncio.sleep(SCOUT_SYNC_DELAY_SECONDS)
-    return "pending"
-
-
 async def process_room_scouts() -> dict:
     if not settings.supabase_enabled:
         raise RuntimeError("Supabase not configured; cannot process room scouts.")
@@ -518,8 +489,9 @@ async def process_room_scouts() -> dict:
                     a_e = ((a_end_min + avail - 1) // avail) if a_end_min is not None else None
                     # Hold it up front so a later overlapping scout can't take it.
                     _reserve(a_room_id, a_day, a_s, a_e)
-                    status = await _poll_scout_room_response(
-                        token, user_profile_id, scout["email"], pending_id, sb
+                    status = await poll_booking_room_response(
+                        token, user_profile_id, scout["email"], pending_id, sb,
+                        offsets=SCOUT_SYNC_OFFSETS_SECONDS,
                     )
                     if status == "success":
                         sb.table("room_scouts").update(
@@ -606,8 +578,9 @@ async def process_room_scouts() -> dict:
                     ).eq("id", scout_id).execute()
 
                 status = (
-                    await _poll_scout_room_response(
-                        token, user_profile_id, scout["email"], activity_id, sb
+                    await poll_booking_room_response(
+                        token, user_profile_id, scout["email"], activity_id, sb,
+                        offsets=SCOUT_SYNC_OFFSETS_SECONDS,
                     )
                     if activity_id
                     else "pending"

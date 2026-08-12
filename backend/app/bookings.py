@@ -889,6 +889,129 @@ async def upcoming_booking(request: Request):
     }
 
 
+# --------------------------------------------------------------------------- #
+# Post-booking room-response re-check
+# --------------------------------------------------------------------------- #
+# An instant booking is logged as "pending": the event is on the organizer's
+# calendar, but the room mailbox processes the invite asynchronously. The only
+# code that reads the room's answer is availability.sync_my_calendar, and that
+# only ever runs off its OWN owner's requests (grid load, history list, the bot's
+# list_bookings) — so a booking made from the Zalo bot, after which the user never
+# opens the app, sat at "Chờ phản hồi" indefinitely. The daily response catch-up
+# does not cover it either: that job only looks at scheduled bookings on "ok".
+#
+# The WEB app used to cover this from the browser: ChatPanel.syncAfterBooking
+# re-fetched the grid with sync=force at 15/45/90s, and each of those forced a
+# sync_my_calendar (see room_resources.availability_grid). Driving it from a client
+# meant it only ever ran for someone sitting in the web chat — the Zalo bot has no
+# browser to run the timers, and the Mini App chat never got an equivalent. Those
+# timers are gone; this is the same three checks, server-side, for every path.
+#
+# Offsets are measured from the moment the invite went to Microsoft. There is no
+# t=0 check on purpose: the room mailbox cannot have answered an invite that was
+# sent milliseconds ago, and Graph has not necessarily published the new event to
+# calendarView yet either, so that pass could only ever come back "pending".
+# Anything still unanswered after the third check stays "pending" and is picked up
+# by the owner's next app request, exactly as before.
+POST_BOOK_SYNC_OFFSETS_SECONDS = (15, 45, 90)
+
+# Room Scout AWAITS its three checks inside the per-minute cron, so it cannot sit
+# on the schedule above — one scout would eat the whole tick. It keeps the tight
+# burst it has always used, and re-checks anything still pending next cycle anyway.
+SCOUT_SYNC_OFFSETS_SECONDS = (0, 4, 8)
+
+
+async def poll_booking_room_response(
+    token: str,
+    user_profile_id: str | None,
+    email: str | None,
+    activity_id: str,
+    sb=None,
+    offsets: tuple[int, ...] = POST_BOOK_SYNC_OFFSETS_SECONDS,
+) -> str:
+    """Confirmation state of booking `activity_id`: 'success' (room accepted),
+    'failed' (declined), or 'pending' (no answer within the poll window).
+
+    Syncs the organizer's calendar at each of `offsets` seconds after the booking —
+    sync_my_calendar reconciles the booking row (accept -> success, decline ->
+    failed + delete the orphaned event) — re-reading the row after each pass and
+    stopping as soon as the room has answered.
+    """
+    if sb is None:
+        from .supabase_client import get_supabase
+
+        sb = get_supabase()
+    elapsed = 0
+    for offset in offsets:
+        if offset > elapsed:
+            await asyncio.sleep(offset - elapsed)
+            elapsed = offset
+        try:
+            await availability.sync_my_calendar(token, user_profile_id, email)
+        except Exception as e:  # noqa: BLE001 - a sync hiccup shouldn't abort the poll
+            log.warning("post-booking sync_my_calendar failed: %s", e)
+        rows = (
+            sb.table("user_activity")
+            .select("status")
+            .eq("id", activity_id)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+        status = rows[0].get("status") if rows else None
+        if status in ("success", "failed"):
+            return status
+    return "pending"
+
+
+# Strong references to in-flight re-checks. asyncio only keeps a weak reference to
+# a running task, so a fire-and-forget poll can be garbage-collected mid-sleep.
+# Entries are discarded on completion, so the set stays bounded by concurrency.
+_room_response_tasks: set[asyncio.Task] = set()
+
+
+def schedule_room_response_recheck(
+    token: str,
+    user_profile_id: str | None,
+    email: str | None,
+    activity_id: str | None,
+) -> None:
+    """Fire-and-forget the post-booking poll so the caller answers immediately.
+
+    Detached rather than hung off BackgroundTasks because the callers that need it
+    most have no BackgroundTasks to hang it on: the chat tool and the Zalo bot both
+    reach create_booking from inside a background task of their own. Best-effort
+    throughout — a booking that is already written must never fail on the re-check.
+    """
+    if not activity_id or not token or not settings.supabase_enabled:
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:  # no event loop (sync caller) -> nothing to detach onto
+        return
+    task = loop.create_task(
+        _recheck_room_response(token, user_profile_id, email, activity_id)
+    )
+    _room_response_tasks.add(task)
+    task.add_done_callback(_room_response_tasks.discard)
+
+
+async def _recheck_room_response(
+    token: str,
+    user_profile_id: str | None,
+    email: str | None,
+    activity_id: str,
+) -> None:
+    try:
+        status = await poll_booking_room_response(
+            token, user_profile_id, email, activity_id
+        )
+        log.info("post-booking room response for %s: %s", activity_id, status)
+    except Exception as e:  # noqa: BLE001 - a detached re-check must never raise
+        log.warning("post-booking re-check failed for %s: %s", activity_id, e)
+
+
 @router.post("/api/bookings")
 async def create_booking(request: Request, payload: BookingRequest):
     try:
@@ -977,7 +1100,7 @@ async def create_booking(request: Request, payload: BookingRequest):
     # the invite asynchronously. The calendar sync promotes this to "success" once
     # the room accepts, or to "failed" (room_declined) if it declines. ("ok" is not
     # part of this path — only a fired scheduled booking passes through it.)
-    _log_user_booking_activity(
+    activity_id = _log_user_booking_activity(
         user_profile_id,
         payload,
         "pending",
@@ -986,6 +1109,11 @@ async def create_booking(request: Request, payload: BookingRequest):
         web_link=ev.get("webLink"),
     )
     _mark_room_availability_owner(user_profile_id, payload)
+
+    # Read the room's answer on the same 15/45/90s schedule the web chat drives from
+    # the browser, for the callers that have no browser. Detached, so this returns
+    # now and the Zalo bot's reply is not held for a minute and a half.
+    schedule_room_response_recheck(token, user_profile_id, _auth_email, activity_id)
 
     # Mirror booking metadata into Supabase when available (Supabase path only).
     if auth_user_id and settings.supabase_enabled:
@@ -1849,6 +1977,16 @@ async def process_scheduled_bookings(as_of: date_cls | None = None) -> dict:
 # runs once a day with no user traffic, so a modest width is plenty.
 RESPONSE_CATCHUP_CONCURRENCY = 3
 
+# Gaps between this job's three checks. An instant booking gets its three checks
+# from schedule_room_response_recheck, timed off the invite; a scheduled booking
+# cannot use that path — it is sent from the midnight fire thread, whose event loop
+# closes as soon as the batch is done, and the first check would land inside
+# booking_schedule.BLACKOUT_TRAIL_SECONDS anyway. So the same three checks happen
+# here instead, starting RESPONSE_CATCHUP_DELAY_SECONDS after FIRE_TIME. The gaps
+# are wider than the instant schedule's because the invites went out minutes ago:
+# a room that answers at all has almost certainly answered before check one.
+RESPONSE_CATCHUP_GAPS_SECONDS = (30, 60)
+
 
 async def catchup_scheduled_booking_responses(as_of: date_cls | None = None) -> dict:
     """Promote fired scheduled bookings past "ok" without waiting for their owner.
@@ -1866,7 +2004,11 @@ async def catchup_scheduled_booking_responses(as_of: date_cls | None = None) -> 
     the room's answer from free/busy. It only looks at scheduled bookings, because
     "ok" is written nowhere else.
 
-    Idempotent: a user with nothing left to reconcile just costs one Graph call.
+    Runs three checks (RESPONSE_CATCHUP_GAPS_SECONDS apart), re-reading which rows
+    are still on "ok" between them so each pass only syncs the owners who actually
+    still need it — a slow room mailbox gets the same three chances an instant
+    booking gets. Idempotent: an owner with nothing left to reconcile costs one
+    Graph call, and a pass with nothing left to do exits early.
     """
     if not settings.supabase_enabled:
         return {"ok": False, "users": 0, "reason": "supabase_disabled"}
@@ -1877,45 +2019,46 @@ async def catchup_scheduled_booking_responses(as_of: date_cls | None = None) -> 
     tz = ZoneInfo(settings.timezone)
     today = as_of or datetime.now(tz).date()
 
-    rows = (
-        sb.table("user_activity")
-        .select("id, user_id, auth_user_id, graph_access_token, graph_event_id, date")
-        .eq("booking_type", "scheduled")
-        .eq("status", "ok")
-        .gte("date", today.isoformat())
-        .execute()
-        .data
-        or []
-    )
+    def owners_awaiting_response() -> dict[str, dict]:
+        """Owners with at least one fired-but-unanswered scheduled booking.
 
-    # One sync per OWNER, not per booking: sync_my_calendar reconciles every row that
-    # user has in the availability window in a single pass.
-    by_owner: dict[str, dict] = {}
-    for row in rows:
-        if not row.get("graph_event_id"):
-            continue  # not actually on the calendar yet -> nothing to read a response from
-        owner = str(row.get("user_id") or "").strip()
-        if not owner:
-            continue
-        entry = by_owner.setdefault(
-            owner, {"auth_user_id": None, "graph_access_token": None, "bookings": 0}
+        Re-read on every pass: rows the previous pass resolved drop out, so a later
+        pass never re-syncs an owner who is already done.
+        """
+        rows = (
+            sb.table("user_activity")
+            .select("id, user_id, auth_user_id, graph_access_token, graph_event_id, date")
+            .eq("booking_type", "scheduled")
+            .eq("status", "ok")
+            .gte("date", today.isoformat())
+            .execute()
+            .data
+            or []
         )
-        entry["bookings"] += 1
-        # The paste-token flow stores its credential per row; keep the first non-empty
-        # of each so the token resolver has every fallback available.
-        if not entry["auth_user_id"] and row.get("auth_user_id"):
-            entry["auth_user_id"] = str(row["auth_user_id"])
-        if not entry["graph_access_token"] and row.get("graph_access_token"):
-            entry["graph_access_token"] = row["graph_access_token"]
+        # One sync per OWNER, not per booking: sync_my_calendar reconciles every row
+        # that user has in the availability window in a single pass.
+        by_owner: dict[str, dict] = {}
+        for row in rows:
+            if not row.get("graph_event_id"):
+                continue  # not on the calendar yet -> no response to read
+            owner = str(row.get("user_id") or "").strip()
+            if not owner:
+                continue
+            entry = by_owner.setdefault(
+                owner, {"auth_user_id": None, "graph_access_token": None, "bookings": 0}
+            )
+            entry["bookings"] += 1
+            # The paste-token flow stores its credential per row; keep the first
+            # non-empty of each so the token resolver has every fallback available.
+            if not entry["auth_user_id"] and row.get("auth_user_id"):
+                entry["auth_user_id"] = str(row["auth_user_id"])
+            if not entry["graph_access_token"] and row.get("graph_access_token"):
+                entry["graph_access_token"] = row["graph_access_token"]
+        return by_owner
 
-    if not by_owner:
-        log.warning("catchup_scheduled_booking_responses: no fired bookings awaiting a room response")
-        return {"ok": True, "users": 0, "synced": 0, "skipped": 0}
-
-    email_by_owner = _profile_email_by_id(sb, set(by_owner))
     sem = asyncio.Semaphore(RESPONSE_CATCHUP_CONCURRENCY)
 
-    async def sync_one(user_profile_id: str, entry: dict) -> bool:
+    async def sync_one(user_profile_id: str, entry: dict, email: str | None) -> bool:
         async with sem:
             try:
                 token = await resolve_background_graph_token(
@@ -1933,7 +2076,7 @@ async def catchup_scheduled_booking_responses(as_of: date_cls | None = None) -> 
                 return False
             try:
                 summary = await availability.sync_my_calendar(
-                    token, user_profile_id, email_by_owner.get(user_profile_id)
+                    token, user_profile_id, email
                 )
                 log.info("response catch-up synced %s: %s", user_profile_id, summary)
                 return True
@@ -1941,19 +2084,45 @@ async def catchup_scheduled_booking_responses(as_of: date_cls | None = None) -> 
                 log.warning("response catch-up sync failed for %s: %s", user_profile_id, e)
                 return False
 
-    log.warning(
-        "catchup_scheduled_booking_responses: syncing %s owner(s) of %s fired booking(s)",
-        len(by_owner), sum(e["bookings"] for e in by_owner.values()),
-    )
-    results = await asyncio.gather(
-        *(sync_one(pid, entry) for pid, entry in by_owner.items())
-    )
-    synced = sum(results)
-    summary = {
-        "ok": True,
-        "users": len(by_owner),
-        "synced": synced,
-        "skipped": len(results) - synced,
-    }
+    passes = 1 + len(RESPONSE_CATCHUP_GAPS_SECONDS)
+    users = synced = skipped = 0
+    by_owner = owners_awaiting_response()
+    for attempt in range(passes):
+        if not by_owner:
+            log.warning(
+                "catchup_scheduled_booking_responses: nothing left to reconcile "
+                "before check %s/%s",
+                attempt + 1, passes,
+            )
+            break
+        email_by_owner = _profile_email_by_id(sb, set(by_owner))
+        log.warning(
+            "catchup_scheduled_booking_responses check %s/%s: syncing %s owner(s) "
+            "of %s fired booking(s)",
+            attempt + 1, passes, len(by_owner),
+            sum(e["bookings"] for e in by_owner.values()),
+        )
+        results = await asyncio.gather(
+            *(
+                sync_one(pid, entry, email_by_owner.get(pid))
+                for pid, entry in by_owner.items()
+            )
+        )
+        # Counters describe the LAST pass that had work: that is the state the job
+        # actually left behind, and earlier passes are already in the log above.
+        users = len(results)
+        synced = sum(results)
+        skipped = users - synced
+        if attempt == passes - 1:
+            break
+        # Re-read BEFORE waiting, not after: sync_my_calendar has already written any
+        # promotion it found, so this tells us whether a wait is worth anything at
+        # all. Everyone answered on this pass -> finish now instead of holding the
+        # job open for a gap it has no work to do on the far side of.
+        by_owner = owners_awaiting_response()
+        if by_owner:
+            await asyncio.sleep(RESPONSE_CATCHUP_GAPS_SECONDS[attempt])
+
+    summary = {"ok": True, "users": users, "synced": synced, "skipped": skipped}
     log.warning("catchup_scheduled_booking_responses finished: %s", summary)
     return summary

@@ -448,8 +448,8 @@ function BookingConfirmationCard({
         book_without_confirmation: action === "accept" ? skipConfirmation : undefined,
       });
       // A confirmed booking changes the user's history — drop the cache so the
-      // Booking History tab refetches fresh data next time it opens, and force a
-      // calendar re-sync so its "pending" status flips to success/failed soon.
+      // Booking History tab refetches fresh data next time it opens. The room's
+      // accept/decline is read server-side (see syncAfterBooking).
       if (action === "accept") onBookingConfirmed?.();
       onActionMessage(res.message);
     } catch (e: any) {
@@ -868,18 +868,17 @@ export function ChatPanel({
   };
 
   // A chatbot booking starts "pending" until the room mailbox responds
-  // asynchronously. Force a calendar re-sync now and again at 15/45/90s (past
-  // the 60s throttle) so the status flips to success/failed on the grid and
-  // Booking History — mirroring the post-booking refresh in BrowseRooms.
+  // asynchronously. Reading that response is now entirely the backend's job: every
+  // booking gets three server-side calendar re-syncs, timed off the invite
+  // (bookings.POST_BOOK_SYNC_OFFSETS_SECONDS). This used to be driven from here
+  // with forced re-syncs at 15/45/90s, which only worked while a web chat tab
+  // happened to be open — the Zalo bot and the Mini App had no equivalent.
+  //
+  // All that is left is dropping the history cache, so opening the Booking History
+  // tab refetches instead of rendering rows captured before this booking existed.
   const syncAfterBooking = useCallback(() => {
     clearBookingHistoryCache();
-    onRefresh?.({ force: true });
-    for (const delay of [15000, 45000, 90000]) {
-      window.setTimeout(() => {
-        clearBookingHistoryCache();
-        onRefresh?.({ force: true });
-      }, delay);
-    }
+    onRefresh?.();
   }, [onRefresh]);
 
   const handleFeedbackChange = (

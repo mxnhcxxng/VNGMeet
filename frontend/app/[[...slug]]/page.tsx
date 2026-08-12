@@ -59,7 +59,10 @@ import { usePathname } from "next/navigation";
 
 // Keep the browse range aligned with backend availability_days.
 const RANGE_DAYS = 16;
-const BROWSE_REFRESH_INTERVAL_MS = 2 * 60 * 1000;
+// Matches the backend's one-minute availability cron (see main.py
+// refresh_availability_pool): polling any slower just shows a cache the server
+// has already rewritten.
+const BROWSE_REFRESH_INTERVAL_MS = 60 * 1000;
 // Retries of /api/auth/me before conceding that a session is really gone. Only
 // used while Supabase still reports a session, to ride out the window where its
 // access token has lapsed but the refresh hasn't landed — that window is what made
@@ -885,10 +888,14 @@ export default function Home() {
   const [leaveSaving, setLeaveSaving] = useState(false);
   const settingsDiscardRef = useRef<(() => void) | null>(null);
   const settingsSaveRef = useRef<(() => Promise<boolean>) | null>(null);
+  // When the last availability fetch was kicked off. Lets the browse tab decide
+  // whether returning to it needs an immediate catch-up fetch or whether the
+  // grid is still within one poll period of fresh.
+  const lastScheduleLoadRef = useRef(0);
   // Frozen browse column order. Owned here so it survives a mid-refresh remount
-  // of BrowseRooms (e.g. the grid briefly emptying during a forced post-booking
-  // refresh) yet is cleared whenever the user leaves the browse tab, so coming
-  // back re-sorts. It only stays put while the user remains on browse.
+  // of BrowseRooms (e.g. the grid briefly emptying during a background refresh)
+  // yet is cleared whenever the user leaves the browse tab, so coming back
+  // re-sorts. It only stays put while the user remains on browse.
   const browseOrderRef = useRef<Map<string, string[]>>(new Map());
   useEffect(() => {
     if (view !== "browse") browseOrderRef.current.clear();
@@ -1109,14 +1116,18 @@ export default function Home() {
   }, [me?.authenticated, me?.graphLinked, refreshMe]);
 
   const loadSchedule = useCallback(async (opts?: { force?: boolean }) => {
+    // Stamped before the round-trip, not after, so a fetch already in flight
+    // still counts as "just loaded" for the browse-tab catch-up check below.
+    lastScheduleLoadRef.current = Date.now();
     setRefreshing(true);
     setError(null);
     try {
       // Read from the cached availability table (refreshed by a background job, and
       // of querying Graph live. Fall back to a live Graph query when the cache
       // isn't available (e.g. manual-token dev mode without Supabase → 503).
-      // force=true bypasses the calendar-sync throttle so the post-booking refresh
-      // picks up a pending booking's room response immediately.
+      // force=true bypasses the server's calendar-sync throttle. Passed by the
+      // explicit refresh button and by the post-booking retries; background polls
+      // leave it off so a tab left open doesn't re-read Graph every minute.
       try {
         setData(await api.availability(RANGE_DAYS, undefined, opts?.force));
       } catch (e: any) {
@@ -1147,6 +1158,17 @@ export default function Home() {
     const refreshWhenVisible = () => {
       if (document.visibilityState === "visible") loadSchedule();
     };
+
+    // Arriving on browse from another tab: the interval below only fires a full
+    // period from now, so without this the grid would show data as stale as the
+    // time spent away. Skipped right after the initial mount load (and on a
+    // quick tab bounce), where the grid is already within one period of fresh.
+    if (
+      document.visibilityState === "visible" &&
+      Date.now() - lastScheduleLoadRef.current >= BROWSE_REFRESH_INTERVAL_MS
+    ) {
+      loadSchedule();
+    }
 
     const interval = window.setInterval(
       refreshWhenVisible,

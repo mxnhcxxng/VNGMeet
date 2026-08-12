@@ -1031,7 +1031,10 @@ export function BrowseRooms({
           variant="tertiary"
           aria-label={tr("browse.refresh")}
           className="rounded-full"
-          onPress={() => onRefresh()}
+          // force=true bypasses the server's per-user calendar-sync throttle: an
+          // explicit refresh is exactly when the user wants their own Outlook
+          // changes re-read, not the throttled no-op a background poll gets.
+          onPress={() => onRefresh({ force: true })}
           isDisabled={refreshing}
         >
           {refreshing ? <Spinner size="sm" /> : <ArrowsRotateRight width={16} height={16} />}
