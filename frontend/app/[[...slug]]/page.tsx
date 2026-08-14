@@ -252,9 +252,9 @@ function CarouselArrow({
 // annotations at the design's 3:4 frame ratio, so it just needs to cover the
 // panel with a dark gradient on top for the caption.
 const SLIDE_BACKGROUNDS: Record<LoginStepKey, string> = {
-  graph: "/auth/graph.png",
-  account: "/auth/account.png",
-  token: "/auth/token.png",
+  graph: "/auth/graph.webp",
+  account: "/auth/account.webp",
+  token: "/auth/token.webp",
 };
 
 function SlideBackground({ stepKey }: { stepKey: LoginStepKey }) {
@@ -268,6 +268,12 @@ function SlideBackground({ stepKey }: { stepKey: LoginStepKey }) {
           key={key}
           src={SLIDE_BACKGROUNDS[key]}
           alt=""
+          // All three slides stay mounted for the cross-fade, so they're all in
+          // the viewport and loading="lazy" would be a no-op. fetchPriority is
+          // the lever that actually works here: the visible slide wins the
+          // connection, the two hidden ones trail behind it.
+          fetchPriority={key === stepKey ? "high" : "low"}
+          decoding="async"
           className={`absolute inset-0 h-full w-full object-cover object-center transition-opacity duration-300 ease-out ${
             key === stepKey ? "opacity-100" : "opacity-0"
           }`}

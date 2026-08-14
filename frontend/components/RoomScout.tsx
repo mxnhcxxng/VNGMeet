@@ -355,7 +355,7 @@ type GuideStep = { image: string; body: ReactNode; copy?: string };
 function buildGuideSteps(t: TFunction): GuideStep[] {
   return [
     {
-      image: "/scout-steps/step-1.png",
+      image: "/scout-steps/step-1.webp",
       copy: GRAPH_EXPLORER_URL,
       body: (
         <>
@@ -372,7 +372,7 @@ function buildGuideSteps(t: TFunction): GuideStep[] {
       ),
     },
     {
-      image: "/scout-steps/step-2.png",
+      image: "/scout-steps/step-2.webp",
       copy: SEND_MAIL_URL,
       body: (
         <>
@@ -382,7 +382,7 @@ function buildGuideSteps(t: TFunction): GuideStep[] {
       ),
     },
     {
-      image: "/scout-steps/step-3.png",
+      image: "/scout-steps/step-3.webp",
       body: (
         <>
           {t("scout.guideStep3a")} <b className="font-semibold">Run Query</b>
@@ -394,7 +394,7 @@ function buildGuideSteps(t: TFunction): GuideStep[] {
       ),
     },
     {
-      image: "/scout-steps/step-4.png",
+      image: "/scout-steps/step-4.webp",
       body: (
         <>
           {t("scout.guideStep4a")} <b className="font-semibold">VNG Meet</b>{" "}
@@ -494,6 +494,8 @@ function ScoutPermissionGuide({ userName }: { userName?: string }) {
           key={step.image}
           src={step.image}
           alt={t("scout.stepImageAlt", { current: stepIndex + 1, total })}
+          loading="lazy"
+          decoding="async"
           className="scout-thumb-fade absolute inset-0 h-full w-full object-cover"
         />
       </div>

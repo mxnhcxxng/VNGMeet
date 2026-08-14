@@ -308,7 +308,7 @@ export function SettingsScreen({
       <div className="px-1 pt-1">
         <div
           className="h-[200px] w-full rounded-xl bg-cover bg-center"
-          style={{ backgroundImage: "url('/profile-cover.png')" }}
+          style={{ backgroundImage: "url('/profile-cover.webp')" }}
         />
       </div>
 
