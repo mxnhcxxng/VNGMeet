@@ -58,19 +58,12 @@ export interface DirectoryRoom {
 // Vòng đời BE: pending -> ok -> success -> ongoing (đang diễn ra) -> finished (đã
 // dùng xong / check out sớm); canceled + failed là hai kết cục còn lại. Xem
 // backend availability._reconcile_room_usage.
-//
-// TẠM THỜI: "ongoing"/"finished" đang bị comment vì bản Mini App trên prod chưa
-// hiểu 2 status này (phải qua duyệt của Zalo mới lên được). Backend đang hạ
-// chúng về "success" cho riêng client Mini App — xem
-// bookings.LEGACY_MINIAPP_STATUS. Khi bản mới lên prod: bỏ comment ở đây, ở
-// pages/history.tsx, components/meeting-detail.tsx, services/i18n.ts, RỒI xoá
-// map bên backend.
 export type BookingStatus =
   | "success"
   | "ok"
   | "pending"
-  // | "ongoing"
-  // | "finished"
+  | "ongoing"
+  | "finished"
   | "failed"
   | "canceled";
 

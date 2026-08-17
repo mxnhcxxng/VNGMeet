@@ -17,10 +17,6 @@ import type { BookingHistoryItem, BookingStatus, UpcomingEvent } from "@/types";
 // Key dịch nhãn + class màu chip trạng thái — khớp màu bản web (frontend
 // BookingHistory: success/ongoing=xanh lá, ok/pending=vàng, failed=đỏ,
 // canceled/finished=xám).
-//
-// TẠM THỜI: 2 dòng ongoing/finished bị comment cùng với BookingStatus trong
-// types.ts — backend đang hạ chúng về "success" cho client Mini App. Xem chú
-// thích ở types.ts trước khi bỏ comment.
 const STATUS_META: Record<
   BookingStatus,
   { labelKey: TranslationKey; className: string }
@@ -28,8 +24,8 @@ const STATUS_META: Record<
   success: { labelKey: "status.success", className: "history-chip--success" },
   ok: { labelKey: "status.awaiting", className: "history-chip--pending" },
   pending: { labelKey: "status.pending", className: "history-chip--pending" },
-  // ongoing: { labelKey: "status.ongoing", className: "history-chip--success" },
-  // finished: { labelKey: "status.finished", className: "history-chip--canceled" },
+  ongoing: { labelKey: "status.ongoing", className: "history-chip--success" },
+  finished: { labelKey: "status.finished", className: "history-chip--canceled" },
   failed: { labelKey: "status.failed", className: "history-chip--failed" },
   canceled: { labelKey: "status.canceled", className: "history-chip--canceled" },
 };

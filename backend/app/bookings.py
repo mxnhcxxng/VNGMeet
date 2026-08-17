@@ -68,9 +68,10 @@ CLOSED_BOOKING_STATUSES = ("failed", "canceled", "finished")
 # Scope: display only, Mini App callers only (identified by the signed session
 # JWT, not by Origin). The DB and the web app keep the real status.
 #
-# REMOVE THIS, together with the commented-out `ongoing`/`finished` entries in
-# miniapp/src/{types.ts,pages/history.tsx,components/meeting-detail.tsx,
-# services/i18n.ts}, once the Mini App build that understands them is live.
+# The Mini App source now handles both statuses (miniapp/src/{types.ts,
+# pages/history.tsx,components/meeting-detail.tsx,services/i18n.ts}), so this map
+# is the last piece: REMOVE IT once that build has cleared Zalo review and is
+# live. Until then the old prod build is still the one calling this endpoint.
 LEGACY_MINIAPP_STATUS = {"ongoing": "success", "finished": "success"}
 
 

@@ -102,9 +102,8 @@ const en = {
   "status.success": "Success",
   "status.awaiting": "Awaiting",
   "status.pending": "Pending",
-  // Tạm comment cùng BookingStatus trong types.ts — xem chú thích ở đó.
-  // "status.ongoing": "In progress",
-  // "status.finished": "Finished",
+  "status.ongoing": "In progress",
+  "status.finished": "Finished",
   "status.failed": "Failed",
   "status.canceled": "Canceled",
 
@@ -392,8 +391,8 @@ const vi: Partial<Record<TranslationKey, string>> = {
   "status.success": "Thành công",
   "status.awaiting": "Chờ phản hồi",
   "status.pending": "Đang chờ",
-  // "status.ongoing": "Đang diễn ra",
-  // "status.finished": "Đã kết thúc",
+  "status.ongoing": "Đang diễn ra",
+  "status.finished": "Đã kết thúc",
   "status.failed": "Thất bại",
   "status.canceled": "Đã hủy",
 
