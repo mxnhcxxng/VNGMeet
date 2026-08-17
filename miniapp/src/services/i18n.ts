@@ -41,11 +41,13 @@ const en = {
   "permission.grant": "Grant permission",
 
   // --- Block screen (token expired / phone not linked to any profile) ------
-  "block.desc":
-    "Your account hasn't been created yet, or your token has expired. Please sign in using the link below to continue.",
-  "block.copy": "Copy",
-  "block.copied": "Copied",
-  "block.visit": "Open VNG Meet",
+  "block.desc": "Please sign in to continue",
+  "block.featFree": "Quick picks of rooms free today",
+  "block.featScout": "Hunt for a free room every minute",
+  "block.featSchedule": "Schedule a booking at midnight",
+  "block.featDirection": "Directions to your next meeting",
+  "block.login": "Sign in with Microsoft",
+  "block.loginFailed": "Couldn't open the sign-in page. Please try again.",
 
   // --- Chatbot link-success screen ----------------------------------------
   "linkSuccess.title": "Chatbot linked successfully",
@@ -200,6 +202,7 @@ const en = {
   "settings.personalInfo": "Personal info",
   "settings.personalInfoDesc": "Update your personal details.",
   "settings.feedback": "Feedback",
+  "settings.reauth": "Sign in again",
   "settings.save": "Save",
   "settings.domain": "Domain",
   "settings.email": "Email",
@@ -326,11 +329,13 @@ const vi: Partial<Record<TranslationKey, string>> = {
   "permission.grant": "Cấp quyền",
 
   // --- Block screen (token hết hạn / SĐT chưa liên kết profile nào) --------
-  "block.desc":
-    "Tài khoản của bạn chưa được tạo hoặc token đã hết hạn, vui lòng đăng nhập tại link ở dưới đây để tiếp tục",
-  "block.copy": "Sao chép",
-  "block.copied": "Đã sao chép",
-  "block.visit": "Truy cập VNG Meet",
+  "block.desc": "Vui lòng đăng nhập để tiếp tục",
+  "block.featFree": "Gợi ý nhanh phòng trống hôm nay",
+  "block.featScout": "Săn phòng trống mỗi phút",
+  "block.featSchedule": "Hẹn giờ đặt phòng lúc nửa đêm",
+  "block.featDirection": "Chỉ đường đến phòng họp sắp tới",
+  "block.login": "Đăng nhập với Microsoft",
+  "block.loginFailed": "Không mở được trang đăng nhập. Vui lòng thử lại.",
 
   // --- Màn liên kết chatbot thành công ------------------------------------
   "linkSuccess.title": "Liên kết chatbot thành công",
@@ -484,6 +489,7 @@ const vi: Partial<Record<TranslationKey, string>> = {
   "settings.personalInfo": "Thông tin cá nhân",
   "settings.personalInfoDesc": "Cập nhật thông tin cá nhân của bạn.",
   "settings.feedback": "Phản hồi",
+  "settings.reauth": "Đăng nhập lại",
   "settings.save": "Lưu",
   "settings.domain": "Tên đăng nhập",
   "settings.email": "Email",

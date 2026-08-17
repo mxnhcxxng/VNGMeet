@@ -8,6 +8,7 @@ import Globe from "@gravity-ui/icons/Globe";
 import Comment from "@gravity-ui/icons/Comment";
 import ChevronLeft from "@gravity-ui/icons/ChevronLeft";
 import Check from "@gravity-ui/icons/Check";
+import ArrowsRotateRight from "@gravity-ui/icons/ArrowsRotateRight";
 
 import ProfileInfo from "@/components/profile-info";
 import defaultAvatar from "@/static/default-avatar.jpg";
@@ -15,7 +16,7 @@ import themeLightPreview from "@/static/theme-light.png";
 import themeDarkPreview from "@/static/theme-dark.png";
 import themeSystemPreview from "@/static/theme-system.png";
 import { api, AuthError } from "@/services/api";
-import { useDisplayName } from "@/services/auth";
+import { clearToken, useDisplayName } from "@/services/auth";
 import { useSettings, type ThemeMode } from "@/services/settings";
 import type { Language, MeResponse } from "@/types";
 import { useSwipeBack } from "@/hooks/use-swipe-back";
@@ -71,6 +72,8 @@ export default function AccountPage({ me, onMeChange }: Props) {
 
   const profile = me?.profile ?? null;
   const phone = formatPhone(profile?.phone);
+  // Cột user_profiles.role — chỉ admin thấy mục "Đăng nhập lại" bên dưới.
+  const isAdmin = profile?.role === "admin";
 
   // Nạp trước danh sách lựa chọn hồ sơ NGAY khi vào tab Tài khoản → khi bấm
   // "Thông tin cá nhân" dữ liệu đã sẵn trong cache, mở màn không giật/không chờ.
@@ -173,8 +176,21 @@ export default function AccountPage({ me, onMeChange }: Props) {
             Icon={Comment}
             label={t("settings.feedback")}
             onClick={() => void openFeedback()}
-            last
+            last={!isAdmin}
           />
+          {/* CHỈ admin: xoá session JWT rồi để Gate authen lại từ đầu bằng SĐT
+              Zalo. KHÔNG gọi là "đăng xuất": Mini App tự authen im lặng nên user
+              quay về Home ngay — trừ khi SĐT không map được tài khoản, lúc đó ra
+              màn chặn đăng nhập Microsoft. Đây là cách test lại luồng đó mà không
+              cần devtools (bản live không có vConsole). */}
+          {isAdmin && (
+            <MenuRow
+              Icon={ArrowsRotateRight}
+              label={t("settings.reauth")}
+              onClick={() => clearToken()}
+              last
+            />
+          )}
         </div>
       </section>
 

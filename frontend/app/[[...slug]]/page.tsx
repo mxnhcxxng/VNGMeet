@@ -37,6 +37,8 @@ import {
 import { Check, Copy } from "@gravity-ui/icons";
 import { supabase, supabaseEnabled } from "@/lib/supabase";
 import { linkMicrosoft, relinkFromStoredSession } from "@/lib/linkMicrosoft";
+import { isZaloMiniAppFlow } from "@/lib/zaloReturn";
+import ZaloReturnScreen from "@/components/ZaloReturnScreen";
 import { Sidebar, type View } from "@/components/Sidebar";
 import { TokenExpiryProvider } from "@/components/TokenExpiryProvider";
 import { BrowseRooms } from "@/components/BrowseRooms";
@@ -1070,6 +1072,13 @@ export default function Home() {
   const authedRef = useRef(false);
   authedRef.current = Boolean(me?.authenticated);
 
+  // POST /api/auth/link của lần OAuth vừa rồi còn đang chạy. Chỉ luồng "đăng nhập
+  // hộ Mini App" dưới đây cần biết: tài khoản đã link từ trước thì graphLinked đã
+  // là true ngay lần fetch /api/auth/me đầu, nếu đá về Mini App lúc đó thì
+  // /api/auth/link (bước ghi lại user_profiles.phone) có thể chưa xong → Mini App
+  // tra SĐT vẫn không thấy → rơi lại màn chặn.
+  const [linkPending, setLinkPending] = useState(false);
+
   // Supabase OAuth flow (only when configured).
   useEffect(() => {
     if (!supabase) return;
@@ -1083,12 +1092,14 @@ export default function Home() {
         const refreshToken = session.provider_refresh_token;
         const providerToken = session.provider_token;
         if (refreshToken) {
+          setLinkPending(true);
           // Deferred out of the callback on purpose: Supabase holds its auth lock
           // while running listeners, and api.link -> req() reaches back into the
           // auth client. Keeping the callback synchronous also stops a slow POST
           // from delaying the refreshMe() below.
           setTimeout(() => {
             void linkMicrosoft(refreshToken, providerToken).then((ok) => {
+              setLinkPending(false);
               if (ok) refreshMe(); // pick up graphLinked / tokenExpiresAt
             });
           }, 0);
@@ -1120,6 +1131,20 @@ export default function Home() {
       cancelled = true;
     };
   }, [me?.authenticated, me?.graphLinked, refreshMe]);
+
+  // Đăng nhập hộ Zalo Mini App: Mini App mở trang này trong webview kèm ?zma=1.
+  // Chỉ hiện màn "đăng nhập thành công" khi đã liên kết xong — graphLinked=true
+  // nghĩa là backend đã có Microsoft refresh token + SĐT cho tài khoản này, tức
+  // Mini App tra SĐT sẽ ra. `linkPending` chặn trường hợp tài khoản link từ
+  // trước: graphLinked đã true ngay lần fetch đầu trong khi POST /api/auth/link
+  // (bước ghi lại phone) còn đang chạy.
+  // Mở web bình thường (không có tham số) thì cờ = false → không đổi gì.
+  const showZmaReturn = Boolean(
+    isZaloMiniAppFlow() &&
+      !linkPending &&
+      me?.authenticated &&
+      me.graphLinked === true,
+  );
 
   const loadSchedule = useCallback(async (opts?: { force?: boolean }) => {
     // Stamped before the round-trip, not after, so a fetch already in flight
@@ -1410,6 +1435,11 @@ export default function Home() {
       </div>
     </div>
   ) : null;
+
+  // Xong việc của luồng Mini App: đã liên kết Microsoft + SĐT nên web không cần
+  // hiện gì thêm (kể cả màn khai báo thông tin cá nhân — Mini App có màn riêng),
+  // chỉ nhắc user đóng webview để quay lại.
+  if (showZmaReturn) return <ZaloReturnScreen />;
 
   if (!me?.authenticated) {
     return (

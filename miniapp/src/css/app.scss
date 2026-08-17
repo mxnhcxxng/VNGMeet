@@ -2895,22 +2895,41 @@ body[zaui-theme="dark"] {
 }
 
 // =====================================================================
-// Màn chặn — token hết hạn / SĐT chưa map profile (Figma 400-2855)
-// Nền gradient xanh cố định (không có bản dark riêng — vốn đã tối).
+// Màn chặn đăng nhập — token hết hạn / SĐT chưa map profile (Figma 506-4832)
+// Nền trang + dải wash xanh trên đỉnh (như màn liên kết chatbot); dùng biến
+// --vm-* để hợp dark mode.
 // =====================================================================
 .block-scr {
   position: fixed;
   inset: 0;
   z-index: 80;
-  background: linear-gradient(180deg, #0068ff 0%, #ffffff 100%);
-  color: #fff;
+  display: flex;
+  flex-direction: column;
+  background: var(--vm-surface);
+  color: var(--vm-ink);
 }
+// Dải xanh đỉnh màn (Figma Rectangle 360×200). Đuôi gradient phải bám
+// var(--vm-surface) để không hở mép trắng trên nền tối.
+.block-scr__banner {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 200px;
+  pointer-events: none;
+  background: linear-gradient(180deg, #0068ff -85.28%, var(--vm-surface) 100%);
+}
+// Vùng giữa nở ra, nội dung canh giữa; nút đăng nhập luôn nằm đáy.
 .block-scr__body {
-  height: 100%;
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 40px;
+  justify-content: center;
+  gap: 60px;
   // Màn này render như overlay fixed (ngoài <Page> ZaUI) nên biến
   // --zaui-safe-area-inset-top không resolve → fallback env() để chừa notch.
   // 44px = dải nút hành động Zalo ("..."/X) ngay dưới safe-area; +24px = khoảng
@@ -2918,29 +2937,58 @@ body[zaui-theme="dark"] {
   padding: calc(
       44px + 24px + var(--zaui-safe-area-inset-top, env(safe-area-inset-top, 0px))
     )
-    16px calc(24px + var(--zaui-safe-area-inset-bottom, 0px));
+    16px 16px;
+}
+.block-scr__heads {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
 }
 .block-scr__brand {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
-.block-scr__logo {
+.block-scr__favicon {
+  width: 40px;
   height: 40px;
-  width: auto;
-  object-fit: contain;
+  display: block;
 }
-// Vùng giữa nở ra để nút "Truy cập" luôn nằm đáy.
-.block-scr__main {
-  flex: 1 1 auto;
-  min-height: 0;
-  width: 100%;
+.block-scr__wordmark {
+  font-size: 30px;
+  line-height: 40px;
+  font-weight: 500;
+  color: var(--vm-blue);
+}
+.block-scr__desc {
+  font-size: 18px;
+  line-height: 24px;
+  font-weight: 500;
+  text-align: center;
+  color: var(--vm-muted);
+}
+// Danh sách tính năng chính (tìm / săn / hẹn giờ / chỉ đường).
+.block-scr__features {
   display: flex;
   flex-direction: column;
-  gap: 40px;
+  gap: 16px;
+}
+.block-scr__feature {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 16px;
+  line-height: 22px;
+  color: var(--vm-muted);
+}
+.block-scr__feature-icon {
+  flex: none;
 }
 // Trạng thái chờ authen: spinner canh giữa trên nền màn chặn (tránh nháy trắng).
 .block-scr__loading {
+  position: relative;
   flex: 1 1 auto;
   min-height: 0;
   width: 100%;
@@ -2952,46 +3000,13 @@ body[zaui-theme="dark"] {
   width: 40px;
   height: 40px;
   border-radius: 50%;
-  border: 3px solid rgba(255, 255, 255, 0.35);
-  border-top-color: #fff;
+  border: 3px solid var(--vm-separator);
+  border-top-color: var(--vm-blue);
   animation: vm-spin 0.8s linear infinite;
 }
-.block-scr__desc {
-  font-size: 16px;
-  line-height: 22px;
-  text-align: center;
-  color: #fff;
-}
-.block-scr__qr-group {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 24px;
-}
-.block-scr__qr {
-  width: 180px;
-  height: 180px;
-  border-radius: 12px;
-  background: #fff;
-  padding: 10px;
-  object-fit: contain;
-}
-// Chip xanh: link + icon copy trên cùng một nút (Figma 403-13608).
-.block-scr__link {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 12px;
-  border: none;
-  border-radius: 999px;
-  background: #0068ff;
-  color: #fff;
-  cursor: pointer;
-}
-.block-scr__link-text {
-  font-size: 16px;
-  line-height: 22px;
-  font-weight: 500;
+.block-scr__footer {
+  flex: none;
+  padding: 16px 16px calc(24px + var(--zaui-safe-area-inset-bottom, 0px));
 }
 .block-scr__cta {
   width: 100%;
@@ -3003,7 +3018,15 @@ body[zaui-theme="dark"] {
   font-size: 15px;
   line-height: 20px;
   font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   cursor: pointer;
+
+  &:disabled {
+    opacity: 0.6;
+  }
 }
 
 // =====================================================================

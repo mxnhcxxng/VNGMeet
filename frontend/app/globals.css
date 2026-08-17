@@ -111,6 +111,31 @@ input[type="password"]::-ms-clear {
   animation: auth-caption-in 0.5s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
+/* Mũi tên "bấm X đi" ở màn quay lại Zalo Mini App: đẩy lên hai nhịp rồi nghỉ,
+   để mắt bắt được hướng chỉ mà không giật liên tục. */
+@keyframes zma-nudge {
+  0%,
+  30%,
+  60%,
+  100% {
+    transform: translateY(0);
+  }
+  15%,
+  45% {
+    transform: translateY(-10px);
+  }
+}
+
+.zma-nudge {
+  animation: zma-nudge 1.8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .zma-nudge {
+    animation: none;
+  }
+}
+
 @keyframes typing-dot {
   0%,
   60%,

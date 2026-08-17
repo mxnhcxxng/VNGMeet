@@ -203,6 +203,8 @@ export interface UserProfile {
   book_without_confirmation?: boolean | null;
   theme?: ThemeMode | null;
   language?: Language | null;
+  // Quyền của user (cột user_profiles.role, BE luôn trả "user" khi trống).
+  role?: "admin" | "user" | null;
 }
 
 export interface MeResponse {

@@ -116,6 +116,11 @@ const en = {
   "settings.feedback": "Send feedback",
   "settings.feedbackTitle": "Send feedback",
 
+  // --- Return to the Zalo Mini App after signing in on its behalf ----------
+  "zma.doneTitle": "Signed in successfully",
+  "zma.doneDesc":
+    "Please tap the X to close this window and return to the VNG Meet Mini App",
+
   // --- Login --------------------------------------------------------------
   "login.welcome": "Welcome to VNG Meet",
   "login.welcomeDesc":
@@ -454,6 +459,11 @@ export type TranslationKey = keyof typeof en;
 
 // Vietnamese overrides. Missing keys fall back to English at lookup time.
 const vi: Partial<Record<TranslationKey, string>> = {
+  // --- Quay lại Zalo Mini App sau khi đăng nhập hộ ------------------------
+  "zma.doneTitle": "Đăng nhập thành công",
+  "zma.doneDesc":
+    "Vui lòng bấm dấu X để đóng cửa sổ và quay lại Mini App VNG Meet",
+
   // --- Common -------------------------------------------------------------
   "common.save": "Lưu thay đổi",
   "common.cancel": "Hủy",

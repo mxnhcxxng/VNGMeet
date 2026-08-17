@@ -335,9 +335,10 @@ function Gate() {
   }
 
   // SĐT Zalo không map được profile nào / token hết hạn và tài khoản không còn
-  // → BE trả 403 → màn hướng dẫn đăng nhập lại qua link/QR (Figma 403-13608).
+  // → BE trả 403 → màn chặn có nút đăng nhập Microsoft (Figma 506-4832). Quay về
+  // từ webview OAuth thì thử đổi session luôn (onRetry), khỏi phải mở lại app.
   if (phase === "unlinked") {
-    return <BlockScreen />;
+    return <BlockScreen onRetry={() => void authenticate()} />;
   }
 
   // Đã cấp quyền SĐT, đang đổi session (chưa có token) → spinner trên nền màn chặn
