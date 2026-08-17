@@ -9,6 +9,7 @@ import Plus from "@gravity-ui/icons/Plus";
 
 import { api, AuthError, getCachedProfileOptions } from "@/services/api";
 import { useSettings } from "@/services/settings";
+import { useKeyboardInset } from "@/hooks/use-keyboard-inset";
 import type { MeResponse, UserProfileOption, UserProfileOptions } from "@/types";
 
 type Props = {
@@ -51,6 +52,9 @@ export default function ProfileInfo({ me, onMeChange }: Props) {
   const [saving, setSaving] = useState(false);
   const [roomSheetOpen, setRoomSheetOpen] = useState(false);
   const [roomSearch, setRoomSearch] = useState("");
+  // Bàn phím che bao nhiêu px → chèn vào padding-bottom của sheet để nút "Xong"
+  // luôn nổi trên bàn phím thay vì bị nuốt mất.
+  const keyboardInset = useKeyboardInset(roomSheetOpen);
 
   const isCampus = office === "campus";
 
@@ -308,14 +312,20 @@ export default function ProfileInfo({ me, onMeChange }: Props) {
         </Button>
       </div>
 
-      {/* Sheet chọn phòng ưa thích */}
+      {/* Sheet chọn phòng ưa thích.
+          height 92% (thay vì co theo nội dung): ô tìm kiếm phải nằm gần ĐỈNH màn
+          hình, nếu không iOS sẽ tự cuộn visual viewport để lộ ô đang focus và
+          kéo lệch cả sheet. Cao cố định cũng khiến danh sách không nhảy chiều
+          cao mỗi lần gõ (lọc còn 1 kết quả thì sheet vẫn đứng yên). */}
       <Sheet
+        className="pinfo-sheet"
         visible={roomSheetOpen}
         onClose={() => setRoomSheetOpen(false)}
         title={t("settings.preferredRooms")}
+        height="92%"
         maskClosable
       >
-        <div className="pinfo__sheet">
+        <div className="pinfo__sheet" style={{ paddingBottom: keyboardInset }}>
           <div className="pinfo__search">
             <Magnifier width={18} height={18} className="pinfo__search-icon" />
             <input
@@ -323,7 +333,34 @@ export default function ProfileInfo({ me, onMeChange }: Props) {
               value={roomSearch}
               placeholder={t("settings.searchRooms")}
               onChange={(e) => setRoomSearch(e.target.value)}
+              // Tên phòng là danh từ riêng ngắn (Amsterdam, Hà Nội…) → tắt hết
+              // auto-capitalize / autocorrect / spellcheck, nếu không iOS viết
+              // hoa chữ đầu + gạch chân đỏ như đang gõ sai chính tả.
+              type="text"
+              inputMode="search"
+              enterKeyHint="search"
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="none"
+              spellCheck={false}
+              // Enter = đóng bàn phím, trả lại chiều cao cho danh sách.
+              onKeyDown={(e) => {
+                if (e.key === "Enter") e.currentTarget.blur();
+              }}
             />
+            {roomSearch && (
+              <button
+                type="button"
+                className="pinfo__search-clear"
+                aria-label={t("settings.clearSearch")}
+                // Giữ focus ở ô nhập: không chặn mousedown thì nút cướp focus,
+                // bàn phím sập xuống rồi lại phải chạm ô để gõ tiếp.
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => setRoomSearch("")}
+              >
+                <Xmark width={16} height={16} />
+              </button>
+            )}
           </div>
           <div className="pinfo__room-list">
             {roomResults.length === 0 ? (

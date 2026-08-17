@@ -196,11 +196,6 @@ const en = {
   "settings.saved": "Settings saved",
   "settings.saveFailed": "Couldn't sync to the server, saved on this device.",
   "settings.savedLocalOnly": "Saved on this device.",
-  // Token expiry card (Figma 400-2293)
-  "account.tokenExpiry": "Token expires in",
-  "account.tokenExpired": "Token expired",
-  "account.tokenExpiryDesc":
-    "Due to development time constraints, the system currently only supports token-based login.",
   // Menu rows + personal info (ported from web Settings)
   "settings.personalInfo": "Personal info",
   "settings.personalInfoDesc": "Update your personal details.",
@@ -218,6 +213,7 @@ const en = {
   "settings.preferredRoomsPlaceholder": "Maximum 3 rooms",
   "settings.addRoom": "Add a room",
   "settings.searchRooms": "Search rooms",
+  "settings.clearSearch": "Clear search",
   "settings.noResults": "No results found",
   "settings.roomsLimit": "You can pick up to 3 rooms.",
   "settings.bookingConfirmation": "Booking confirmation",
@@ -484,11 +480,6 @@ const vi: Partial<Record<TranslationKey, string>> = {
   "settings.saved": "Đã lưu cài đặt",
   "settings.saveFailed": "Chưa đồng bộ được lên máy chủ, đã lưu trên thiết bị này.",
   "settings.savedLocalOnly": "Đã lưu trên thiết bị này.",
-  // Thẻ token hết hạn (Figma 400-2293)
-  "account.tokenExpiry": "Token hết hạn sau",
-  "account.tokenExpired": "Token đã hết hạn",
-  "account.tokenExpiryDesc":
-    "Do giới hạn về thời gian phát triển, hiện tại hệ thống chỉ hỗ trợ đăng nhập bằng token.",
   // Menu + thông tin cá nhân (port từ Cài đặt bản web)
   "settings.personalInfo": "Thông tin cá nhân",
   "settings.personalInfoDesc": "Cập nhật thông tin cá nhân của bạn.",
@@ -506,6 +497,7 @@ const vi: Partial<Record<TranslationKey, string>> = {
   "settings.preferredRoomsPlaceholder": "Tối đa 3 phòng",
   "settings.addRoom": "Thêm phòng",
   "settings.searchRooms": "Tìm phòng",
+  "settings.clearSearch": "Xoá tìm kiếm",
   "settings.noResults": "Không tìm thấy kết quả",
   "settings.roomsLimit": "Bạn chỉ được chọn tối đa 3 phòng.",
   "settings.bookingConfirmation": "Xác nhận đặt phòng",

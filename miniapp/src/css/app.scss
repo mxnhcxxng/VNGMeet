@@ -582,10 +582,12 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
   flex: 1 1 auto;
   display: flex;
   flex-direction: column;
-  // Nền xanh đậm loang từ đỉnh (Figma Rectangle 50) → trắng. Dùng đơn vị px để
-  // dải gradient chỉ phủ 200px trên cùng, phần còn lại của màn giữ trắng.
+  // Nền xanh đậm loang từ đỉnh (Figma Rectangle 50) → nền trang. Dùng đơn vị px
+  // để dải gradient chỉ phủ 200px trên cùng, phần còn lại giữ nền trang. Điểm
+  // cuối là var(--vm-surface) chứ KHÔNG hardcode #ffffff — nếu không, dark mode
+  // sẽ có mảng trắng đục từ 200px trở xuống.
   background:
-    linear-gradient(180deg, #0068ff -170px, #ffffff 200px),
+    linear-gradient(180deg, #0068ff -170px, var(--vm-surface) 200px),
     var(--vm-surface);
 }
 .booking-success__body {
@@ -2340,7 +2342,7 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
 }
 
 // ===================================================================
-// Màn Tài khoản (Figma 400-2699): hồ sơ + thẻ token + danh sách mục.
+// Màn Tài khoản (Figma 400-2699): hồ sơ + danh sách mục.
 // Mỗi mục mở một trang con trượt từ phải (.acct-sub).
 // ===================================================================
 .acct {
@@ -2349,11 +2351,19 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
   min-height: 100%;
   color: var(--vm-ink);
   // Halo "Rectangle 50" (Figma 400:2496): dải 220px sát mép trên, linear dọc từ
-  // #0068FF 80% (đỉnh) mờ dần về trong suốt (đáy), phủ trên nền trắng.
-  background-color: var(--vm-surface);
+  // #0068FF 80% (đỉnh) mờ dần về trong suốt (đáy), phủ trên nền trang.
+  // Điểm cuối phải là CHÍNH màu xanh với alpha 0 — dùng rgba(255,255,255,0) thì
+  // đuôi fade ám trắng, lệch hẳn so với nền ở dark mode.
+  //
+  // Nền dưới halo phải là --vm-page (Y HỆT .acct__tail), KHÔNG phải --vm-surface:
+  // halo chỉ cao 220px trong khi hero cao hơn thế, nên phần hero còn lại và dải
+  // .acct__tail nằm sát nhau. Hai màu khác nhau (dark: #16171b vs #0e0f12) tạo
+  // đúng một vệt cắt ngang ngay chỗ fade vừa tắt. Các thẻ mục vẫn dùng
+  // --vm-surface nên vẫn nổi trên nền này.
+  background-color: var(--vm-page, #f9fafb);
   background-image: linear-gradient(
     360deg,
-    rgba(255, 255, 255, 0) 0%,
+    rgba(0, 104, 255, 0) 0%,
     rgba(0, 104, 255, 0.8) 100%
   );
   background-repeat: no-repeat;
@@ -2399,41 +2409,6 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
 .acct__phone {
   font-size: 16px;
   line-height: 22px;
-  color: var(--vm-muted);
-}
-
-// --- Thẻ token hết hạn ---
-.acct__token {
-  margin: 24px 12px 0;
-  padding: 12px 16px;
-  border-radius: 12px;
-  background: var(--vm-accent-soft-bg);
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.acct__token-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-.acct__token-label {
-  font-size: 16px;
-  font-weight: 500;
-  line-height: 22px;
-  color: var(--vm-ink);
-}
-.acct__token-time {
-  font-size: 16px;
-  font-weight: 500;
-  line-height: 22px;
-  color: var(--vm-blue);
-  font-variant-numeric: tabular-nums;
-}
-.acct__token-desc {
-  font-size: 14px;
-  line-height: 18px;
   color: var(--vm-muted);
 }
 
@@ -2537,15 +2512,17 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
 .pinfo__field {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  // 0 — khoảng cách nhãn→ô do chính ô tạo ra bằng `margin: 4px 0` (đúng như
+  // .zaui-input làm), nếu cộng thêm gap thì trường custom sẽ thưa hơn Picker.
+  gap: 0;
   min-width: 0;
 }
-// Khớp nhãn của ZaUI Picker/Input (giống .scout__label).
+// Khớp .zaui-input-label (14/18, weight thường, màu chữ input) — trước đây
+// 14/20 weight 500 nên nhãn "Phòng ưa thích" đậm hơn các nhãn ZaUI khác.
 .pinfo__label {
   font-size: 14px;
-  font-weight: 500;
-  line-height: 20px;
-  color: var(--vm-ink);
+  line-height: 18px;
+  color: var(--zaui-light-input-text-color, #141415);
 }
 
 // Chevron của Picker vốn sát mép phải → chừa 12px cho đều (giống .scout).
@@ -2555,31 +2532,56 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
 .pinfo__chevron {
   color: var(--vm-muted);
 }
+// Picker disabled: ZaUI làm mờ chữ qua `color` trên wrapper → chevron phải
+// inherit theo, không thì icon vẫn đậm trong khi chữ đã mờ.
+.pinfo__scroll .zaui-input-affix-wrapper-disabled .pinfo__chevron {
+  color: inherit;
+}
 
-// Phòng ưa thích: ô chip + nút thêm, mở Sheet để chọn. Style khớp input Picker
-// (chiều cao, bo góc, viền, khoảng cách icon phải 12px) để đồng bộ với các trường
-// Office/Floor/Building.
+// Phòng ưa thích: nút mở Sheet — KHÔNG phải component ZaUI nên phải tự vẽ lại
+// đúng khung Input/Picker. Dùng THẲNG biến --zaui-light-input-* (ở dark mode đã
+// remap sang giá trị dark trong khối body[zaui-theme="dark"] bên dưới) thay vì
+// --vm-*: nhờ vậy khớp cả 2 theme và khớp cả các state (viền xanh khi bấm, nền
+// xám + mất viền khi disabled) y như 5 trường ZaUI còn lại.
 .pinfo__rooms {
   display: flex;
   align-items: center;
   gap: 8px;
   width: 100%;
-  min-height: 52px;
-  padding: 10px 12px;
-  border: 1px solid var(--vm-separator);
-  border-radius: 10px;
-  background: var(--vm-surface);
+  min-height: 48px; // = .zaui-input-medium
+  margin: 4px 0; // = margin của .zaui-input
+  padding: 8px 12px; // ngang 12px như .zaui-input; dọc co giãn theo chip
+  border: 1px solid var(--zaui-light-input-border-color, #b9bdc1);
+  border-radius: 8px;
+  background: var(--zaui-light-input-background-color, #ffffff);
+  color: var(--zaui-light-input-text-color, #141415);
+  font-size: 16px;
+  line-height: 22px;
   cursor: pointer;
   text-align: left;
   -webkit-tap-highlight-color: transparent;
 }
+// ZaUI đổi viền sang xanh ở hover/focus; trên mobile tương đương là :active.
+.pinfo__rooms:active:not(:disabled) {
+  border-color: var(--zaui-light-input-hover-border-color, #006af5);
+}
+// Khớp .zaui-input-disabled: nền xám + chữ mờ + BỎ viền (không dùng opacity —
+// opacity làm nhạt cả chip xanh, lệch hẳn với Picker disabled bên trên).
 .pinfo__rooms:disabled {
-  opacity: 0.6;
+  border: none;
+  padding: 9px 13px; // bù 1px viền đã bỏ để chiều cao không đổi
+  color: var(--zaui-light-input-disabled-color, #767a7f);
+  background: var(--zaui-light-input-disabled-background-color, #0000001a);
+  cursor: default;
 }
 .pinfo__rooms-placeholder {
   flex: 1 1 auto;
-  color: var(--vm-muted);
+  color: var(--zaui-light-input-placeholder-color, #b9bdc1);
   font-size: 16px;
+}
+.pinfo__rooms:disabled .pinfo__rooms-placeholder,
+.pinfo__rooms:disabled .pinfo__rooms-add {
+  color: inherit;
 }
 .pinfo__chips {
   flex: 1 1 auto;
@@ -2611,19 +2613,43 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
   background: var(--vm-surface);
 }
 
-// Sheet chọn phòng ưa thích
+// --- Sheet chọn phòng ưa thích ---------------------------------------------
+// Bố cục chuẩn của "picker có tìm kiếm": ô tìm kiếm GHIM trên cùng, danh sách là
+// vùng cuộn DUY NHẤT ở giữa, nút xác nhận GHIM đáy. Sheet cao cố định 92% (prop
+// height của ZaUI Sheet) chứ không co theo nội dung, vì 2 lý do:
+//  1) Ô tìm kiếm phải nằm gần đỉnh màn hình. Sheet thấp → ô nhập rơi vào vùng
+//     bàn phím che, iOS tự cuộn visual viewport để lộ nó và kéo lệch nguyên lớp
+//     position: fixed (đúng hiện tượng "loạn xạ nút lên").
+//  2) Chiều cao đứng yên khi gõ — lọc còn 1 kết quả thì sheet không co giật.
+// Bàn phím che bao nhiêu thì component chèn ngần ấy vào padding-bottom (xem
+// useKeyboardInset) để nút "Xong" luôn nổi trên bàn phím.
+.pinfo-sheet .zaui-sheet-content {
+  // ZaUI đặt touch-action: none trên sheet để bắt cử chỉ kéo — chặn luôn cuộn
+  // của .pinfo__room-list bên trong, nên phải mở lại pan-y cho vùng cuộn.
+  .pinfo__room-list {
+    touch-action: pan-y;
+  }
+}
 .pinfo__sheet {
+  // Chiếm hết phần còn lại của sheet (dưới handler + title); min-height: 0 để
+  // .pinfo__room-list được phép co lại và tự cuộn thay vì đội sheet cao lên.
+  flex: 1 1 auto;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  max-height: 60vh;
   padding: 8px 16px 16px;
 }
+// Ô tìm kiếm: kiểu "filled" (chuẩn ô tìm kiếm của Zalo — nằm trong sheet nên
+// không cần viền) → chỉ mượn hình học/typography của Input ZaUI, KHÔNG mượn màu
+// (xem .pinfo__search-input).
 .pinfo__search {
+  flex: none;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px;
-  border-radius: 10px;
+  min-height: 48px;
+  padding: 0 12px;
+  border-radius: 8px;
   background: var(--vm-surface-2);
   margin-bottom: 8px;
 }
@@ -2631,18 +2657,50 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
   flex: none;
   color: var(--vm-muted);
 }
+// Nút xoá nhanh nội dung tìm kiếm (chỉ hiện khi đã gõ). 32px vuông cho đủ vùng
+// chạm; -6px lề phải để icon lùi sát mép hơn, cân với icon kính lúp bên trái.
+.pinfo__search-clear {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin-right: -6px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  color: var(--vm-muted);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
 .pinfo__search-input {
   flex: 1 1 auto;
   min-width: 0;
   border: none;
   background: none;
   outline: none;
+  // Màu dùng token của app, KHÔNG dùng --zaui-light-input-*: token placeholder
+  // của ZaUI (#b9bdc1 light / #53575a dark) được thiết kế cho nền input trắng
+  // /#141415 có viền — đặt lên nền filled --vm-surface-2 (#f4f4f5 / #202127) thì
+  // tương phản rơi xuống ~2:1, dark mode gần như mất chữ. --vm-muted đọc được ở
+  // cả 2 theme và khớp luôn màu icon kính lúp ngay cạnh.
   color: var(--vm-ink);
-  font-size: 15px;
+  // 16px bắt buộc: dưới 16px iOS tự zoom trang khi focus vào input.
+  font-size: 16px;
+  line-height: 22px;
 }
+.pinfo__search-input::placeholder {
+  color: var(--vm-muted);
+}
+// Vùng cuộn duy nhất của sheet. min-height: 0 bắt buộc — thiếu nó thì flex item
+// không co xuống dưới chiều cao nội dung và danh sách sẽ tràn ra sau footer.
 .pinfo__room-list {
   flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain; // cuộn hết danh sách không kéo lây nền phía sau
   display: flex;
   flex-direction: column;
 }
@@ -2677,13 +2735,17 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
   flex: none;
   color: var(--vm-blue);
 }
+// Sheet giờ cao cố định → canh giữa trạng thái rỗng theo chiều dọc (margin auto
+// trong flex column) thay vì dán sát mép trên một khoảng trống lớn.
 .pinfo__room-empty {
+  margin: auto 0;
   padding: 24px;
   text-align: center;
   color: var(--vm-muted);
   font-size: 14px;
 }
 .pinfo__sheet-footer {
+  flex: none;
   padding-top: 12px;
 }
 
@@ -2767,6 +2829,39 @@ body[zaui-theme="dark"] {
   --zaui-light-picker-option-color: var(--vm-muted);
   --zaui-light-picker-option-selected-color: var(--vm-blue);
   --zaui-light-picker-selected-background-color: rgba(255, 255, 255, 0.08);
+
+  // ZaUI Input/Picker: zaui.css có ĐỦ bộ biến --zaui-dark-input-*, nhưng chỉ vá
+  // MỘT SỐ rule cho dark (body[zaui-theme="dark"] .zaui-input...), các rule còn
+  // lại vẫn đọc --zaui-light-input-*. Rõ nhất là .zaui-input-affix-wrapper —
+  // khung của Picker (Picker = Input + suffix) — bản dark CHỈ ghi đè
+  // background-color, KHÔNG ghi đè border-color, nên viền giữ nguyên #b9bdc1 →
+  // đúng cái "viền trắng" ở dark mode. Đây là chỗ ZaUI quên chứ không phải chủ
+  // ý. Sửa gọn bằng cách remap luôn bộ biến light sang giá trị dark tương ứng:
+  // mọi rule chưa được vá tự khớp theo, và các control tự vẽ (.pinfo__rooms)
+  // dùng chung biến này cũng đúng theo.
+  --zaui-light-input-text-color: var(--zaui-dark-input-text-color, #f4f5f6);
+  --zaui-light-input-border-color: var(--zaui-dark-input-border-color, #767a7f);
+  --zaui-light-input-placeholder-color: var(
+    --zaui-dark-input-placeholder-color,
+    #53575a
+  );
+  --zaui-light-input-background-color: var(
+    --zaui-dark-input-background-color,
+    #141415
+  );
+  --zaui-light-input-disabled-color: var(--zaui-dark-input-disabled-color, #8f9499);
+  --zaui-light-input-disabled-background-color: var(
+    --zaui-dark-input-disabled-background-color,
+    #ffffff1a
+  );
+  --zaui-light-input-helper-text-color: var(
+    --zaui-dark-input-helper-text-color,
+    #8f9499
+  );
+  --zaui-light-input-clear-icon-color: var(
+    --zaui-dark-input-clear-icon-color,
+    #f4f5f6
+  );
 
   // Phòng khi sheet dùng .zaui-sheet-content thay cho .zaui-modal-content.
   .zaui-sheet-content {
@@ -3010,8 +3105,9 @@ body[zaui-theme="dark"] {
   right: 0;
   height: 200px;
   pointer-events: none;
-  // Nền xanh đậm → trắng (Figma Rectangle 50, 360×200).
-  background: linear-gradient(180deg, #0068ff -85.28%, #ffffff 100%);
+  // Nền xanh đậm → nền trang (Figma Rectangle 50, 360×200). Đuôi phải bám
+  // var(--vm-surface) để không hở mép trắng trên nền tối.
+  background: linear-gradient(180deg, #0068ff -85.28%, var(--vm-surface) 100%);
 }
 .link-ok__body {
   position: relative;
@@ -3153,7 +3249,7 @@ body[zaui-theme="dark"] {
 // --- Biến thể cho màn xác nhận (link-confirm) & lỗi (link-error) ---------
 // Banner đỏ nhạt cho màn thất bại (Figma 438-3259).
 .link-ok__banner--error {
-  background: linear-gradient(180deg, #ff3b30 -85.28%, #ffffff 100%);
+  background: linear-gradient(180deg, #ff3b30 -85.28%, var(--vm-surface) 100%);
 }
 // Vòng tròn X đỏ cho màn thất bại.
 .link-ok__check--error {

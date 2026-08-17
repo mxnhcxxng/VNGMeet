@@ -60,34 +60,9 @@ function formatPhone(raw?: string | null): string {
   return raw;
 }
 
-function pad2(n: number): string {
-  return n < 10 ? `0${n}` : String(n);
-}
-
-// Đồng hồ đếm ngược tới hạn `expSec` (epoch giây). Trả "HH:MM:SS", null nếu chưa
-// có hạn, "" khi đã hết hạn (caller tự hiện nhãn "đã hết hạn").
-function useCountdown(expSec?: number | null): string | null {
-  const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
-  useEffect(() => {
-    if (!expSec) return;
-    const id = window.setInterval(
-      () => setNow(Math.floor(Date.now() / 1000)),
-      1000,
-    );
-    return () => window.clearInterval(id);
-  }, [expSec]);
-  if (!expSec) return null;
-  const left = expSec - now;
-  if (left <= 0) return "";
-  const h = Math.floor(left / 3600);
-  const m = Math.floor((left % 3600) / 60);
-  const s = left % 60;
-  return `${pad2(h)}:${pad2(m)}:${pad2(s)}`;
-}
-
-// Màn Tài khoản (Figma 400-2699): hồ sơ + thẻ token + danh sách mục (Thông tin cá
-// nhân / Giao diện / Ngôn ngữ / Phản hồi) trong thẻ trắng bo góc. Mỗi mục mở một
-// trang con trượt từ phải.
+// Màn Tài khoản (Figma 400-2699): hồ sơ + danh sách mục (Thông tin cá nhân /
+// Giao diện / Ngôn ngữ / Phản hồi) trong thẻ trắng bo góc. Mỗi mục mở một trang
+// con trượt từ phải.
 export default function AccountPage({ me, onMeChange }: Props) {
   const { theme, setTheme, language, setLanguage, t } = useSettings();
   const { openSnackbar } = useSnackbar();
@@ -96,11 +71,6 @@ export default function AccountPage({ me, onMeChange }: Props) {
 
   const profile = me?.profile ?? null;
   const phone = formatPhone(profile?.phone);
-  // Hạn token Graph thật (~24h) do backend trả (backend đọc từ graph_token_pool).
-  // KHÔNG decode session JWT Zalo làm fallback vì nó sống 30 ngày → card hiện
-  // ~720h. Không có token Graph → null → ẩn card.
-  const expSec = me?.tokenExpiresAt ?? null;
-  const countdown = useCountdown(expSec);
 
   // Nạp trước danh sách lựa chọn hồ sơ NGAY khi vào tab Tài khoản → khi bấm
   // "Thông tin cá nhân" dữ liệu đã sẵn trong cache, mở màn không giật/không chờ.
@@ -177,19 +147,6 @@ export default function AccountPage({ me, onMeChange }: Props) {
           {phone && <div className="acct__phone">{phone}</div>}
         </div>
       </section>
-
-      {/* Thẻ token hết hạn */}
-      {countdown !== null && (
-        <section className="acct__token">
-          <div className="acct__token-row">
-            <span className="acct__token-label">{t("account.tokenExpiry")}</span>
-            <span className="acct__token-time">
-              {countdown || t("account.tokenExpired")}
-            </span>
-          </div>
-          <p className="acct__token-desc">{t("account.tokenExpiryDesc")}</p>
-        </section>
-      )}
 
       {/* Nhóm cài đặt trong thẻ trắng bo góc, trên dải nền xám tới bottom-nav */}
       <section className="acct__tail">

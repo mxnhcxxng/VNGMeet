@@ -211,7 +211,6 @@ export interface MeResponse {
   email?: string;
   profile?: UserProfile | null;
   profileComplete?: boolean;
-  tokenExpiresAt?: number | null; // epoch giây — hạn của session JWT (đếm ngược)
 }
 
 // Một lựa chọn cho các trường hồ sơ (office/floor/building/phòng ưa thích) — khớp
