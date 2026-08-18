@@ -8,13 +8,14 @@ import Clock from "@gravity-ui/icons/Clock";
 import MapPin from "@gravity-ui/icons/MapPin";
 import Persons from "@gravity-ui/icons/Persons";
 import ArrowShapeTurnUpRight from "@gravity-ui/icons/ArrowShapeTurnUpRight";
+import Binoculars from "@gravity-ui/icons/Binoculars";
 
 import MapModal from "@/components/map-modal";
 import { useSwipeBack } from "@/hooks/use-swipe-back";
 import { roomFlag } from "@/services/room-flags";
 import { composeDirectionsText, shareDirections } from "@/services/share";
 import { useT } from "@/services/settings";
-import type { TranslationKey } from "@/services/i18n";
+import type { TFunction, TranslationKey } from "@/services/i18n";
 import type { BookingStatus, UpcomingEvent } from "@/types";
 
 // Trạng thái đặt phòng → chip (nhãn + màu). Dùng chung style .history-chip với
@@ -27,15 +28,38 @@ const STATUS_CHIP: Record<
   ok: { labelKey: "status.awaiting", className: "history-chip--pending" },
   pending: { labelKey: "status.pending", className: "history-chip--pending" },
   ongoing: { labelKey: "status.ongoing", className: "history-chip--success" },
-  finished: { labelKey: "status.finished", className: "history-chip--canceled" },
+  finished: { labelKey: "status.finished", className: "history-chip--finished" },
   failed: { labelKey: "status.failed", className: "history-chip--failed" },
   canceled: { labelKey: "status.canceled", className: "history-chip--canceled" },
+};
+
+// CTA cuối màn phụ thuộc trạng thái lượt đặt:
+//  - success / ongoing: phòng đang là của mình → chia sẻ đường đi.
+//  - failed: đặt hụt → săn ngay phòng tương tự cho đúng khung giờ đó.
+//  - finished / canceled: buổi họp đã xong/huỷ → săn cho tuần sau (ngày +7).
+//  - ok / pending: đang chờ phòng phản hồi → chưa có hành động nào.
+const SHARE_STATUSES: BookingStatus[] = ["success", "ongoing"];
+// addDays truyền cho buildScoutPrefill khi mở màn "Săn phòng".
+const SCOUT_CTA: Partial<
+  Record<BookingStatus, { labelKey: TranslationKey; addDays: number }>
+> = {
+  failed: { labelKey: "detail.scoutSimilar", addDays: 0 },
+  finished: { labelKey: "detail.scoutNextWeek", addDays: 7 },
+  canceled: { labelKey: "detail.scoutNextWeek", addDays: 7 },
 };
 
 // "2026-07-24" -> "24/07"
 function formatDate(iso: string): string {
   const [, m, d] = iso.split("-");
   return d && m ? `${d}/${m}` : iso;
+}
+
+// "2026-07-24" -> "T5" / "Thu" (thứ dạng ngắn, dùng chung key với màn "Lịch sử").
+function weekdayLabel(iso: string, t: TFunction): string {
+  const d = new Date(`${iso}T00:00:00`);
+  return Number.isNaN(d.getTime())
+    ? ""
+    : t(`weekday.${d.getDay()}` as TranslationKey);
 }
 
 const ATTENDEE_EMAIL_DOMAIN = "@vng.com.vn";
@@ -55,12 +79,23 @@ type Props = {
   // Trạng thái lượt đặt để hiện chip dưới tiêu đề (Figma 317-9943). Home mở từ
   // lịch sắp tới nên luôn "success"; Lịch sử truyền đúng status của lượt đặt.
   status?: BookingStatus;
+  // Mở màn "Săn phòng" điền sẵn theo lượt đặt này (chỉ "Lịch sử" truyền vào);
+  // addDays = 0 (săn phòng tương tự) hoặc 7 (săn cho tuần sau).
+  onScout?: (addDays: number) => void;
+  // Đang có phiên săn chạy → khoá CTA săn phòng (backend chỉ cho 1 phiên/người).
+  scoutDisabled?: boolean;
   onClose: () => void;
 };
 
 // Màn "Chi tiết lịch họp": push từ phải sang trái (slide-in RTL). Gồm map, thông
 // tin cơ bản (ngày/giờ/vị trí/người tham dự) và mô tả cuộc họp. Khớp Figma 317-9943.
-export default function MeetingDetail({ event, status, onClose }: Props) {
+export default function MeetingDetail({
+  event,
+  status,
+  onScout,
+  scoutDisabled,
+  onClose,
+}: Props) {
   const t = useT();
   const [entered, setEntered] = useState(false);
   const [leaving, setLeaving] = useState(false);
@@ -83,7 +118,11 @@ export default function MeetingDetail({ event, status, onClose }: Props) {
 
   const title = event.subject || event.room_name || t("common.meeting");
   const flag = roomFlag(event.room_name);
-  const dateTime = `${formatDate(event.date)} • ${event.start_time} - ${event.end_time}`;
+  // Dòng ngày/giờ mở đầu bằng thứ: "T5 • 24/07 • 14:00 - 15:00".
+  const weekday = weekdayLabel(event.date, t);
+  const dateTime = `${weekday ? `${weekday} • ` : ""}${formatDate(event.date)} • ${
+    event.start_time
+  } - ${event.end_time}`;
   const attendees = (event.attendees ?? [])
     .map(stripAttendeeDomain)
     .filter(Boolean);
@@ -94,6 +133,9 @@ export default function MeetingDetail({ event, status, onClose }: Props) {
       : attendees.slice(0, ATTENDEES_PREVIEW);
   const description = (event.body ?? "").trim();
   const chip = status ? STATUS_CHIP[status] : null;
+  // Không truyền status (mở từ "Lịch sắp tới") coi như lượt đặt thành công.
+  const canShare = !status || SHARE_STATUSES.includes(status);
+  const scoutCta = !canShare && status && onScout ? SCOUT_CTA[status] : null;
 
   // Chia sẻ đường đi tới phòng họp: ưu tiên ảnh sơ đồ, không có thì chia sẻ text.
   async function handleShare() {
@@ -202,16 +244,35 @@ export default function MeetingDetail({ event, status, onClose }: Props) {
         </section>
       </div>
 
-      <footer className="mtg-detail__footer">
-        <button
-          className="mtg-detail__share"
-          type="button"
-          onClick={handleShare}
-        >
-          <ArrowShapeTurnUpRight width={18} height={18} />
-          {t("dir.share")}
-        </button>
-      </footer>
+      {(canShare || scoutCta) && (
+        <footer className="mtg-detail__footer">
+          {canShare ? (
+            <button
+              className="mtg-detail__share"
+              type="button"
+              onClick={handleShare}
+            >
+              <ArrowShapeTurnUpRight width={18} height={18} />
+              {t("dir.share")}
+            </button>
+          ) : (
+            <>
+              {scoutDisabled && (
+                <p className="mtg-detail__footer-note">{t("detail.scoutBusy")}</p>
+              )}
+              <button
+                className="mtg-detail__share"
+                type="button"
+                disabled={scoutDisabled}
+                onClick={() => onScout?.(scoutCta!.addDays)}
+              >
+                <Binoculars width={18} height={18} />
+                {t(scoutCta!.labelKey)}
+              </button>
+            </>
+          )}
+        </footer>
+      )}
 
       {mapOpen && event.map && (
         <MapModal src={event.map} onClose={() => setMapOpen(false)} />

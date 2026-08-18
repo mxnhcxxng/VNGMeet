@@ -785,6 +785,12 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
   background-color: #c7d2dd;
   background-image: linear-gradient(135deg, #a8bccd 0%, #6f8aa3 100%);
 }
+// Lượt đặt hụt / đã huỷ: ảnh phòng chuyển đen trắng + mờ đi, để nhìn thẻ là biết
+// ngay lượt đặt không còn hiệu lực (chip trạng thái chỉ là phần xác nhận).
+.history-card__media--dimmed {
+  filter: grayscale(1);
+  opacity: 0.6;
+}
 .history-card__body {
   flex: 1 1 0;
   min-width: 0;
@@ -843,6 +849,12 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
 .history-chip--failed {
   background: rgba(240, 68, 56, 0.15);
   color: #b42318;
+}
+// Đã kết thúc = buổi họp đã diễn ra đúng như đặt → xanh dương (tích cực), khác
+// với "đã huỷ" màu xám trung tính.
+.history-chip--finished {
+  background: rgba(0, 104, 255, 0.15);
+  color: #0053cc;
 }
 .history-chip--canceled {
   background: rgba(113, 113, 122, 0.15);
@@ -1105,6 +1117,20 @@ $header-h: calc(44px + var(--zaui-safe-area-inset-top, 0px));
 }
 .mtg-detail__share:active {
   background: #0057cc;
+}
+// Giữ nguyên nút primary xanh, chỉ làm mờ (khớp cách disable của các nút khác
+// trong app) — đổi sang nền xám + chữ xám sẽ nhìn thành nút tertiary.
+.mtg-detail__share:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+// Chú thích dưới footer (vd đang có phiên săn phòng nên khoá CTA).
+.mtg-detail__footer-note {
+  margin: 0 0 8px;
+  color: var(--vm-muted);
+  font-size: 13px;
+  line-height: 18px;
+  text-align: center;
 }
 
 // ===================================================================
@@ -2813,6 +2839,9 @@ body[zaui-theme="dark"] {
   }
   .history-chip--failed {
     color: #f87171;
+  }
+  .history-chip--finished {
+    color: #60a5fa;
   }
   .history-chip--canceled {
     color: #a1a1aa;

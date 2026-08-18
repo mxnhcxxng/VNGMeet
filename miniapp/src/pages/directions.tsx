@@ -6,14 +6,11 @@ import Compass from "@gravity-ui/icons/Compass";
 
 import RoomDirectionDetail from "@/components/room-direction-detail";
 import { useSwipeBack } from "@/hooks/use-swipe-back";
-import { api, AuthError } from "@/services/api";
+import { AuthError } from "@/services/api";
+import { loadRoomDirectory, peekRoomDirectory } from "@/services/room-directory";
 import { roomFlag } from "@/services/room-flags";
 import { useT } from "@/services/settings";
 import type { DirectoryRoom } from "@/types";
-
-// Cache cấp module: mở lại màn "Chỉ đường" render ngay từ cache rồi nạp ngầm
-// (sống trong phiên, mất khi reload app).
-let cachedRooms: DirectoryRoom[] | null = null;
 
 // Khớp case-insensitive với cột office của meeting_room_metadata.
 function officeKey(office?: string | null): string {
@@ -66,8 +63,8 @@ export default function Directions({ office, onClose }: Props) {
   const [entered, setEntered] = useState(false);
   const [leaving, setLeaving] = useState(false);
 
-  const [rooms, setRooms] = useState<DirectoryRoom[] | null>(cachedRooms);
-  const [loading, setLoading] = useState(cachedRooms === null);
+  const [rooms, setRooms] = useState<DirectoryRoom[] | null>(peekRoomDirectory);
+  const [loading, setLoading] = useState(peekRoomDirectory() === null);
   const [error, setError] = useState(false);
   const [selected, setSelected] = useState<DirectoryRoom | null>(null);
   // Chữ cái đang chạm trên thanh A-Z (hiện bong bóng + tô sáng); null = không chạm.
@@ -92,12 +89,10 @@ export default function Directions({ office, onClose }: Props) {
   const swipeBack = useSwipeBack(handleClose, !selected);
 
   async function load() {
-    if (cachedRooms === null) setLoading(true);
+    if (peekRoomDirectory() === null) setLoading(true);
     setError(false);
     try {
-      const { rooms } = await api.roomsDirectory();
-      cachedRooms = rooms;
-      setRooms(rooms);
+      setRooms(await loadRoomDirectory());
     } catch (e) {
       if (!(e instanceof AuthError)) setError(true);
     } finally {

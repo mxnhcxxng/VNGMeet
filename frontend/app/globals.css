@@ -229,3 +229,19 @@ input[type="password"]::-ms-clear {
   --accent-soft: color-mix(in oklab, var(--accent) 15%, transparent);
   --accent-soft-hover: color-mix(in oklab, var(--accent) 20%, transparent);
 }
+
+/* Booking history: a finished meeting ran exactly as booked, so its chip reads
+   blue instead of neutral grey. Spelled out here rather than via `color="accent"`
+   because the app accent is orange — and `.accent-keep-blue` only re-mixes the
+   background shades, not `--accent-soft-foreground` (already computed on :root),
+   so the chip label would still come out orange. Same mix ratios HeroUI uses for
+   its own soft chips, so it sits in the same family as success/warning/danger. */
+.chip.chip-finished {
+  --chip-finished: oklch(62.04% 0.195 253.83);
+  --chip-bg: color-mix(in oklab, var(--chip-finished) 15%, transparent);
+  --chip-fg: color-mix(in oklab, var(--chip-finished) 70%, var(--foreground) 30%);
+}
+html.dark .chip.chip-finished {
+  --chip-bg: color-mix(in oklab, var(--chip-finished) 12%, transparent);
+  --chip-fg: color-mix(in oklab, var(--chip-finished) 80%, var(--foreground) 30%);
+}

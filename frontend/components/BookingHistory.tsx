@@ -43,11 +43,18 @@ const STATUS_COLOR: Record<
   ok: "warning",
   pending: "warning",
   // A meeting in progress reads as live-and-well, same as a confirmed booking.
-  // Once it's over there is nothing to act on, so it drops to neutral.
+  // Once it's over it keeps a positive read (blue, via STATUS_CHIP_CLASS below);
+  // only a cancelation drops to neutral.
   ongoing: "success",
   finished: "default",
   failed: "danger",
   canceled: "default",
+};
+
+// HeroUI chips only ship accent/success/warning/danger/default, and the app accent
+// is orange — so the blue "finished" chip comes from a local class (globals.css).
+const STATUS_CHIP_CLASS: Partial<Record<Booking["status"], string>> = {
+  finished: "chip-finished",
 };
 
 const STATUS_LABEL_KEY: Record<Booking["status"], TranslationKey> = {
@@ -670,6 +677,7 @@ export function BookingHistory() {
                           size="sm"
                           variant="soft"
                           color={STATUS_COLOR[b.status] ?? "warning"}
+                          className={STATUS_CHIP_CLASS[b.status]}
                         >
                           {STATUS_LABEL_KEY[b.status]
                             ? t(STATUS_LABEL_KEY[b.status])

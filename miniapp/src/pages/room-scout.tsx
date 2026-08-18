@@ -13,7 +13,13 @@ import { getToken } from "@/services/auth";
 import { useSwipeBack } from "@/hooks/use-swipe-back";
 import { useSettings, useT } from "@/services/settings";
 import type { TFunction, TranslationKey } from "@/services/i18n";
-import type { CapacitySize, RoomScout as RoomScoutRow, RoomScoutPayload } from "@/types";
+import type {
+  BookingHistoryItem,
+  CapacitySize,
+  RoomScout as RoomScoutRow,
+  RoomScoutPayload,
+  ScoutPrefill,
+} from "@/types";
 
 // Săn tối đa 14 ngày tới — khớp SCOUT_MAX_ADVANCE_DAYS của web.
 const SCOUT_MAX_ADVANCE_DAYS = 14;
@@ -105,6 +111,114 @@ function defaultStartTime(): string {
   return options.find((tm) => timeToMinutes(tm) >= nowMinutes) ?? options[0];
 }
 
+// Snap về lưới 30 phút của TIME_OPTIONS (làm tròn xuống cho giờ bắt đầu, lên cho
+// giờ kết thúc) rồi kẹp trong khung giờ làm việc 09:00–18:00.
+const SLOT_MINUTES = 30;
+const DAY_START_MIN = 9 * 60;
+const DAY_END_MIN = 18 * 60;
+
+function minutesToTime(minutes: number): string {
+  return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(
+    minutes % 60,
+  ).padStart(2, "0")}`;
+}
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+// "14:30:00" / "14:30" -> số phút từ 00:00; NaN nếu chuỗi rỗng/hỏng.
+function parseClock(value?: string | null): number {
+  const [h, m] = (value || "").slice(0, 5).split(":");
+  const minutes = Number(h) * 60 + Number(m);
+  return Number.isFinite(minutes) ? minutes : NaN;
+}
+// Số phút từ 00:00 của thời điểm hiện tại.
+function nowMinutes(): number {
+  const now = new Date();
+  return now.getHours() * 60 + now.getMinutes();
+}
+
+// ISO date + n ngày, kẹp trong cửa sổ [hôm nay, hôm nay + 14] backend cho phép.
+// Lượt đặt cũ thường đã qua: CTA "tuần sau" (days = 7) cộng tiếp từng tuần để giữ
+// đúng thứ trong tuần (vd họp thứ Ba → thứ Ba gần nhất chưa qua), còn CTA "phòng
+// tương tự" (days = 0) thì lùi về hôm nay.
+function shiftScoutDate(iso: string, days: number): string {
+  const base = isoToDate(iso);
+  if (Number.isNaN(base.getTime())) return defaultScoutDate();
+  base.setHours(12, 0, 0, 0);
+  base.setDate(base.getDate() + days);
+
+  const min = localDateAfter(0);
+  const max = localDateAfter(SCOUT_MAX_ADVANCE_DAYS);
+  let value = localIso(base);
+  if (value < min) {
+    if (days <= 0) return min;
+    while (value < min) {
+      base.setDate(base.getDate() + days);
+      value = localIso(base);
+    }
+  }
+  return value > max ? max : value;
+}
+
+// Dựng dữ liệu điền sẵn cho form săn phòng từ một lượt đặt trong "Lịch sử":
+// giữ nguyên khung giờ (đã snap về lưới 30 phút) và sức chứa của phòng cũ,
+// `addDays` = 0 khi săn lại phòng tương tự, = 7 khi săn cho tuần sau.
+export function buildScoutPrefill(
+  item: BookingHistoryItem,
+  addDays: number,
+  capacitySize?: CapacitySize | null,
+): ScoutPrefill {
+  const rawStart = parseClock(item.start_time);
+  const rawEnd = parseClock(item.end_time);
+  const hasRange =
+    !Number.isNaN(rawStart) && !Number.isNaN(rawEnd) && rawEnd > rawStart;
+
+  const startMin = hasRange
+    ? clamp(
+        Math.floor(rawStart / SLOT_MINUTES) * SLOT_MINUTES,
+        DAY_START_MIN,
+        DAY_END_MIN - SLOT_MINUTES,
+      )
+    : timeToMinutes(defaultStartTime());
+  const endMin = hasRange
+    ? clamp(
+        Math.ceil(rawEnd / SLOT_MINUTES) * SLOT_MINUTES,
+        startMin + SLOT_MINUTES,
+        DAY_END_MIN,
+      )
+    : clamp(startMin + 60, startMin + SLOT_MINUTES, DAY_END_MIN);
+
+  // Thời lượng = độ dài khung giờ, nhưng Picker chỉ có tới 180 phút.
+  const maxDuration = Number(DURATION_VALUES[DURATION_VALUES.length - 1]);
+  const duration = clamp(endMin - startMin, SLOT_MINUTES, maxDuration);
+
+  let date = shiftScoutDate(item.date, addDays);
+  let start = startMin;
+  let end = endMin;
+
+  // Khung giờ rơi vào hôm nay nhưng đã trôi qua thì scout không bao giờ đặt được:
+  // dời sang slot gần nhất còn đặt được (giữ độ dài khung giờ), hết giờ làm việc
+  // hôm nay thì sang ngày mai với khung giờ gốc.
+  if (date === localDateAfter(0) && end <= nowMinutes()) {
+    const nextSlot = Math.ceil(nowMinutes() / SLOT_MINUTES) * SLOT_MINUTES;
+    if (nextSlot + duration <= DAY_END_MIN) {
+      start = Math.max(nextSlot, DAY_START_MIN);
+      end = Math.min(start + (endMin - startMin), DAY_END_MIN);
+    } else {
+      date = localDateAfter(1); // luôn trong cửa sổ 14 ngày
+    }
+  }
+
+  return {
+    scout_date: date,
+    scout_start_time: minutesToTime(start),
+    scout_end_time: minutesToTime(end),
+    duration_minutes: duration,
+    capacity_sizes: capacitySize ? [capacitySize] : [],
+    office: item.office ?? null,
+  };
+}
+
 function durationLabel(t: TFunction, minutes: number): string {
   const key = DURATION_KEY[String(minutes)];
   return key ? t(key) : t("scout.durFallback", { n: minutes });
@@ -148,13 +262,42 @@ function readScoutCache(): ScoutCache | null {
   return scoutCache && scoutCache.token === getToken() ? scoutCache : null;
 }
 
-type Props = { onClose: () => void };
+// Ghi cache; office là tuỳ chọn để màn khác (vd "Lịch sử") cập nhật danh sách
+// phiên mà không xoá office đã biết.
+function writeScoutCache(scouts: RoomScoutRow[], userOffice?: string) {
+  const previous = readScoutCache();
+  scoutCache = {
+    token: getToken(),
+    scouts,
+    userOffice: userOffice ?? previous?.userOffice ?? "",
+  };
+}
+
+// Backend chỉ cho mỗi người 1 phiên săn đang chạy, nên màn "Lịch sử" phải biết
+// trước để disable CTA săn phòng. null = chưa nạp lần nào.
+export function peekHasActiveScout(): boolean | null {
+  const cache = readScoutCache();
+  return cache ? cache.scouts.some((s) => s.status === "active") : null;
+}
+
+// Nạp lại danh sách phiên (dùng chung cache với màn "Săn phòng").
+export async function loadHasActiveScout(): Promise<boolean> {
+  const { scouts } = await api.roomScouts();
+  writeScoutCache(scouts);
+  return scouts.some((s) => s.status === "active");
+}
+
+type Props = {
+  // Điền sẵn form khi mở từ "Lịch sử" (săn phòng tương tự / săn cho tuần sau).
+  prefill?: ScoutPrefill | null;
+  onClose: () => void;
+};
 
 // Màn "Săn phòng" (Figma iPhone 17-9): trượt từ PHẢI vào, có nút back → swipe-back.
 // Học fields + autofill từ bản web (frontend/components/RoomScout.tsx); các dropdown
 // dùng ZaUI Picker (multi-column) + DatePicker thay cho Select của web.
 // Vòng đời: form tạo → thẻ "đang săn" (sửa/huỷ) → thẻ "đã tìm thấy phòng".
-export default function RoomScout({ onClose }: Props) {
+export default function RoomScout({ prefill, onClose }: Props) {
   const t = useT();
   const [entered, setEntered] = useState(false);
   const [leaving, setLeaving] = useState(false);
@@ -184,7 +327,7 @@ export default function RoomScout({ onClose }: Props) {
       setUserOffice(office);
       setScouts(res.scouts);
       // Cập nhật cache cho lần mở sau (stale-while-revalidate).
-      scoutCache = { token: getToken(), scouts: res.scouts, userOffice: office };
+      writeScoutCache(res.scouts, office);
     } catch (e) {
       if (!(e instanceof AuthError)) {
         // Giữ trạng thái cũ; báo nhẹ để không kẹt màn trắng.
@@ -271,7 +414,11 @@ export default function RoomScout({ onClose }: Props) {
                 onEdit={() => setEditing(true)}
               />
             ) : (
-              <ScoutForm userOffice={userOffice} onSaved={load} />
+              <ScoutForm
+                userOffice={(prefill?.office ?? "").trim() || userOffice}
+                prefill={prefill}
+                onSaved={load}
+              />
             )}
           </>
         )}
@@ -361,12 +508,14 @@ function ScoutForm({
   userOffice,
   mode = "create",
   scout,
+  prefill,
   onSaved,
   onCancel,
 }: {
   userOffice: string;
   mode?: "create" | "edit";
   scout?: RoomScoutRow;
+  prefill?: ScoutPrefill | null;
   onSaved: () => void | Promise<void>;
   onCancel?: () => void;
 }) {
@@ -375,15 +524,23 @@ function ScoutForm({
   const { openSnackbar } = useSnackbar();
   const isEdit = mode === "edit";
 
+  // Ưu tiên phiên đang sửa > dữ liệu điền sẵn từ "Lịch sử" > mặc định.
   const [scoutDate, setScoutDate] = useState(
-    () => scout?.scout_date || defaultScoutDate(),
+    () => scout?.scout_date || prefill?.scout_date || defaultScoutDate(),
   );
   const [startTime, setStartTime] = useState(
-    () => scout?.scout_start_time || defaultStartTime(),
+    () =>
+      scout?.scout_start_time || prefill?.scout_start_time || defaultStartTime(),
   );
-  const [endTime, setEndTime] = useState(scout?.scout_end_time || "");
-  const [duration, setDuration] = useState(
-    scout ? String(scout.duration_minutes) : "",
+  const [endTime, setEndTime] = useState(
+    () => scout?.scout_end_time || prefill?.scout_end_time || "",
+  );
+  const [duration, setDuration] = useState(() =>
+    scout
+      ? String(scout.duration_minutes)
+      : prefill
+        ? String(prefill.duration_minutes)
+        : "",
   );
   // Sức chứa cho chọn NHIỀU mức (multi-select) — khớp web. Seed từ phiên cũ.
   const [capacities, setCapacities] = useState<CapacitySize[]>(() =>
@@ -391,7 +548,7 @@ function ScoutForm({
       ? scout.capacity_sizes
       : scout?.capacity_size
         ? [scout.capacity_size]
-        : [],
+        : (prefill?.capacity_sizes ?? []),
   );
   const toggleCapacity = (size: CapacitySize) =>
     setCapacities((cur) =>

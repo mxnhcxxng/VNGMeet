@@ -170,6 +170,9 @@ const en = {
   "detail.others": "+{count} others",
   "detail.descTitle": "Meeting description",
   "detail.descEmpty": "No meeting description",
+  "detail.scoutSimilar": "Scout a similar room",
+  "detail.scoutNextWeek": "Scout for next week",
+  "detail.scoutBusy": "You can only run one scouting session at a time.",
 
   // --- Directions (Chỉ đường) ---------------------------------------------
   "dir.title": "Directions",
@@ -457,6 +460,9 @@ const vi: Partial<Record<TranslationKey, string>> = {
   "detail.others": "+{count} người khác",
   "detail.descTitle": "Mô tả cuộc họp",
   "detail.descEmpty": "Không có mô tả cuộc họp",
+  "detail.scoutSimilar": "Săn phòng tương tự",
+  "detail.scoutNextWeek": "Săn phòng cho tuần sau",
+  "detail.scoutBusy": "Bạn chỉ có thể có 1 phiên săn phòng cùng lúc.",
 
   // --- Directions (Chỉ đường) ---------------------------------------------
   "dir.title": "Chỉ đường",

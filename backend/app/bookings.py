@@ -50,38 +50,6 @@ ACTIVE_BOOKING_STATUSES = ("ok", "pending", "success", "ongoing")
 # Terminal statuses: the reservation is over, nothing left to change on it.
 CLOSED_BOOKING_STATUSES = ("failed", "canceled", "finished")
 
-# --------------------------------------------------------------------------- #
-# TEMPORARY — Mini App backwards compatibility
-# --------------------------------------------------------------------------- #
-# The Zalo Mini App live in production predates the room-usage lifecycle and only
-# knows ok/pending/success/failed/canceled. Its status chip is a lookup with a
-# `?? STATUS_META.pending` fallback, so an unknown status renders as "Đang chờ" —
-# a finished meeting would read as still waiting for the room. A Mini App release
-# has to clear Zalo's review before it can ship, so the backend cannot assume the
-# client moved with it.
-#
-# Both new statuses mean "the room was secured and the booking is real", which is
-# exactly what `success` meant to the old client, so collapsing them restores the
-# pre-change behaviour precisely: a used-in-full meeting used to sit at `success`
-# forever. canceled/failed are untouched — the old client already renders those.
-#
-# Scope: display only, Mini App callers only (identified by the signed session
-# JWT, not by Origin). The DB and the web app keep the real status.
-#
-# The Mini App source now handles both statuses (miniapp/src/{types.ts,
-# pages/history.tsx,components/meeting-detail.tsx,services/i18n.ts}), so this map
-# is the last piece: REMOVE IT once that build has cleared Zalo review and is
-# live. Until then the old prod build is still the one calling this endpoint.
-LEGACY_MINIAPP_STATUS = {"ongoing": "success", "finished": "success"}
-
-
-def _apply_legacy_miniapp_status(rows: list[dict]) -> None:
-    """Rewrite new statuses to their pre-lifecycle equivalent, in place."""
-    for row in rows:
-        legacy = LEGACY_MINIAPP_STATUS.get(row.get("status"))
-        if legacy:
-            row["status"] = legacy
-
 
 def _log_user_booking_activity(
     user_profile_id: str | None,
@@ -780,10 +748,6 @@ async def list_my_bookings(request: Request, background_tasks: BackgroundTasks):
         r["image"] = (meta or {}).get("thumbnail_link")
         r["office"] = (meta or {}).get("office")
         r["map"] = (meta or {}).get("map_link")
-    # TEMPORARY: see LEGACY_MINIAPP_STATUS. The live Mini App build cannot render
-    # ongoing/finished yet, so it keeps seeing the pre-lifecycle statuses.
-    if auth.is_zalo_session_request(request):
-        _apply_legacy_miniapp_status(rows)
     return {"bookings": rows}
 
 

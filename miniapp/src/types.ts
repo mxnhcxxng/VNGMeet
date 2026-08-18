@@ -179,6 +179,18 @@ export interface RoomScoutPayload {
   office?: string | null;
 }
 
+// Thông tin điền sẵn cho form săn phòng khi mở từ một lượt đặt trong "Lịch sử"
+// (săn lại phòng tương tự / săn cho tuần sau) — đã snap về lưới 30 phút và kẹp
+// trong khung giờ làm việc + cửa sổ 14 ngày mà backend cho phép.
+export interface ScoutPrefill {
+  scout_date: string; // ISO "yyyy-mm-dd"
+  scout_start_time: string; // "HH:MM"
+  scout_end_time: string; // "HH:MM"
+  duration_minutes: number;
+  capacity_sizes: CapacitySize[];
+  office?: string | null;
+}
+
 export interface RoomScoutsResponse {
   scouts: RoomScout[];
   can_send_mail: boolean;

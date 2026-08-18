@@ -8,15 +8,31 @@ import ClockArrowRotateLeft from "@gravity-ui/icons/ClockArrowRotateLeft";
 import MeetingDetail from "@/components/meeting-detail";
 import SwipeViews from "@/components/swipe-views";
 import EmptyIllustration from "@/components/empty-illustration";
+import RoomScout, {
+  buildScoutPrefill,
+  loadHasActiveScout,
+  peekHasActiveScout,
+} from "@/pages/room-scout";
 import { api, AuthError } from "@/services/api";
+import {
+  findRoom,
+  loadRoomDirectory,
+  peekRoomDirectory,
+} from "@/services/room-directory";
 import { roomFlag } from "@/services/room-flags";
 import { useT } from "@/services/settings";
-import type { TranslationKey } from "@/services/i18n";
-import type { BookingHistoryItem, BookingStatus, UpcomingEvent } from "@/types";
+import type { TFunction, TranslationKey } from "@/services/i18n";
+import type {
+  BookingHistoryItem,
+  BookingStatus,
+  CapacitySize,
+  ScoutPrefill,
+  UpcomingEvent,
+} from "@/types";
 
 // Key dịch nhãn + class màu chip trạng thái — khớp màu bản web (frontend
 // BookingHistory: success/ongoing=xanh lá, ok/pending=vàng, failed=đỏ,
-// canceled/finished=xám).
+// finished=xanh dương, canceled=xám).
 const STATUS_META: Record<
   BookingStatus,
   { labelKey: TranslationKey; className: string }
@@ -25,18 +41,31 @@ const STATUS_META: Record<
   ok: { labelKey: "status.awaiting", className: "history-chip--pending" },
   pending: { labelKey: "status.pending", className: "history-chip--pending" },
   ongoing: { labelKey: "status.ongoing", className: "history-chip--success" },
-  finished: { labelKey: "status.finished", className: "history-chip--canceled" },
+  finished: { labelKey: "status.finished", className: "history-chip--finished" },
   failed: { labelKey: "status.failed", className: "history-chip--failed" },
   canceled: { labelKey: "status.canceled", className: "history-chip--canceled" },
 };
 
-// Bộ lọc theo thời gian (Figma 346-1292): tất cả / sắp tới / đã qua.
+// Bộ lọc theo TRẠNG THÁI (không theo mốc thời gian): tất cả / sắp tới / đã qua.
 type TabKey = "all" | "upcoming" | "past";
 const TABS: { key: TabKey; labelKey: TranslationKey }[] = [
   { key: "all", labelKey: "history.all" },
   { key: "upcoming", labelKey: "history.upcoming" },
   { key: "past", labelKey: "history.past" },
 ];
+const DEFAULT_TAB: TabKey = "upcoming";
+
+// "Sắp tới" = lượt đặt còn hiệu lực: phòng đã giữ (success), đang họp (ongoing)
+// hoặc còn đang chờ (pending = chờ đặt lúc 00:00, ok = chờ phòng phản hồi) —
+// khớp ACTIVE_BOOKING_STATUSES của backend. "Đã qua" = đã dùng xong (finished).
+// failed/canceled không nằm ở tab nào ngoài "Tất cả".
+const UPCOMING_STATUSES: BookingStatus[] = [
+  "success",
+  "ongoing",
+  "pending",
+  "ok",
+];
+const PAST_STATUSES: BookingStatus[] = ["finished"];
 
 // "2026-07-22" -> "22/7" (khớp Figma: bỏ số 0 ở đầu, 1 dấu gạch).
 function formatShortDate(iso: string): string {
@@ -44,15 +73,18 @@ function formatShortDate(iso: string): string {
   return d && m ? `${Number(d)}/${Number(m)}` : iso;
 }
 
+// "2026-07-22" -> "T3" / "Tue" (thứ dạng ngắn, dùng chung key với dải chọn ngày
+// của màn "Tìm phòng"). Trả "" nếu ngày không đọc được.
+function weekdayLabel(iso: string, t: TFunction): string {
+  const d = new Date(`${iso}T00:00:00`);
+  return Number.isNaN(d.getTime())
+    ? ""
+    : t(`weekday.${d.getDay()}` as TranslationKey);
+}
+
 // "14:00:00" / "14:00" -> "14:00".
 function hhmm(time?: string | null): string {
   return (time || "").slice(0, 5);
-}
-
-// Cuộc họp đã kết thúc? (dùng phân loại "sắp tới" vs "đã qua").
-function isPast(item: BookingHistoryItem): boolean {
-  const end = new Date(`${item.date}T${hhmm(item.end_time)}:00`);
-  return !Number.isNaN(end.getTime()) && end.getTime() < Date.now();
 }
 
 // Dựng UpcomingEvent để mở màn "Chi tiết lịch họp" (dùng chung component với
@@ -87,8 +119,36 @@ export default function HistoryPage() {
   // Skeleton chỉ hiện lần đầu chưa có cache; có cache thì render ngay + nạp ngầm.
   const [loading, setLoading] = useState(cachedBookings === null);
   const [error, setError] = useState(false);
-  const [tab, setTab] = useState<TabKey>("all");
+  const [tab, setTab] = useState<TabKey>(DEFAULT_TAB);
   const [selected, setSelected] = useState<BookingHistoryItem | null>(null);
+  // Dữ liệu điền sẵn cho màn "Săn phòng" mở đè lên màn chi tiết; null = đang đóng.
+  const [scoutPrefill, setScoutPrefill] = useState<ScoutPrefill | null>(null);
+  // Đang có phiên săn chạy → khoá CTA săn phòng ở màn chi tiết (BE chỉ cho 1 phiên).
+  const [hasActiveScout, setHasActiveScout] = useState(
+    () => peekHasActiveScout() ?? false,
+  );
+
+  // Nạp trạng thái phiên săn: lúc mở tab và sau khi đóng màn "Săn phòng" (vừa tạo
+  // hoặc vừa huỷ phiên thì CTA phải đổi theo).
+  function refreshScoutState() {
+    loadHasActiveScout().then(setHasActiveScout, () => {
+      // Lỗi mạng/hết phiên: giữ trạng thái cũ, submit vẫn được backend chặn.
+    });
+  }
+
+  // Mở màn "Săn phòng" từ chi tiết lượt đặt: lấy sức chứa của đúng phòng cũ trong
+  // danh bạ phòng (có cache thì dùng ngay), thiếu thì để user tự chọn.
+  async function openScout(item: BookingHistoryItem, addDays: number) {
+    let capacity: CapacitySize | null = null;
+    try {
+      const rooms = peekRoomDirectory() ?? (await loadRoomDirectory());
+      capacity =
+        findRoom(rooms, item.room_email, item.room_name)?.capacity_size ?? null;
+    } catch {
+      // Không tải được danh bạ phòng — vẫn mở form, chỉ thiếu sức chứa.
+    }
+    setScoutPrefill(buildScoutPrefill(item, addDays, capacity));
+  }
 
   async function load() {
     if (cachedBookings === null) setLoading(true);
@@ -106,6 +166,7 @@ export default function HistoryPage() {
 
   useEffect(() => {
     void load();
+    refreshScoutState();
   }, []);
 
   const tabIndex = Math.max(
@@ -114,14 +175,21 @@ export default function HistoryPage() {
   );
 
   function itemsFor(key: TabKey): BookingHistoryItem[] {
-    return items.filter((item) =>
-      key === "all" ? true : key === "past" ? isPast(item) : !isPast(item),
-    );
+    if (key === "all") return items;
+    const allowed = key === "upcoming" ? UPCOMING_STATUSES : PAST_STATUSES;
+    return items.filter((item) => allowed.includes(item.status));
   }
 
   function renderCard(item: BookingHistoryItem) {
     const status = STATUS_META[item.status] ?? STATUS_META.pending;
     const flag = roomFlag(item.room_name);
+    // Lượt đặt không thành hiện thực → làm mờ ảnh phòng (xám + opacity).
+    const dimmed = item.status === "failed" || item.status === "canceled";
+    // Dòng ngày/giờ mở đầu bằng thứ: "T3 • 22/7 • 14:00 - 15:00".
+    const weekday = weekdayLabel(item.date, t);
+    const when = `${weekday ? `${weekday} • ` : ""}${formatShortDate(item.date)} • ${hhmm(
+      item.start_time,
+    )} - ${hhmm(item.end_time)}`;
     return (
       <div
         key={item.id}
@@ -131,7 +199,9 @@ export default function HistoryPage() {
         onClick={() => setSelected(item)}
       >
         <div
-          className="history-card__media"
+          className={`history-card__media${
+            dimmed ? " history-card__media--dimmed" : ""
+          }`}
           style={
             item.image ? { backgroundImage: `url(${item.image})` } : undefined
           }
@@ -155,10 +225,7 @@ export default function HistoryPage() {
             )}
             <div className="history-card__row">
               <Clock width={16} height={16} />
-              <span>
-                {formatShortDate(item.date)} • {hhmm(item.start_time)} -{" "}
-                {hhmm(item.end_time)}
-              </span>
+              <span>{when}</span>
             </div>
             {item.location && (
               <div className="history-card__row">
@@ -242,7 +309,20 @@ export default function HistoryPage() {
         <MeetingDetail
           event={toEvent(selected)}
           status={selected.status}
+          onScout={(addDays) => void openScout(selected, addDays)}
+          scoutDisabled={hasActiveScout}
           onClose={() => setSelected(null)}
+        />
+      )}
+
+      {/* Săn phòng đè lên màn chi tiết (z-index 66 > 60); back về lại chi tiết. */}
+      {scoutPrefill && (
+        <RoomScout
+          prefill={scoutPrefill}
+          onClose={() => {
+            setScoutPrefill(null);
+            refreshScoutState();
+          }}
         />
       )}
     </div>
