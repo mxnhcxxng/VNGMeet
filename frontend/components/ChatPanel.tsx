@@ -1048,16 +1048,16 @@ export function ChatPanel({
     <InternalNavContext.Provider value={onNavigate ?? null}>
     <div className="flex h-full w-full flex-col">
       {empty ? (
-        <div className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto px-5 py-6">
-          <div className="flex w-full max-w-3xl flex-col items-center gap-10">
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto px-4 py-6 sm:px-5">
+          <div className="flex w-full max-w-3xl flex-col items-center gap-8 sm:gap-10">
             {error && (
               <Chip color="danger" variant="soft" size="sm">
                 {error}
               </Chip>
             )}
             <div className="flex items-center gap-2.5">
-              <BrandIcon size={48} className="shrink-0" />
-              <h1 className="text-2xl font-semibold tracking-tight text-[#181d27] dark:text-[#f7f7f7]">
+              <BrandIcon size={40} className="shrink-0 sm:size-12" />
+              <h1 className="text-xl font-semibold tracking-tight text-[#181d27] dark:text-[#f7f7f7] sm:text-2xl">
                 {welcomeTitle}
               </h1>
             </div>

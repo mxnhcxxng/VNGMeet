@@ -57,7 +57,7 @@ function ThemeCard({
       className="flex max-w-[240px] flex-col items-start gap-3 text-left"
     >
       <div
-        className={`relative h-[132px] w-[200px] overflow-hidden rounded-[10px] transition-shadow ${
+        className={`relative h-[92px] w-[140px] overflow-hidden rounded-[10px] transition-shadow sm:h-[132px] sm:w-[200px] ${
           selected
             ? "shadow-[0px_0px_0px_2px_#ffffff,0px_0px_0px_4px_#f05a22] dark:shadow-[0px_0px_0px_2px_#0c0e12,0px_0px_0px_4px_#f05a22]"
             : ""
@@ -94,7 +94,7 @@ const THEME_CARDS: { mode: ThemeMode; srcKey: string }[] = [
 
 function SectionLabel({ title, description }: { title: string; description: string }) {
   return (
-    <div className="flex min-w-[200px] max-w-[280px] flex-1 flex-col">
+    <div className="flex w-full min-w-0 flex-col sm:w-auto sm:min-w-[200px] sm:max-w-[280px] sm:flex-1">
       <p className="text-sm font-medium text-[#18181b] dark:text-[#f7f7f7]">{title}</p>
       <p className="text-sm text-[#71717a] dark:text-[#94979c]">{description}</p>
     </div>
@@ -303,40 +303,40 @@ export function SettingsScreen({
   const req = <span className="text-danger">*</span>;
 
   return (
-    <div className="h-full overflow-y-auto pb-12">
+    <div className="relative h-full overflow-y-auto">
       {/* Cover image — fills the full horizontal width of the container */}
       <div className="px-1 pt-1">
         <div
-          className="h-[200px] w-full rounded-xl bg-cover bg-center"
+          className="h-[140px] w-full rounded-xl bg-cover bg-center sm:h-[200px]"
           style={{ backgroundImage: "url('/profile-cover.webp')" }}
         />
       </div>
 
-      <div className="mx-auto flex w-full max-w-[1280px] flex-col gap-12">
-        <div className="-mt-10 flex items-start gap-5 px-8">
-            <div className="flex size-[160px] shrink-0 items-center justify-center rounded-full border border-black/10 dark:border-[#373a41] bg-white dark:bg-[#13161b] p-1.5">
+      <div className="mx-auto flex w-full max-w-[1280px] flex-col gap-8 sm:gap-12">
+        <div className="-mt-8 flex flex-col items-start gap-3 px-4 sm:-mt-10 sm:flex-row sm:gap-5 sm:px-8">
+            <div className="flex size-[96px] shrink-0 items-center justify-center rounded-full border border-black/10 dark:border-[#373a41] bg-white dark:bg-[#13161b] p-1.5 sm:size-[160px]">
               <img
                 src="/default-avatar.jpg"
                 alt={displayName || "User"}
                 className="size-full rounded-full object-cover"
               />
             </div>
-            <div className="flex flex-1 flex-col gap-1 pt-16">
-              <p className="text-2xl font-semibold text-[#181d27] dark:text-[#f7f7f7]">{displayName}</p>
-              {email && <p className="text-base text-[#535862] dark:text-[#94979c]">{email}</p>}
+            <div className="flex w-full min-w-0 flex-1 flex-col gap-1 sm:pt-16">
+              <p className="truncate text-xl font-semibold text-[#181d27] dark:text-[#f7f7f7] sm:text-2xl">{displayName}</p>
+              {email && <p className="truncate text-sm text-[#535862] dark:text-[#94979c] sm:text-base">{email}</p>}
             </div>
           </div>
 
         {/* Form sections */}
-        <div className="flex flex-col gap-6 px-8">
+        <div className="flex flex-col gap-6 px-4 sm:px-8">
           {/* Personal info */}
           <div className="flex flex-wrap items-start gap-x-8 gap-y-4">
             <SectionLabel
               title={t("settings.personalInfo")}
               description={t("settings.personalInfoDesc")}
             />
-            <div className="flex min-w-[280px] flex-1 flex-col gap-4">
-              <div className="grid grid-cols-2 gap-4">
+            <div className="flex w-full min-w-0 flex-1 flex-col gap-4 sm:min-w-[280px]">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <TextField fullWidth isDisabled>
                   <Label>{t("settings.domain")} {req}</Label>
                   <Input variant="secondary" value={emailUsername} />
@@ -372,7 +372,7 @@ export function SettingsScreen({
                 </Select.Popover>
               </Select>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <Select
                   variant="secondary"
                   className="flex flex-col gap-2"
@@ -523,7 +523,7 @@ export function SettingsScreen({
               title={t("settings.bookingConfirmation")}
               description={t("settings.bookingConfirmationDesc")}
             />
-            <div className="flex min-w-[280px] flex-1 items-center gap-3">
+            <div className="flex w-full min-w-0 flex-1 items-center gap-3 sm:min-w-[280px]">
               <Switch
                 isSelected={bookWithoutConfirmation}
                 onChange={setBookWithoutConfirmation}
@@ -578,10 +578,10 @@ export function SettingsScreen({
               title={t("settings.language")}
               description={t("settings.languageDesc")}
             />
-            <div className="flex flex-1">
+            <div className="flex w-full flex-1 sm:w-auto">
               <Select
                 variant="secondary"
-                className="flex w-[256px] flex-col gap-2"
+                className="flex w-full flex-col gap-2 sm:w-[256px]"
                 selectedKey={language}
                 onSelectionChange={(key) =>
                   setLanguage((key as Language) ?? "en")
@@ -613,7 +613,7 @@ export function SettingsScreen({
           )}
 
           {/* Footer buttons */}
-          <div className="flex items-center justify-between gap-2 py-4">
+          <div className="flex flex-col gap-3 pb-6 pt-4 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
             <Button
               variant="tertiary"
               className="rounded-full"
@@ -622,7 +622,7 @@ export function SettingsScreen({
               <Comment className="size-4" />
               {t("settings.feedback")}
             </Button>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center justify-end gap-2">
             <Button
               variant="tertiary"
               className="rounded-full"

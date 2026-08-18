@@ -11,6 +11,7 @@ import {
   ClockArrowRotateLeft,
   Binoculars,
   TrashBin,
+  Xmark,
 } from "@gravity-ui/icons";
 import { Button, Dropdown, Label } from "@heroui/react";
 import type { ChatThread } from "@/lib/api";
@@ -308,6 +309,8 @@ export function Sidebar({
   onPrefetchThread,
   onRenameThread,
   onDeleteThread,
+  open = false,
+  onClose,
 }: {
   view: View;
   onChange: (v: View) => void;
@@ -322,6 +325,11 @@ export function Sidebar({
   onPrefetchThread?: (threadId: string) => void;
   onRenameThread?: (threadId: string, title: string) => Promise<void>;
   onDeleteThread?: (threadId: string) => Promise<void>;
+  // Below `lg` the sidebar is an off-canvas drawer: `open` slides it in and
+  // `onClose` is called by the backdrop, the ✕ button, Escape, and every
+  // navigation row (picking a destination should reveal it, not hide it).
+  open?: boolean;
+  onClose?: () => void;
 }) {
   const t = useT();
   const display = username || t("common.user");
@@ -329,21 +337,59 @@ export function Sidebar({
   const email = display.includes("@") ? display : "";
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
 
+  // Every navigation action doubles as "close the drawer" on mobile; on desktop
+  // `onClose` is a no-op because the sidebar is always visible.
+  const navigate = (run: () => void) => () => {
+    run();
+    onClose?.();
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose?.();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open, onClose]);
+
   return (
-    <aside className="flex w-[280px] shrink-0 flex-col rounded-2xl bg-white dark:bg-[#0c0e12] shadow-sm">
+    <>
+      {/* Drawer backdrop (mobile only) */}
+      <div
+        aria-hidden
+        onClick={onClose}
+        className={`fixed inset-0 z-40 bg-black/40 transition-opacity duration-300 lg:hidden ${
+          open ? "opacity-100" : "pointer-events-none opacity-0"
+        }`}
+      />
+
+    <aside
+      className={`fixed inset-y-2 left-2 z-50 flex w-[280px] max-w-[calc(100vw-4rem)] shrink-0 flex-col rounded-2xl bg-white dark:bg-[#0c0e12] shadow-xl transition-transform duration-300 ease-out lg:static lg:z-auto lg:max-w-none lg:translate-x-0 lg:shadow-sm ${
+        open ? "translate-x-0" : "-translate-x-[calc(100%+1rem)]"
+      }`}
+    >
       {/* Brand */}
-      <div className="flex items-center px-5 pt-5">
+      <div className="flex items-center justify-between gap-2 px-5 pt-5">
         <div className="flex items-center gap-[7.5px]">
           <BrandIcon size={24} className="shrink-0" />
           <span className="text-[18px] font-bold leading-6 text-[#181d27] dark:text-[#f7f7f7]">VNG MEET</span>
         </div>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label={t("sidebar.closeMenu")}
+          className="-mr-1 flex size-8 shrink-0 items-center justify-center rounded-full text-[#71717a] transition-colors hover:bg-[#f5f5f5] hover:text-[#18181b] dark:text-[#94979c] dark:hover:bg-[#22262f] dark:hover:text-[#f7f7f7] lg:hidden"
+        >
+          <Xmark width={16} height={16} />
+        </button>
       </div>
 
       {/* Primary nav */}
       <div className="mt-5 flex flex-col gap-0.5 px-4">
         <button
           type="button"
-          onClick={() => onNewChat?.()}
+          onClick={navigate(() => onNewChat?.())}
           className={`${ROW} ${view === "chat" && !activeThreadId ? "bg-[var(--default)]" : "hover:bg-[#f5f5f5] dark:hover:bg-[#22262f]"}`}
         >
           <PencilToSquare width={16} height={16} />
@@ -351,7 +397,7 @@ export function Sidebar({
         </button>
         <button
           type="button"
-          onClick={() => onChange("browse")}
+          onClick={navigate(() => onChange("browse"))}
           className={`${ROW} ${view === "browse" ? "bg-[var(--default)]" : "hover:bg-[#f5f5f5] dark:hover:bg-[#22262f]"}`}
         >
           <Magnifier width={16} height={16} />
@@ -359,7 +405,7 @@ export function Sidebar({
         </button>
         <button
           type="button"
-          onClick={() => onChange("roomScout")}
+          onClick={navigate(() => onChange("roomScout"))}
           className={`${ROW} ${view === "roomScout" ? "bg-[var(--default)]" : "hover:bg-[#f5f5f5] dark:hover:bg-[#22262f]"}`}
         >
           <Binoculars width={16} height={16} />
@@ -373,7 +419,7 @@ export function Sidebar({
         </button>
         <button
           type="button"
-          onClick={() => onChange("bookingHistory")}
+          onClick={navigate(() => onChange("bookingHistory"))}
           className={`${ROW} ${view === "bookingHistory" ? "bg-[var(--default)]" : "hover:bg-[#f5f5f5] dark:hover:bg-[#22262f]"}`}
         >
           <ClockArrowRotateLeft width={16} height={16} />
@@ -405,7 +451,7 @@ export function Sidebar({
                     key={thread.id}
                     thread={thread}
                     active={active}
-                    onClick={() => onSelectThread?.(thread.id)}
+                    onClick={navigate(() => onSelectThread?.(thread.id))}
                     onPrefetch={
                       onPrefetchThread
                         ? () => onPrefetchThread(thread.id)
@@ -428,7 +474,7 @@ export function Sidebar({
       <div className="flex flex-col gap-4 px-4 pb-5 pt-5">
         <button
           type="button"
-          onClick={() => onChange("settings")}
+          onClick={navigate(() => onChange("settings"))}
           className={`${ROW} ${view === "settings" ? "bg-[var(--default)]" : "hover:bg-[#f5f5f5] dark:hover:bg-[#22262f]"}`}
         >
           <Gear width={16} height={16} />
@@ -500,5 +546,6 @@ export function Sidebar({
         </div>
       )}
     </aside>
+    </>
   );
 }

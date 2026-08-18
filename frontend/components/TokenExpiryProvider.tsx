@@ -230,9 +230,9 @@ function TokenInfoModal({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="flex max-h-[85vh] w-full max-w-[640px] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-[#0c0e12]">
+      <div className="flex max-h-[85dvh] w-full max-w-[640px] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-[#0c0e12]">
         {/* Header: orange info icon (accent) + title + close */}
-        <div className="flex items-start gap-3 px-6 pt-6">
+        <div className="flex items-start gap-3 px-5 pt-5 sm:px-6 sm:pt-6">
           <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-[#f05a22]/10 text-[#f05a22]">
             <CircleInfo width={22} height={22} />
           </span>
@@ -250,7 +250,7 @@ function TokenInfoModal({
         </div>
 
         {/* Body */}
-        <div className="mt-4 min-h-0 flex-1 space-y-5 overflow-y-auto px-6">
+        <div className="mt-4 min-h-0 flex-1 space-y-5 overflow-y-auto px-5 sm:px-6">
           {reason === "refresh" && (
             <div className="flex items-start gap-2 rounded-xl bg-[#fee7de] p-3 text-sm leading-6 text-[#535862] dark:bg-[#3B1202] dark:text-[#fee7de]">
               <TriangleExclamation className="mt-0.5 size-4 shrink-0 text-[#F05A22]" />
@@ -277,7 +277,7 @@ function TokenInfoModal({
         </div>
 
         {/* Footer */}
-        <div className="flex justify-end px-6 pb-6 pt-5">
+        <div className="flex justify-end px-5 pb-5 pt-5 sm:px-6 sm:pb-6">
           <Button className="rounded-full" onPress={onClose}>
             {t("tokenModal.close")}
           </Button>

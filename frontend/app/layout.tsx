@@ -31,7 +31,7 @@ export default async function RootLayout({
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
-      <body className="min-h-screen bg-background text-foreground">
+      <body className="min-h-[100dvh] bg-background text-foreground">
         <Providers initialLanguage={language}>{children}</Providers>
       </body>
     </html>

@@ -1,6 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import {
   Button,
   Calendar,
@@ -303,6 +311,8 @@ export function BrowseRooms({
   // DateInput, so react-aria has no element to position the popover against and
   // it falls back to the top-left corner. Wiring the trigger ref fixes that.
   const dateTriggerRef = useRef<HTMLButtonElement>(null);
+  // Mobile day strip (the phone/tablet stand-in for the desktop day pill).
+  const dayStripRef = useRef<HTMLDivElement>(null);
 
   // Office is picked via the tabs; rooms are further narrowed by a name search.
   // Default to the user's work location, falling back to Campus.
@@ -847,57 +857,21 @@ export function BrowseRooms({
     el.scrollTop = Math.max(0, (anchorBlock - 1) * SLOT_H);
   }, [slotMinutes]);
 
-  return (
-    <div className="flex h-full flex-col bg-white dark:bg-[#0c0e12]">
-      {/* Office tabs */}
-      <div className="border-b border-[color:var(--separator)] bg-white dark:bg-[#0c0e12] px-6 pt-3">
-        <Tabs
-          variant="secondary"
-          selectedKey={office || undefined}
-          onSelectionChange={(key) => setOffice(key as string)}
-        >
-          <Tabs.ListContainer>
-            <Tabs.List>
-              {OFFICES.map((o) => (
-                <Tabs.Tab key={o.value} id={o.value} className="w-auto min-w-fit">
-                  {o.label}
-                  <Tabs.Indicator />
-                </Tabs.Tab>
-              ))}
-            </Tabs.List>
-          </Tabs.ListContainer>
-        </Tabs>
-      </div>
+  // Keep the selected chip centred in the mobile day strip whenever the day
+  // changes from anywhere else (the month picker, "today", a deep link).
+  useEffect(() => {
+    const chip = dayStripRef.current?.querySelector<HTMLElement>(
+      `[data-day-index="${dayIndex}"]`,
+    );
+    chip?.scrollIntoView({ inline: "center", block: "nearest", behavior: "smooth" });
+  }, [dayIndex]);
 
-      {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-3 border-b border-[color:var(--separator)] bg-white dark:bg-[#0c0e12] px-6 py-4">
-        <Button
-          variant="tertiary"
-          className="rounded-full"
-          isDisabled={dayIndex === 0}
-          onPress={() => setDayIndex(() => 0)}
-        >
-          {dayIndex === 0 ? (
-            <ArrowRightFromLine width={16} height={16} />
-          ) : (
-            <ArrowLeft width={16} height={16} />
-          )}
-          {tr("browse.today")}
-        </Button>
-
-        {/* Day navigation + date picker, grouped into a single pill. */}
-        <I18nProvider locale={datePickerLocale}>
-          <div className="inline-flex h-9 items-center overflow-hidden rounded-full bg-[var(--default)] text-[var(--foreground)]">
-            <button
-              type="button"
-              aria-label={tr("browse.prevDay")}
-              disabled={dayIndex <= 0}
-              onClick={() => setDayIndex((n) => Math.max(0, n - 1))}
-              className="flex h-full w-9 items-center justify-center transition-colors hover:bg-[var(--default-hover)] disabled:opacity-40 disabled:hover:bg-transparent"
-            >
-              <ChevronLeft width={16} height={16} />
-            </button>
-            <span className="h-5 w-px bg-[var(--separator)]" />
+  // Day picker for the desktop toolbar pill: the caller supplies the trigger
+  // and the ref the popover positions against.
+  const renderDayPicker = (
+    trigger: ReactNode,
+    popoverTriggerRef: RefObject<HTMLButtonElement | null>,
+  ) => (
             <DatePicker
               aria-label={tr("browse.datePicker")}
               value={parseDate(data.days[dayIndex])}
@@ -909,16 +883,8 @@ export function BrowseRooms({
                 if (idx >= 0) setDayIndex(() => idx);
               }}
             >
-              <DatePicker.Trigger
-                ref={dateTriggerRef}
-                className="relative flex h-9 w-36 items-center justify-center px-0 text-[13px] font-medium outline-none transition-colors hover:bg-[var(--default-hover)]"
-              >
-                <CalendarIcon width={16} height={16} className="absolute left-2.5 shrink-0" />
-                <span className="block w-36 shrink-0 whitespace-nowrap pl-7 pr-1 text-center">
-                  {formatDatePickerLabel(data.days[dayIndex], datePickerLocale)}
-                </span>
-              </DatePicker.Trigger>
-              <DatePicker.Popover triggerRef={dateTriggerRef} className="!max-w-none w-fit">
+              {trigger}
+              <DatePicker.Popover triggerRef={popoverTriggerRef} className="!max-w-none w-fit">
                 <Calendar
                   firstDayOfWeek="mon"
                   minValue={parseDate(data.days[0])}
@@ -970,6 +936,142 @@ export function BrowseRooms({
                 </Calendar>
               </DatePicker.Popover>
             </DatePicker>
+  );
+
+  return (
+    <div className="flex h-full flex-col bg-white dark:bg-[#0c0e12]">
+      {/* Office tabs */}
+      <div className="border-b border-[color:var(--separator)] bg-white dark:bg-[#0c0e12] px-4 pt-3 sm:px-6">
+        <Tabs
+          variant="secondary"
+          selectedKey={office || undefined}
+          onSelectionChange={(key) => setOffice(key as string)}
+        >
+          <Tabs.ListContainer>
+            <Tabs.List>
+              {OFFICES.map((o) => (
+                <Tabs.Tab key={o.value} id={o.value} className="w-auto min-w-fit">
+                  {o.label}
+                  <Tabs.Indicator />
+                </Tabs.Tab>
+              ))}
+            </Tabs.List>
+          </Tabs.ListContainer>
+        </Tabs>
+      </div>
+
+      {/* Mobile date bar — modelled on the Outlook calendar: a swipeable strip of
+          day chips replaces the desktop prev/next pill, with refresh pinned to
+          the right so the strip can scroll under it. The month header, "today",
+          search and hour window stay desktop-only on purpose: on a phone the
+          grid itself is the scarce resource. */}
+      <div className="flex items-center gap-1 border-b border-[color:var(--separator)] bg-white pr-2 dark:bg-[#0c0e12] lg:hidden">
+        <div
+          ref={dayStripRef}
+          className="flex min-w-0 flex-1 gap-1 overflow-x-auto px-3 py-2 [mask-image:linear-gradient(to_right,#000_calc(100%_-_20px),transparent)] [-webkit-mask-image:linear-gradient(to_right,#000_calc(100%_-_20px),transparent)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        >
+          {data.days.slice(0, maxDayIndex + 1).map((iso, index) => {
+            const selected = index === dayIndex;
+            const weekend = isWeekendIso(iso);
+            const isToday = iso === todayIso;
+            return (
+              <button
+                key={iso}
+                type="button"
+                data-day-index={index}
+                aria-current={selected ? "date" : undefined}
+                onClick={() => setDayIndex(() => index)}
+                className={`flex w-11 shrink-0 flex-col items-center gap-1 rounded-xl py-1 outline-none transition-colors ${
+                  selected ? "" : "hover:bg-[var(--default)]"
+                }`}
+              >
+                <span
+                  className={`text-[11px] font-medium ${
+                    weekend ? "text-danger" : "text-default-500"
+                  }`}
+                >
+                  {formatWeekdayLabel(iso, datePickerLocale)}
+                </span>
+                <span
+                  className={`flex size-8 items-center justify-center rounded-full text-sm font-semibold tabular-nums transition-colors ${
+                    selected
+                      ? "bg-[var(--accent)] text-[var(--accent-foreground)]"
+                      : isToday
+                        ? "text-[var(--accent)]"
+                        : weekend
+                          ? "text-danger"
+                          : "text-default-900"
+                  }`}
+                >
+                  {Number(iso.slice(8, 10))}
+                </span>
+                {/* Always rendered so chips keep the same height. */}
+                <span
+                  className={`size-1 rounded-full ${
+                    bookedDates.has(iso) ? "bg-green-500" : "bg-transparent"
+                  }`}
+                />
+              </button>
+            );
+          })}
+        </div>
+
+        <button
+          type="button"
+          aria-label={tr("browse.refresh")}
+          disabled={refreshing}
+          onClick={() => onRefresh({ force: true })}
+          className="ml-1 flex size-9 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-[var(--default)] disabled:opacity-40"
+        >
+          {refreshing ? (
+            <Spinner size="sm" />
+          ) : (
+            <ArrowsRotateRight width={18} height={18} />
+          )}
+        </button>
+      </div>
+
+      {/* Toolbar (desktop) */}
+      <div className="hidden flex-wrap items-center gap-3 border-b border-[color:var(--separator)] bg-white dark:bg-[#0c0e12] px-6 py-4 lg:flex">
+        <Button
+          variant="tertiary"
+          className="rounded-full"
+          isDisabled={dayIndex === 0}
+          onPress={() => setDayIndex(() => 0)}
+        >
+          {dayIndex === 0 ? (
+            <ArrowRightFromLine width={16} height={16} />
+          ) : (
+            <ArrowLeft width={16} height={16} />
+          )}
+          {tr("browse.today")}
+        </Button>
+
+        {/* Day navigation + date picker, grouped into a single pill. */}
+        <I18nProvider locale={datePickerLocale}>
+          <div className="inline-flex h-9 items-center overflow-hidden rounded-full bg-[var(--default)] text-[var(--foreground)]">
+            <button
+              type="button"
+              aria-label={tr("browse.prevDay")}
+              disabled={dayIndex <= 0}
+              onClick={() => setDayIndex((n) => Math.max(0, n - 1))}
+              className="flex h-full w-9 items-center justify-center transition-colors hover:bg-[var(--default-hover)] disabled:opacity-40 disabled:hover:bg-transparent"
+            >
+              <ChevronLeft width={16} height={16} />
+            </button>
+            <span className="h-5 w-px bg-[var(--separator)]" />
+            {renderDayPicker(
+              <DatePicker.Trigger
+                ref={dateTriggerRef}
+                className="relative flex h-9 w-36 items-center justify-center px-0 text-[13px] font-medium outline-none transition-colors hover:bg-[var(--default-hover)]"
+              >
+                <CalendarIcon width={16} height={16} className="absolute left-2.5 shrink-0" />
+                <span className="block w-36 shrink-0 whitespace-nowrap pl-7 pr-1 text-center">
+                  {formatDatePickerLabel(data.days[dayIndex], datePickerLocale)}
+                </span>
+              </DatePicker.Trigger>,
+              dateTriggerRef,
+            )}
             <span className="h-5 w-px bg-[var(--separator)]" />
             <button
               type="button"

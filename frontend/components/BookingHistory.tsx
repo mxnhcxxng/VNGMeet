@@ -22,6 +22,7 @@ import {
 import {
   ArrowsRotateRight,
   Ban,
+  Sliders,
   Binoculars,
   Clock,
   Comments,
@@ -107,7 +108,7 @@ function FilterSelect({
   options: Option[];
 }) {
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-center sm:gap-2">
       <span className="whitespace-nowrap text-sm text-[#71717a] dark:text-[#94979c]">{label}</span>
       <Select
         aria-label={label}
@@ -115,7 +116,7 @@ function FilterSelect({
         selectedKey={value}
         onSelectionChange={(k) => onChange(String(k))}
       >
-        <Select.Trigger className="min-w-[110px]">
+        <Select.Trigger className="w-full sm:w-auto sm:min-w-[110px]">
           <Select.Value />
           <Select.Indicator />
         </Select.Trigger>
@@ -159,6 +160,17 @@ function isPastBooking(b: Booking): boolean {
   return end.getTime() < Date.now();
 }
 
+// Past, canceled, failed and finished bookings can no longer be edited or
+// canceled — the same rule drives the desktop table row and the mobile card.
+function bookingActionsDisabled(b: Booking): boolean {
+  return (
+    b.status === "failed" ||
+    b.status === "canceled" ||
+    b.status === "finished" ||
+    isPastBooking(b)
+  );
+}
+
 // Replaces the (hidden) booking-type and method columns with small orange icons
 // shown beside the subject. Type and method are independent, so a booking can
 // carry two icons: a clock (scheduled) or binoculars (scout) for the type, plus
@@ -197,6 +209,87 @@ function withinTimeRange(dateStr: string, range: string): boolean {
   sunday.setDate(monday.getDate() + 6);
   sunday.setHours(23, 59, 59, 999);
   return d >= monday && d <= sunday;
+}
+
+// Mobile rendering of one booking. The desktop table's six columns can't fit a
+// phone, so below `lg` every row becomes a card: subject + status on top, then
+// room and time, with the same edit / cancel actions the table row offers.
+function BookingCard({
+  booking,
+  t,
+  onEdit,
+  onCancel,
+}: {
+  booking: Booking;
+  t: TFunction;
+  onEdit: () => void;
+  onCancel: () => void;
+}) {
+  const disabled = bookingActionsDisabled(booking);
+  const flag = roomFlag(booking.room_name);
+  return (
+    <div className="flex flex-col gap-3 rounded-2xl border border-[color:var(--separator)] bg-white p-4 dark:bg-[#13161b]">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-1.5">
+          {bookingIndicators(booking, t).map(({ key, Icon, label }) => (
+            <Icon
+              key={key}
+              width={16}
+              height={16}
+              className="shrink-0 text-[#f97316]"
+              aria-label={label}
+            />
+          ))}
+          <span className="min-w-0 truncate text-sm font-semibold text-[#181d27] dark:text-[#f7f7f7]">
+            {booking.subject || "—"}
+          </span>
+        </div>
+        <Chip
+          size="sm"
+          variant="soft"
+          color={STATUS_COLOR[booking.status] ?? "warning"}
+          className={`shrink-0 ${STATUS_CHIP_CLASS[booking.status] ?? ""}`}
+        >
+          {STATUS_LABEL_KEY[booking.status]
+            ? t(STATUS_LABEL_KEY[booking.status])
+            : booking.status}
+        </Chip>
+      </div>
+
+      <div className="flex flex-col gap-1 text-sm text-[#71717a] dark:text-[#94979c]">
+        <span className="truncate">
+          {flag && <span className="mr-1.5">{flag}</span>}
+          {booking.room_name || booking.room_email}
+        </span>
+        <span className="tabular-nums">
+          {booking.date} · {booking.start_time} – {booking.end_time}
+        </span>
+      </div>
+
+      <div className="flex items-center justify-end gap-1">
+        <Button
+          size="sm"
+          variant="ghost"
+          className="rounded-full"
+          isDisabled={disabled}
+          onPress={onEdit}
+        >
+          <Pencil width={16} height={16} />
+          {t("common.edit")}
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="rounded-full text-danger"
+          isDisabled={disabled}
+          onPress={onCancel}
+        >
+          <Ban width={16} height={16} />
+          {t("bh.cancelBooking")}
+        </Button>
+      </div>
+    </div>
+  );
 }
 
 // Placeholder layout — uses HeroUI's table as-is. Styling to be refined later.
@@ -426,6 +519,13 @@ export function BookingHistory() {
     setPage(1);
   }, [status, bookingType, method, timeRange, pageSize]);
 
+  // On phones the four filter selects collapse behind a "Filters" toggle so the
+  // list itself keeps the screen — same pattern as the browse date bar.
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const activeFilterCount = [status, bookingType, method, timeRange].filter(
+    (value) => value !== "all",
+  ).length;
+
   const total = filtered.length;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const safePage = Math.min(page, totalPages);
@@ -482,10 +582,52 @@ export function BookingHistory() {
     [pageSize]
   );
 
+  // Rendered twice (phone bar + desktop filter row) with different visibility
+  // classes, so the button itself is defined once here.
+  const renderRefreshButton = (className: string) => (
+    <Button
+      isIconOnly
+      size="sm"
+      variant="tertiary"
+      aria-label={t("bh.refresh")}
+      className={className}
+      onPress={load}
+      isDisabled={loading}
+    >
+      <ArrowsRotateRight width={16} height={16} />
+    </Button>
+  );
+
   return (
-    <div className="flex h-full flex-col gap-4 p-4">
-      {/* Filter bar */}
-      <div className="flex flex-wrap items-center gap-x-5 gap-y-3 px-4">
+    <div className="flex h-full flex-col gap-3 p-3 sm:gap-4 sm:p-4">
+      {/* Filter bar — a 2-up grid on phones, one wrapping row from `sm` up
+          (`sm:contents` dissolves the grid so the filters rejoin that row). */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-5 sm:gap-y-3 sm:px-4">
+        {/* Phone-only bar: opens the filter grid and carries the refresh action
+            so the collapsed state costs a single row. */}
+        <div className="flex items-center gap-2 sm:hidden">
+          <button
+            type="button"
+            aria-expanded={filtersOpen}
+            onClick={() => setFiltersOpen((open) => !open)}
+            className={`flex items-center gap-2 rounded-full px-3 py-1.5 text-sm font-medium text-[#18181b] transition-colors dark:text-[#f7f7f7] ${
+              filtersOpen ? "bg-[var(--default)]" : "hover:bg-[var(--default)]"
+            }`}
+          >
+            <Sliders width={16} height={16} />
+            {t("common.filters")}
+            {activeFilterCount > 0 && (
+              <span className="flex size-5 items-center justify-center rounded-full bg-[var(--accent)] text-[11px] font-semibold text-[var(--accent-foreground)]">
+                {activeFilterCount}
+              </span>
+            )}
+          </button>
+          {renderRefreshButton("ml-auto rounded-full")}
+        </div>
+
+        <div
+          className={`${filtersOpen ? "grid" : "hidden"} grid-cols-2 gap-x-3 gap-y-2 sm:contents`}
+        >
         <FilterSelect
           label={t("bh.filterTimeRange")}
           value={timeRange}
@@ -510,17 +652,8 @@ export function BookingHistory() {
           onChange={setMethod}
           options={METHOD_OPTS}
         />
-        <Button
-          isIconOnly
-          size="sm"
-          variant="tertiary"
-          aria-label={t("bh.refresh")}
-          className="ml-auto rounded-full"
-          onPress={load}
-          isDisabled={loading}
-        >
-          <ArrowsRotateRight width={16} height={16} />
-        </Button>
+        </div>
+        {renderRefreshButton("ml-auto hidden rounded-full sm:flex")}
       </div>
 
       {error && (
@@ -531,7 +664,19 @@ export function BookingHistory() {
 
       {initialLoading ? (
         <div className="min-h-0 flex-1 overflow-auto" aria-hidden>
-          <Table variant="secondary">
+          <div className="flex flex-col gap-3 lg:hidden">
+            {skeletonRows.map((row) => (
+              <div
+                key={row.id}
+                className="flex flex-col gap-3 rounded-2xl border border-[color:var(--separator)] bg-white p-4 dark:bg-[#13161b]"
+              >
+                <div className="h-4 w-2/3 animate-pulse rounded-full bg-default" />
+                <div className="h-3 w-1/2 animate-pulse rounded-full bg-default" />
+                <div className="h-3 w-2/5 animate-pulse rounded-full bg-default" />
+              </div>
+            ))}
+          </div>
+          <Table variant="secondary" className="hidden lg:block">
             <TableContent aria-label={t("bh.tableLabel")}>
               <TableHeader>
                 <TableColumn id="date" isRowHeader>
@@ -595,7 +740,22 @@ export function BookingHistory() {
                 loading ? "pointer-events-none opacity-60" : "opacity-100"
               }`}
             >
-              <Table variant="secondary">
+              <div className="flex flex-col gap-3 lg:hidden">
+                {pageItems.map((b) => (
+                  <BookingCard
+                    key={b.id}
+                    booking={b}
+                    t={t}
+                    onEdit={() => setEditing(b)}
+                    onCancel={() => {
+                      setCancelError(null);
+                      setCanceling(b);
+                    }}
+                  />
+                ))}
+              </div>
+
+              <Table variant="secondary" className="hidden lg:block">
                 <TableContent
                   aria-label={t("bh.tableLabel")}
                   sortDescriptor={sortDescriptor}
@@ -686,11 +846,7 @@ export function BookingHistory() {
                       </TableCell>
                       <TableCell>
                         {(() => {
-                          const actionsDisabled =
-                            b.status === "failed" ||
-                            b.status === "canceled" ||
-                            b.status === "finished" ||
-                            isPastBooking(b);
+                          const actionsDisabled = bookingActionsDisabled(b);
                           return (
                         <div className="flex items-center gap-1">
                           <Button

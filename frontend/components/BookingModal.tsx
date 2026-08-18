@@ -239,24 +239,26 @@ export function BookingModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-4"
       onMouseDown={closeFromBackdrop}
     >
-      <div className="flex w-full max-w-[1072px] gap-6 rounded-2xl bg-white p-6 shadow-2xl dark:bg-[#0c0e12]">
-        {/* Banner — 400px wide. The thumbnail (meeting_room_metadata.thumbnail_link)
-            with room name, email and metadata chips overlaid over a dark gradient
-            for legibility. Stretches to the form's height. */}
-        <div className="relative w-[400px] min-h-[420px] shrink-0 overflow-hidden rounded-lg bg-default-100 shadow-lg">
+      {/* Below `lg` the two halves stack and the dialog turns into a scrollable
+          bottom sheet; from `lg` up it's the side-by-side banner + form design. */}
+      <div className="flex max-h-[92dvh] w-full max-w-[1072px] flex-col gap-4 overflow-y-auto rounded-t-2xl bg-white p-4 shadow-2xl dark:bg-[#0c0e12] sm:max-h-[90dvh] sm:rounded-2xl lg:flex-row lg:gap-6 lg:overflow-visible lg:p-6">
+        {/* Banner — 400px wide on desktop, a short cover strip once stacked. The
+            thumbnail (meeting_room_metadata.thumbnail_link) with room name, email
+            and metadata chips overlaid over a dark gradient for legibility. */}
+        <div className="relative h-[160px] w-full shrink-0 overflow-hidden rounded-lg bg-default-100 shadow-lg sm:h-[200px] lg:h-auto lg:min-h-[420px] lg:w-[400px]">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={slot.thumbnail || "/default-room-thumbnail.png"}
             alt={slot.roomName}
             className="h-full w-full object-cover"
           />
-          <div className="absolute inset-0 bg-gradient-to-b from-transparent from-50% to-black/90" />
-          <div className="absolute inset-x-0 bottom-0 flex flex-col gap-2 p-6">
+          <div className="absolute inset-0 bg-gradient-to-b from-transparent from-20% to-black/90 lg:from-50%" />
+          <div className="absolute inset-x-0 bottom-0 flex flex-col gap-2 p-4 lg:p-6">
             <div className="text-white">
-              <p className="text-2xl font-bold leading-8">
+              <p className="text-xl font-bold leading-7 lg:text-2xl lg:leading-8">
                 {roomFlag(slot.roomName) && (
                   <span className="mr-2">{roomFlag(slot.roomName)}</span>
                 )}
@@ -285,8 +287,8 @@ export function BookingModal({
           </div>
         </div>
 
-        {/* Form — 600px wide */}
-        <div className="flex w-[600px] shrink-0 flex-col gap-5">
+        {/* Form — 600px wide from `lg` up, full width once stacked */}
+        <div className="flex w-full flex-col gap-5 lg:w-[600px] lg:shrink-0">
           {/* Title + subtitle */}
           <div className="flex flex-col gap-0.5">
             <div className="flex items-center gap-2">
@@ -297,7 +299,7 @@ export function BookingModal({
                   className="shrink-0 text-[var(--accent)]"
                 />
               )}
-              <h2 className="text-2xl font-bold leading-8 text-default-900">
+              <h2 className="text-xl font-bold leading-7 text-default-900 lg:text-2xl lg:leading-8">
                 {title}
               </h2>
             </div>
@@ -316,8 +318,10 @@ export function BookingModal({
               />
             </TextField>
 
-            <div className="grid grid-cols-2 gap-4">
-              <TextField fullWidth isDisabled>
+            {/* Start + end always share one row — they read as a single range,
+                so stacking them on narrow screens breaks the pairing. */}
+            <div className="flex items-start gap-3 sm:gap-4">
+              <TextField fullWidth className="min-w-0 flex-1" isDisabled>
                 <Label>
                   {t("booking.startTime")} {req}
                 </Label>
@@ -326,6 +330,7 @@ export function BookingModal({
 
               <Select
                 variant="secondary"
+                className="min-w-0 flex-1"
                 selectedKey={endTime || null}
                 onSelectionChange={(key) => setEndTime((key as string) ?? "")}
               >
@@ -362,7 +367,7 @@ export function BookingModal({
               <Label>{t("booking.description")}</Label>
               <TextArea
                 variant="secondary"
-                rows={7}
+                rows={4}
                 placeholder={t("booking.descriptionPlaceholder")}
                 value={notes}
                 onChange={(event) => setNotes(event.target.value)}

@@ -34,7 +34,7 @@ import {
   type UserProfileOption,
   type UserProfileOptions,
 } from "@/lib/api";
-import { Check, Copy } from "@gravity-ui/icons";
+import { Bars, Check, Copy, PencilToSquare } from "@gravity-ui/icons";
 import { supabase, supabaseEnabled } from "@/lib/supabase";
 import { linkMicrosoft, relinkFromStoredSession } from "@/lib/linkMicrosoft";
 import { isZaloMiniAppFlow } from "@/lib/zaloReturn";
@@ -51,7 +51,7 @@ import {
 import { SettingsScreen } from "@/components/SettingsScreen";
 import { BrandIcon } from "@/components/BrandIcon";
 import { useTheme, useLanguage, useT } from "@/app/providers";
-import type { TFunction } from "@/lib/i18n";
+import type { TFunction, TranslationKey } from "@/lib/i18n";
 import {
   BookingHistory,
   clearBookingHistoryCache,
@@ -378,8 +378,8 @@ function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
   };
 
   return (
-    <div className="min-h-screen bg-white dark:bg-[#0c0e12]">
-      <main className="grid min-h-screen grid-cols-1 lg:grid-cols-[1fr_1.04fr]">
+    <div className="min-h-[100dvh] bg-white dark:bg-[#0c0e12]">
+      <main className="grid min-h-[100dvh] grid-cols-1 lg:grid-cols-[1fr_1.04fr]">
         <section className="flex items-center justify-center px-5 py-10 sm:px-8 sm:py-12">
           <form
             className="flex w-full max-w-[480px] flex-col items-start gap-6"
@@ -629,9 +629,9 @@ function ProfileInfoScreen({
   };
 
   return (
-    <div className="min-h-screen bg-white dark:bg-[#0c0e12]">
-      <main className="grid min-h-screen lg:grid-cols-[1fr_1.04fr]">
-        <section className="flex items-center justify-center px-8 py-12">
+    <div className="min-h-[100dvh] bg-white dark:bg-[#0c0e12]">
+      <main className="grid min-h-[100dvh] grid-cols-1 lg:grid-cols-[1fr_1.04fr]">
+        <section className="flex items-center justify-center px-5 py-10 sm:px-8 sm:py-12">
           <div className="flex w-full max-w-[480px] flex-col items-start gap-6">
             <BrandIcon size={64} />
 
@@ -850,7 +850,7 @@ function ProfileInfoScreen({
           </div>
         </section>
 
-        <section className="relative min-h-[520px] overflow-hidden bg-default-100 lg:rounded-l-[80px]">
+        <section className="relative min-h-[200px] overflow-hidden bg-default-100 sm:min-h-[360px] lg:min-h-[520px] lg:rounded-l-[80px]">
           <img
             src="/auth/vng-campus.webp"
             alt="VNG Corporation campus"
@@ -861,6 +861,16 @@ function ProfileInfoScreen({
     </div>
   );
 }
+
+// Title shown in the mobile top bar for each view — on desktop the sidebar's
+// highlighted row plays this role, so the bar only exists below `lg`.
+const MOBILE_TITLE_KEY: Record<View, TranslationKey> = {
+  browse: "sidebar.browseRooms",
+  chat: "sidebar.chat",
+  roomScout: "sidebar.roomScout",
+  bookingHistory: "sidebar.bookingHistory",
+  settings: "sidebar.settings",
+};
 
 export default function Home() {
   const t = useT();
@@ -875,6 +885,9 @@ export default function Home() {
   const pathname = usePathname();
   const initialRoute = useRef(parseRoute(pathname)).current;
   const [view, setView] = useState<View>(initialRoute.view);
+  // Off-canvas sidebar state — only meaningful below `lg`, where the shell
+  // collapses from two panes to one and the sidebar becomes a drawer.
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [data, setData] = useState<ScheduleResponse | null>(null);
   const [dayIndex, setDayIndex] = useState(0);
   const [chatThreads, setChatThreads] = useState<ChatThread[]>([]);
@@ -908,6 +921,8 @@ export default function Home() {
   useEffect(() => {
     if (view !== "browse") browseOrderRef.current.clear();
   }, [view]);
+
+  const closeSidebar = useCallback(() => setSidebarOpen(false), []);
 
   // Run a navigation, but if there are unsaved Settings changes, stash it and
   // surface the confirm modal instead.
@@ -1344,8 +1359,8 @@ export default function Home() {
     if (initialRoute.view === "browse") {
       return (
         <TokenExpiryProvider fallbackExpiresAt={null}>
-          <div className="flex h-screen gap-2 overflow-hidden bg-[#f0f0f1] p-2 dark:bg-[#13161b]">
-            <aside className="flex w-[280px] shrink-0 flex-col rounded-2xl bg-white p-4 shadow-sm dark:bg-[#0c0e12]">
+          <div className="flex h-[100dvh] gap-0 overflow-hidden bg-[#f0f0f1] p-0 dark:bg-[#13161b] lg:gap-2 lg:p-2">
+            <aside className="hidden w-[280px] shrink-0 flex-col rounded-2xl bg-white p-4 shadow-sm dark:bg-[#0c0e12] lg:flex">
               <div className="mb-8 flex items-center gap-3">
                 <div className="h-9 w-9 animate-pulse rounded-full bg-default" />
                 <div className="h-5 w-28 animate-pulse rounded-full bg-default" />
@@ -1360,7 +1375,7 @@ export default function Home() {
               </div>
               <div className="mt-auto h-12 animate-pulse rounded-full bg-default" />
             </aside>
-            <main className="min-w-0 flex-1 overflow-hidden rounded-2xl bg-white shadow-sm dark:bg-[#0c0e12]">
+            <main className="min-w-0 flex-1 overflow-hidden bg-white shadow-sm dark:bg-[#0c0e12] lg:rounded-2xl">
               <BrowseRooms
                 data={buildBrowsePlaceholderData()}
                 dayIndex={dayIndex}
@@ -1377,7 +1392,7 @@ export default function Home() {
     }
 
     return (
-      <div className="flex h-screen flex-col items-center justify-center gap-3">
+      <div className="flex h-[100dvh] flex-col items-center justify-center gap-3">
         <Spinner />
         <span className="text-sm text-default-500">{t("common.loading")}</span>
       </div>
@@ -1465,8 +1480,10 @@ export default function Home() {
       autoRefresh={me.graphLinked === true}
       onExpired={showSessionExpiredModal}
     >
-    <div className="flex h-screen gap-2 overflow-hidden bg-[#f0f0f1] p-2 dark:bg-[#13161b]">
+    <div className="flex h-[100dvh] gap-0 overflow-hidden bg-[#f0f0f1] p-0 dark:bg-[#13161b] lg:gap-2 lg:p-2">
       <Sidebar
+        open={sidebarOpen}
+        onClose={closeSidebar}
         view={view}
         onChange={requestView}
         username={me.username}
@@ -1492,7 +1509,38 @@ export default function Home() {
         onDeleteThread={handleDeleteThread}
       />
 
-      <main className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-2xl bg-white shadow-sm dark:bg-[#0c0e12]">
+      <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-white shadow-sm dark:bg-[#0c0e12] lg:rounded-2xl">
+        {/* Mobile top bar — the only way back to the nav once the sidebar is
+            off-canvas. Hidden from `lg` up, where the sidebar is always on. */}
+        <div className="flex shrink-0 items-center gap-2 border-b border-[color:var(--separator)] px-3 py-2 lg:hidden">
+          <button
+            type="button"
+            onClick={() => setSidebarOpen(true)}
+            aria-label={t("sidebar.openMenu")}
+            className="flex size-9 shrink-0 items-center justify-center rounded-full text-[#18181b] transition-colors hover:bg-[#f5f5f5] dark:text-[#f7f7f7] dark:hover:bg-[#22262f]"
+          >
+            <Bars width={18} height={18} />
+          </button>
+          <span className="truncate text-base font-semibold text-[#18181b] dark:text-[#f7f7f7]">
+            {t(MOBILE_TITLE_KEY[view])}
+          </span>
+          {view === "chat" && activeThreadId && (
+            <button
+              type="button"
+              onClick={() =>
+                guardNav(() => {
+                  setView("chat");
+                  setActiveThreadId(null);
+                })
+              }
+              aria-label={t("sidebar.newChat")}
+              className="ml-auto flex size-9 shrink-0 items-center justify-center rounded-full text-[#18181b] transition-colors hover:bg-[#f5f5f5] dark:text-[#f7f7f7] dark:hover:bg-[#22262f]"
+            >
+              <PencilToSquare width={18} height={18} />
+            </button>
+          )}
+        </div>
+
         {error && (
           <div className="border-b border-danger-200 bg-danger-50 px-6 py-2 text-sm text-danger">
             {error}

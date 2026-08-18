@@ -298,7 +298,7 @@ export function RoomScout({
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-y-auto">
-      <div className="flex min-h-full w-full flex-col items-center justify-center px-6 py-10">
+      <div className="flex min-h-full w-full flex-col items-center justify-center px-4 py-8 sm:px-6 sm:py-10">
         <div className={`w-full ${showGuide ? "max-w-[640px]" : "max-w-[480px]"}`}>
           {loading ? (
             <ScoutFormSkeleton />
