@@ -2980,16 +2980,13 @@ body[zaui-theme="dark"] {
   align-items: center;
   gap: 6px;
 }
-.block-scr__favicon {
-  width: 40px;
+// Logo là lockup ngang (icon + chữ "VNG Meet") nên chốt theo CHIỀU CAO, bề ngang
+// tự co theo tỉ lệ — giống .perm-scr__logo, tránh bóp méo ảnh 638x120.
+.block-scr__logo {
   height: 40px;
+  width: auto;
   display: block;
-}
-.block-scr__wordmark {
-  font-size: 30px;
-  line-height: 40px;
-  font-weight: 500;
-  color: var(--vm-blue);
+  object-fit: contain;
 }
 .block-scr__desc {
   font-size: 18px;

@@ -46,7 +46,7 @@ const STATUS_META: Record<
   canceled: { labelKey: "status.canceled", className: "history-chip--canceled" },
 };
 
-// Bộ lọc theo TRẠNG THÁI (không theo mốc thời gian): tất cả / sắp tới / đã qua.
+// Bộ lọc: tất cả / sắp tới / đã qua ("Sắp tới" là tab mặc định).
 type TabKey = "all" | "upcoming" | "past";
 const TABS: { key: TabKey; labelKey: TranslationKey }[] = [
   { key: "all", labelKey: "history.all" },
@@ -55,17 +55,16 @@ const TABS: { key: TabKey; labelKey: TranslationKey }[] = [
 ];
 const DEFAULT_TAB: TabKey = "upcoming";
 
-// "Sắp tới" = lượt đặt còn hiệu lực: phòng đã giữ (success), đang họp (ongoing)
-// hoặc còn đang chờ (pending = chờ đặt lúc 00:00, ok = chờ phòng phản hồi) —
-// khớp ACTIVE_BOOKING_STATUSES của backend. "Đã qua" = đã dùng xong (finished).
-// failed/canceled không nằm ở tab nào ngoài "Tất cả".
-const UPCOMING_STATUSES: BookingStatus[] = [
+// Lượt đặt "có thật" (phòng đã/đang giữ, hoặc còn đang chờ): chia sang Sắp tới /
+// Đã qua theo MỐC THỜI GIAN, nên lịch hôm nay chưa họp xong vẫn nằm ở "Sắp tới".
+// failed/canceled không thuộc tab nào ngoài "Tất cả".
+const LISTED_STATUSES: BookingStatus[] = [
   "success",
   "ongoing",
   "pending",
   "ok",
+  "finished",
 ];
-const PAST_STATUSES: BookingStatus[] = ["finished"];
 
 // "2026-07-22" -> "22/7" (khớp Figma: bỏ số 0 ở đầu, 1 dấu gạch).
 function formatShortDate(iso: string): string {
@@ -85,6 +84,15 @@ function weekdayLabel(iso: string, t: TFunction): string {
 // "14:00:00" / "14:00" -> "14:00".
 function hhmm(time?: string | null): string {
   return (time || "").slice(0, 5);
+}
+
+// Lượt đặt đã xong chưa? Theo giờ kết thúc so với hiện tại; riêng "finished" là
+// trạng thái cuối (trả phòng sớm thì end_time còn ở tương lai) nên luôn tính là
+// đã qua.
+function isDone(item: BookingHistoryItem): boolean {
+  if (item.status === "finished") return true;
+  const end = new Date(`${item.date}T${hhmm(item.end_time)}:00`);
+  return !Number.isNaN(end.getTime()) && end.getTime() < Date.now();
 }
 
 // Dựng UpcomingEvent để mở màn "Chi tiết lịch họp" (dùng chung component với
@@ -176,8 +184,11 @@ export default function HistoryPage() {
 
   function itemsFor(key: TabKey): BookingHistoryItem[] {
     if (key === "all") return items;
-    const allowed = key === "upcoming" ? UPCOMING_STATUSES : PAST_STATUSES;
-    return items.filter((item) => allowed.includes(item.status));
+    return items.filter(
+      (item) =>
+        LISTED_STATUSES.includes(item.status) &&
+        (key === "past" ? isDone(item) : !isDone(item)),
+    );
   }
 
   function renderCard(item: BookingHistoryItem) {

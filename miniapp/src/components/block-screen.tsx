@@ -8,7 +8,7 @@ import Binoculars from "@gravity-ui/icons/Binoculars";
 import Clock from "@gravity-ui/icons/Clock";
 import MapPin from "@gravity-ui/icons/MapPin";
 
-import favicon from "@/static/favicon-blue.svg";
+import logo from "@/static/logo-blue.png";
 import { msOAuthUrl } from "@/config";
 import { useT } from "@/services/settings";
 import type { TranslationKey } from "@/services/i18n";
@@ -153,8 +153,7 @@ export default function BlockScreen({
       <div className="block-scr__body">
         <div className="block-scr__heads">
           <div className="block-scr__brand">
-            <img className="block-scr__favicon" src={favicon} alt="" />
-            <span className="block-scr__wordmark">VNG Meet</span>
+            <img className="block-scr__logo" src={logo} alt="VNG Meet" />
           </div>
           <p className="block-scr__desc">{t("block.desc")}</p>
         </div>
