@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import logging
+
 import httpx
 
 from .config import get_settings
 
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"
+
+log = logging.getLogger("vngmeet.graph")
 
 
 async def get_schedule(
@@ -16,16 +20,16 @@ async def get_schedule(
     end_iso: str,
     timezone: str,
     interval_minutes: int,
-    client: httpx.AsyncClient | None = None,
 ) -> dict[str, str]:
     """Call /me/calendar/getSchedule and return {email: availabilityView}.
 
     availabilityView is a string of digits, one per interval:
       0 = free, 1 = tentative, 2 = busy, 3 = out-of-office, 4 = working elsewhere.
 
-    Pass `client` when issuing several batches: creating an AsyncClient per call
-    costs a fresh DNS lookup + TCP + TLS handshake to graph.microsoft.com every
-    time, which dominates the refresh job once there is more than one batch.
+    Every call owns its AsyncClient. Callers issue their batches one at a time, so
+    the per-call DNS + TCP + TLS handshake is the price of keeping each batch fully
+    independent — a client shared across concurrent batches made a single batch's
+    failure much harder to attribute.
     """
     if not emails:
         return {}
@@ -41,19 +45,30 @@ async def get_schedule(
         "availabilityViewInterval": interval_minutes,
     }
     url = f"{GRAPH_BASE}/me/calendar/getSchedule"
-    if client is not None:
+    async with httpx.AsyncClient(timeout=60) as client:
         resp = await client.post(url, headers=headers, json=body)
         resp.raise_for_status()
         data = resp.json()
-    else:
-        async with httpx.AsyncClient(timeout=60) as owned:
-            resp = await owned.post(url, headers=headers, json=body)
-            resp.raise_for_status()
-            data = resp.json()
 
+    # Only schedules Graph could actually READ make it into the result. A mailbox
+    # it failed on comes back as a normal entry carrying an `error` object and an
+    # empty availabilityView — and an empty view is indistinguishable from "free
+    # all day" once it is sliced per-day downstream. Dropping the entry keeps
+    # "unknown" distinct from "free", so every caller decides for itself instead
+    # of silently inheriting a fully-free room.
     result: dict[str, str] = {}
     for item in data.get("value", []):
-        result[item.get("scheduleId")] = item.get("availabilityView", "")
+        schedule_id = item.get("scheduleId")
+        view = item.get("availabilityView") or ""
+        err = item.get("error")
+        if err or not view:
+            log.warning(
+                "getSchedule: no free/busy for %s (%s) - skipped, not treated as free",
+                schedule_id,
+                (err or {}).get("message") if isinstance(err, dict) else (err or "empty availabilityView"),
+            )
+            continue
+        result[schedule_id] = view
     return result
 
 

@@ -186,7 +186,7 @@ SCHEDULE_BATCH = 20
 
 # Rows per room_availability upsert. Each row carries three 96-element arrays, so
 # rooms x availability_days in a single request is a multi-megabyte body that both
-# stalls and occasionally times out. Chunks go up concurrently.
+# stalls and occasionally times out. Chunks go up one after another.
 UPSERT_CHUNK = 250
 
 
@@ -199,14 +199,21 @@ async def refresh_availability_delegated(token: str) -> dict:
     and the returned availabilityView is sliced into per-day rows of 96 15-min
     slots. This is the only availability-refresh path.
 
-    Runs on a one-minute cron, so it MUST finish inside a minute: APScheduler is
-    configured with max_instances=1, and an overrun silently drops the next tick —
-    which is what turned this job's real-world cadence into two minutes. Hence the
-    concurrent batches, the shared HTTP connection, and the chunked upsert.
+    Everything here runs SEQUENTIALLY — one getSchedule batch at a time, then one
+    upsert chunk at a time. The batches were briefly overlapped with asyncio.gather
+    (2644bc4) to fit the cron budget; that was reverted on purpose. The few seconds
+    it saved were not worth a flow where one batch failing among many was hard to
+    attribute and the resulting cache state was hard to reason about.
 
-    Every Supabase call here goes through asyncio.to_thread: supabase-py is
+    The cost is real: this runs on a one-minute cron with max_instances=1, so a run
+    overshooting 60s silently drops the next tick and the cache ages. Watch the SLOW
+    line logged below — if it starts firing, widen the cron interval rather than
+    reaching for concurrency again.
+
+    Every Supabase call still goes through asyncio.to_thread: supabase-py is
     synchronous, and this job's payloads are large enough that running them inline
     would block the whole event loop — including the scheduled-booking countdown.
+    Each to_thread is awaited on its own, one at a time; that is not concurrency.
     """
     settings = get_settings()
     if not settings.supabase_enabled:
@@ -235,37 +242,32 @@ async def refresh_availability_delegated(token: str) -> dict:
 
     batches = [emails[i : i + SCHEDULE_BATCH] for i in range(0, len(emails), SCHEDULE_BATCH)]
 
-    async def _fetch(client: httpx.AsyncClient, batch: list[str]) -> dict[str, str] | None:
+    existing_meta = await asyncio.to_thread(_read_existing_slot_meta, sb, room_ids, day_list)
+
+    # One batch at a time, in order. A batch that fails contributes None and is
+    # counted as errors below; it must not take the rest of the refresh with it.
+    view_sets: list[dict[str, str] | None] = []
+    for batch in batches:
         try:
-            return await graph.get_schedule(
-                token,
-                batch,
-                start_iso,
-                end_iso,
-                settings.timezone,
-                settings.availability_slot_minutes,
-                client=client,
+            view_sets.append(
+                await graph.get_schedule(
+                    token,
+                    batch,
+                    start_iso,
+                    end_iso,
+                    settings.timezone,
+                    settings.availability_slot_minutes,
+                )
             )
         except httpx.HTTPStatusError as e:
             log.warning(
                 "getSchedule(delegated) failed for %s: %s %s",
                 batch, e.response.status_code, e.response.text[:200],
             )
+            view_sets.append(None)
         except Exception as e:  # noqa: BLE001 - one batch must not kill the rest
             log.warning("getSchedule(delegated) error for %s: %s", batch, e)
-        return None
-
-    # The existing-meta read and every getSchedule batch are independent: overlap
-    # them instead of paying for them one after another.
-    async with httpx.AsyncClient(
-        timeout=60,
-        limits=httpx.Limits(max_keepalive_connections=len(batches) or 1,
-                            max_connections=max(len(batches) * 2, 4)),
-    ) as client:
-        existing_meta, *view_sets = await asyncio.gather(
-            asyncio.to_thread(_read_existing_slot_meta, sb, room_ids, day_list),
-            *(_fetch(client, b) for b in batches),
-        )
+            view_sets.append(None)
     t_fetched = time.perf_counter()
 
     upserts: list[dict] = []
@@ -274,16 +276,23 @@ async def refresh_availability_delegated(token: str) -> dict:
     room_slots: dict[tuple[str, str], list[int]] = {}
     errors = 0
     now_iso = datetime.now(tz).isoformat()
+    # Rooms this tick actually got readable free/busy for, and rooms whose whole
+    # getSchedule batch failed. Everything in `by_email` that is in neither set is
+    # a room Graph answered for but could not read (graph.get_schedule dropped it).
+    fetched_emails: set[str] = set()
+    failed_batch_emails: set[str] = set()
 
     for batch, views in zip(batches, view_sets):
         if views is None:
             errors += len(batch)
+            failed_batch_emails.update(e.lower() for e in batch)
             continue
 
         for email, view in views.items():
             room = by_email.get(email.lower())
             if not room:
                 continue
+            fetched_emails.add(email.lower())
             for di, day in enumerate(day_list):
                 chunk = view[di * SLOTS_PER_DAY : (di + 1) * SLOTS_PER_DAY]
                 scheduled_day = di == len(day_list) - 1
@@ -291,10 +300,21 @@ async def refresh_availability_delegated(token: str) -> dict:
                     _av_char_to_status(c, scheduled_day=scheduled_day)
                     for c in chunk
                 ]
-                # Pad if Graph returned a short view (defensive; missing = free).
+                # Pad if Graph returned a short view — as BUSY, never free.
+                #
+                # This used to pad with 0 (free), which is how a room with an empty
+                # availabilityView became "free all day, every day": 96 fabricated
+                # zeros per day, rewritten every minute, indistinguishable from a
+                # genuinely empty room. Room Scout then auto-booked it on repeat.
+                # Graph.get_schedule now drops unreadable rooms outright, so this
+                # only ever sees a genuinely SHORT view — and a slot we have no
+                # answer for must block booking, not invite it.
                 if len(slots) < SLOTS_PER_DAY:
-                    pad_value = -1 if scheduled_day else 0
-                    slots += [pad_value] * (SLOTS_PER_DAY - len(slots))
+                    log.warning(
+                        "short availabilityView for %s on %s: %d/%d slots - padding busy",
+                        room["email"], day.isoformat(), len(slots), SLOTS_PER_DAY,
+                    )
+                    slots += [1] * (SLOTS_PER_DAY - len(slots))
                 room_slots[(room["id"], day.isoformat())] = slots
                 meta = existing_meta.get((room["id"], day.isoformat())) or {}
                 slot_owner_ids = _merge_owner_ids_with_slots(meta.get("owner"), slots)
@@ -316,16 +336,24 @@ async def refresh_availability_delegated(token: str) -> dict:
     def _prune() -> None:
         sb.table("room_availability").delete().lt("date", today.isoformat()).execute()
 
+    # Chunk at a time, then prune. Still chunked — a single multi-megabyte upsert
+    # times out — but each chunk lands before the next is sent, so a failure names
+    # exactly which rows did not make it instead of one anonymous gather result.
     chunks = [upserts[i : i + UPSERT_CHUNK] for i in range(0, len(upserts), UPSERT_CHUNK)]
-    writes = await asyncio.gather(
-        *(asyncio.to_thread(_upsert, c) for c in chunks),
-        asyncio.to_thread(_prune),
-        return_exceptions=True,
-    )
-    for outcome in writes:
-        if isinstance(outcome, BaseException):
+    for idx, chunk in enumerate(chunks):
+        try:
+            await asyncio.to_thread(_upsert, chunk)
+        except Exception as e:  # noqa: BLE001 - one chunk must not lose the rest
             errors += 1
-            log.warning("room_availability write failed: %s", outcome)
+            log.warning(
+                "room_availability upsert chunk %d/%d (%d rows) failed: %s",
+                idx + 1, len(chunks), len(chunk), e,
+            )
+    try:
+        await asyncio.to_thread(_prune)
+    except Exception as e:  # noqa: BLE001 - pruning is housekeeping, not the contract
+        errors += 1
+        log.warning("room_availability prune failed: %s", e)
 
     # Read the fresh room free/busy back into booking history: accepted bookings
     # become ongoing / finished / canceled here, once a minute, for every user.
@@ -344,18 +372,38 @@ async def refresh_availability_delegated(token: str) -> dict:
     except Exception as e:  # noqa: BLE001 - history must not break the cache refresh
         log.warning("reconcile_room_usage skipped: %s", e)
 
+    # Rooms whose batch succeeded but that Graph returned no readable free/busy
+    # for. They get NO row this tick, deliberately: a missing/stale row is caught
+    # by AVAILABILITY_CACHE_TTL and by the Room Scout freshness check, whereas a
+    # fabricated all-free row passes every validity check we have.
+    unreadable = sorted(
+        by_email[email]["email"]
+        for email in by_email
+        if email not in fetched_emails and email not in failed_batch_emails
+    )
+
     total_ms = (time.perf_counter() - t_start) * 1000
     summary = {
         "rooms": len(rooms),
         "rows": len(upserts),
         "errors": errors,
+        "unreadable_rooms": len(unreadable),
         "usage": usage,
         "fetch_ms": round((t_fetched - t_start) * 1000),
         "total_ms": round(total_ms),
     }
+    # ERROR, not INFO: a room Graph cannot read is a room that silently vanishes
+    # from the grid and from Room Scout's candidates. Reporting `errors: 0` while
+    # serving fabricated availability for these rooms is exactly what hid this bug
+    # for three months — name the rooms so it is actionable.
+    if unreadable:
+        log.error(
+            "refresh_availability_delegated: NO free/busy for %d/%d room(s), not cached: %s | %s",
+            len(unreadable), len(rooms), ", ".join(unreadable), summary,
+        )
     # WARNING, not INFO: this job has a hard one-minute budget (max_instances=1
     # means an overrun eats the next tick), so a slow run needs to be visible.
-    if total_ms > 30_000:
+    elif total_ms > 30_000:
         log.warning(
             "refresh_availability_delegated SLOW (%.1fs of its 60s budget): %s",
             total_ms / 1000, summary,

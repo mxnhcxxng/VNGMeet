@@ -13,7 +13,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from . import auth, availability, graph
-from .app_context import log, settings
+from .app_context import AVAILABILITY_CACHE_TTL, log, settings
 from .bookings import (
     _log_user_booking_activity,
     _mark_room_availability_owner,
@@ -26,7 +26,11 @@ from .bookings import (
 from .chat import _effective_capacity_size
 from .models import BookingRequest
 from .profiles import _booking_auth_context, _read_user_profile
-from .room_resources import _read_availability_cache, _require_auth
+from .room_resources import (
+    _parse_cache_updated_at,
+    _read_availability_cache,
+    _require_auth,
+)
 
 router = APIRouter()
 
@@ -550,10 +554,24 @@ async def process_room_scouts() -> dict:
             cache = _read_availability_cache(sb, [r["id"] for r in rooms], [scout_day]) if rooms else {}
             skip_lunch = bool(scout.get("ignore_lunch_break"))
             outcome = None
+            # Auto-booking acts on cached free/busy without re-checking Graph, so a
+            # row it cannot vouch for must be skipped rather than trusted. Length
+            # alone was not enough: a fabricated all-free row is exactly 96 slots
+            # long. Age is the check that catches a room the refresh job has
+            # stopped writing (Graph can no longer read it) — better to scout no
+            # room than to auto-book one whose availability we are guessing at.
+            fresh_cutoff = datetime.now(timezone.utc) - AVAILABILITY_CACHE_TTL
             for room in rooms:
                 row = cache.get((room["id"], scout_day))
                 slots = list(row.get("slots") or []) if row else []
                 if len(slots) != availability.SLOTS_PER_DAY:
+                    continue
+                row_updated_at = _parse_cache_updated_at(row.get("updated_at"))
+                if not row_updated_at or row_updated_at < fresh_cutoff:
+                    log.warning(
+                        "room scout %s: skipping %s - availability cache stale (updated_at=%s)",
+                        scout_id, room.get("email"), row.get("updated_at"),
+                    )
                     continue
                 slots = _apply_lunch_break(slots, skip_lunch)
                 block = _earliest_free_block(

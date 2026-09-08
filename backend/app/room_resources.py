@@ -192,8 +192,15 @@ async def schedule(
     day_list = [(today + timedelta(days=i)).isoformat() for i in range(days)]
 
     # grid[email] -> list (per time) of list (per day) of status int
+    #
+    # Seeded BUSY (1), not free (0). A room only ever gets written below if
+    # getSchedule actually returned free/busy for it; a room Graph could not read
+    # is dropped by graph.get_schedule and never reaches this loop. Seeding free
+    # would render exactly those rooms as wide open all week — the same
+    # "unknown means free" mistake that had Room Scout auto-booking phantom
+    # rooms. Unknown must render unbookable.
     grids: dict[str, list[list[int]]] = {
-        e: [[0] * days for _ in times] for e in room_emails
+        e: [[1] * days for _ in times] for e in room_emails
     }
 
     # One getSchedule call per day (business hours only) keeps slicing trivial.
@@ -598,6 +605,18 @@ async def availability_grid(
             slots = row.get("slots") if row else []
             slot_owner_ids = row.get("slot_owner_ids") if row else []
             slot_attendee_ids = row.get("slot_attendee_ids") if row else []
+            # No usable row for this room/day -> render the whole day BUSY.
+            #
+            # The refresh job deliberately writes no row for a room Graph cannot
+            # read (see refresh_availability_delegated), so `slots` is empty here
+            # for exactly those rooms. Falling through with an empty list made
+            # every `start + k < len(slots)` guard below short-circuit to False,
+            # i.e. busy=False, i.e. the room rendered completely free — the same
+            # "no data means free" inversion that was feeding Room Scout.
+            if len(slots) != availability.SLOTS_PER_DAY:
+                for ti in range(len(base_idx)):
+                    api_grid[ti][di] = 1
+                continue
             # Any day containing -1 is not treated as a normal instant day. The
             # final cache day intentionally keeps Graph-free slots at -1 while
             # Graph-busy slots are 1, so bookings there remain scheduled but
