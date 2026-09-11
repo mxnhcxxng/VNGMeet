@@ -20,6 +20,7 @@ overnight.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
@@ -235,27 +236,40 @@ async def renew_pool_tokens() -> int:
         from .supabase_client import get_supabase
 
         sb = get_supabase()
-        user_ids = [
-            str(r["user_id"])
-            for r in (sb.table("provider_tokens").select("user_id").execute().data or [])
-            if r.get("user_id")
-        ]
+
+        # Both reads go through asyncio.to_thread. supabase-py is synchronous, so
+        # running them inline blocks the WHOLE event loop, and this job walks every
+        # OAuth user: the two reads below plus, per user due for renewal, another
+        # read and two writes inside get_graph_token. That is the burst Supabase
+        # answered with 504s on exactly these two queries — see the cron offset in
+        # main.py for the other half of the fix.
+        def _read_user_ids() -> list[str]:
+            return [
+                str(r["user_id"])
+                for r in (sb.table("provider_tokens").select("user_id").execute().data or [])
+                if r.get("user_id")
+            ]
+
+        user_ids = await asyncio.to_thread(_read_user_ids)
         if not user_ids:
             return 0
 
         # One read for the whole pool state, so the common case (nothing due) costs
         # two queries and zero Azure round-trips.
-        pooled = {
-            str(r["owner_key"]): r
-            for r in (
-                sb.table("graph_token_pool")
-                .select("owner_key, status, expires_at")
-                .in_("owner_key", user_ids)
-                .execute()
-                .data
-                or []
-            )
-        }
+        def _read_pool() -> dict[str, dict]:
+            return {
+                str(r["owner_key"]): r
+                for r in (
+                    sb.table("graph_token_pool")
+                    .select("owner_key, status, expires_at")
+                    .in_("owner_key", user_ids)
+                    .execute()
+                    .data
+                    or []
+                )
+            }
+
+        pooled = await asyncio.to_thread(_read_pool)
     except Exception as e:  # noqa: BLE001 - a bookkeeping job must never crash the scheduler
         log.warning("renew_pool_tokens: could not read state: %s", e)
         return 0
@@ -374,16 +388,23 @@ async def refresh_availability_from_pool() -> dict | None:
     sb = get_supabase()
     now = datetime.now(timezone.utc)
 
-    # Flip aged-out rows to `expired` so the pool state is readable at a glance.
-    try:
+    # Both bookkeeping queries go through asyncio.to_thread, like every Supabase
+    # call in the refresh this job drives: supabase-py is synchronous, and this
+    # runs on the every-minute cron, so inline calls stall the event loop for the
+    # whole app once a minute.
+    def _expire_stale() -> None:
         sb.table("graph_token_pool").update(
             {"status": "expired", "updated_at": now.isoformat()}
         ).eq("status", "active").lte("expires_at", now.isoformat()).execute()
+
+    # Flip aged-out rows to `expired` so the pool state is readable at a glance.
+    try:
+        await asyncio.to_thread(_expire_stale)
     except Exception as e:  # noqa: BLE001
         log.warning("could not expire stale pool tokens: %s", e)
 
-    try:
-        rows = (
+    def _read_candidates() -> list[dict]:
+        return (
             sb.table("graph_token_pool")
             .select("owner_key, user_email, token_encrypted, expires_at")
             .eq("status", "active")
@@ -394,6 +415,9 @@ async def refresh_availability_from_pool() -> dict | None:
             .data
             or []
         )
+
+    try:
+        rows = await asyncio.to_thread(_read_candidates)
     except Exception as e:  # noqa: BLE001
         log.warning("could not read graph_token_pool: %s", e)
         return None
@@ -427,10 +451,13 @@ async def refresh_availability_from_pool() -> dict | None:
             log.warning("pool token of %s failed getSchedule; trying next", owner_key)
             continue
 
-        try:
+        def _stamp_used(_owner_key=owner_key) -> None:
             sb.table("graph_token_pool").update(
                 {"last_used_at": datetime.now(timezone.utc).isoformat()}
-            ).eq("owner_key", owner_key).execute()
+            ).eq("owner_key", _owner_key).execute()
+
+        try:
+            await asyncio.to_thread(_stamp_used)
         except Exception as e:  # noqa: BLE001
             log.warning("could not stamp last_used_at for %s: %s", owner_key, e)
         log.info("availability refreshed from pool (owner %s): %s", owner_key, summary)

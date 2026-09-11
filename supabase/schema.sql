@@ -388,6 +388,12 @@ alter table room_availability
   add column if not exists slot_attendee_ids jsonb not null default to_jsonb(array_fill(null::text, ARRAY[96]));
 alter table room_availability
   add column if not exists meetings jsonb not null default '[]'::jsonb;
+-- When Graph free/busy last wrote this row. Distinct from `updated_at`, which ANY
+-- writer stamps (_mark/_release_room_availability_owner, sync_my_calendar) — so a
+-- scout's own booking used to refresh the very timestamp its staleness guard reads.
+-- Only refresh_availability_delegated may set this. NULL = never synced from Graph.
+alter table room_availability
+  add column if not exists graph_synced_at timestamptz;
 alter table room_availability
   drop constraint if exists room_availability_slot_owner_ids_len;
 alter table room_availability
@@ -486,6 +492,11 @@ alter table room_scouts add column if not exists booked_room_email text;
 alter table room_scouts add column if not exists booked_start_time text;
 alter table room_scouts add column if not exists booked_end_time text;
 alter table room_scouts add column if not exists acknowledged_at timestamptz;
+-- Room+window pairs whose meeting request the room DECLINED. Auto-booking treats
+-- them as busy on later cycles; without this the scout re-books the same block
+-- every minute forever (decline -> sync deletes the event -> slots read free
+-- again). See migrate_room_scout_declined_attempts.sql.
+alter table room_scouts add column if not exists declined_attempts jsonb not null default '[]'::jsonb;
 create index if not exists idx_room_scouts_user_status on room_scouts(user_id, status);
 create index if not exists idx_room_scouts_active_expires on room_scouts(status, expires_at);
 alter table room_scouts enable row level security;

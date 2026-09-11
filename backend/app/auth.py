@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import re
@@ -381,7 +382,13 @@ async def get_graph_token(user_id: str) -> str:
     if cached and cached[1] - 60 > time.time():
         return cached[0]
 
-    refresh_token = _load_refresh_token(user_id)
+    # Every Supabase call in this coroutine goes through asyncio.to_thread.
+    # supabase-py is synchronous, so calling it inline blocks the WHOLE event
+    # loop — and the one caller that runs this in a tight loop is
+    # token_pool.renew_pool_tokens, which walks every OAuth user every five
+    # minutes. availability.refresh_availability_delegated already offloads for
+    # exactly this reason; this path was the one that still did not.
+    refresh_token = await asyncio.to_thread(_load_refresh_token, user_id)
     if not refresh_token:
         raise HTTPException(401, "Microsoft account not linked. Sign in again.")
 
@@ -429,14 +436,15 @@ async def get_graph_token(user_id: str) -> str:
 
     new_refresh = payload.get("refresh_token")
     if new_refresh and new_refresh != refresh_token:
-        store_refresh_token(user_id, new_refresh)
+        await asyncio.to_thread(store_refresh_token, user_id, new_refresh)
 
     # Feed the fresh token to the background availability pool. Only reached on
     # an actual exchange (~once/hour/user thanks to the cache above), and
     # save_token itself is best-effort, so this never slows or breaks auth.
     from .token_pool import save_token
 
-    save_token(
+    await asyncio.to_thread(
+        save_token,
         user_id,
         access_token,
         user_email=_decode_jwt_claim(access_token, "upn", "unique_name", "email"),

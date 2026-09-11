@@ -327,6 +327,14 @@ async def refresh_availability_delegated(token: str) -> dict:
                         "slot_owner_ids": slot_owner_ids,
                         "slot_attendee_ids": slot_attendee_ids,
                         "updated_at": now_iso,
+                        # THE stamp that says "Graph told us this". Every other
+                        # writer of this row touches updated_at — a booking, a
+                        # release, a calendar sync — so updated_at cannot answer
+                        # "is this free/busy still real?". This column can, and
+                        # only this job ever writes it. Room Scout refuses to
+                        # auto-book against a row whose graph_synced_at is stale
+                        # or missing.
+                        "graph_synced_at": now_iso,
                     }
                 )
 
@@ -381,6 +389,27 @@ async def refresh_availability_delegated(token: str) -> dict:
         for email in by_email
         if email not in fetched_emails and email not in failed_batch_emails
     )
+
+    # A room reading free for every slot of every cached day is the exact signature
+    # of the padding bug fixed above (96 fabricated zeros per day, rewritten every
+    # minute), and it is also what Room Scout will happily auto-book on repeat. A
+    # genuinely unused room looks the same, so this is a WARNING to correlate
+    # against, not an error: if a room shows up here AND its bookings get declined,
+    # the free/busy is lying and the room's mailbox is what to check.
+    fully_free = sorted(
+        by_email[email]["email"]
+        for email in fetched_emails
+        if all(
+            all(s != 1 for s in room_slots.get((by_email[email]["id"], day.isoformat()), [1]))
+            for day in day_list
+        )
+    )
+    if fully_free:
+        log.warning(
+            "refresh_availability_delegated: %d room(s) free in EVERY slot of all "
+            "%d cached days - verify their mailbox free/busy is really readable: %s",
+            len(fully_free), len(day_list), ", ".join(fully_free),
+        )
 
     total_ms = (time.perf_counter() - t_start) * 1000
     summary = {
@@ -1096,10 +1125,29 @@ async def sync_my_calendar(
                     {"status": "failed", "error_message": "room_declined"}
                 ).in_("id", declined_ids).execute()
                 declined = len(declined_ids)
+                # Name them. `declined: 1` in the summary is unattributable, which
+                # is why a Room Scout hammering ONE room every minute produced
+                # fifteen identical anonymous log lines and no way to see it.
+                by_id = {str(r["id"]): r for r in rows}
+                log.warning(
+                    "sync_my_calendar: room declined %d booking(s) for %s: %s",
+                    len(declined_ids),
+                    me_email or me,
+                    "; ".join(
+                        f"{(by_id.get(str(i)) or {}).get('room_email')} "
+                        f"{(by_id.get(str(i)) or {}).get('date')} "
+                        f"{(by_id.get(str(i)) or {}).get('start_time')}"
+                        for i in declined_ids
+                    ),
+                )
         except Exception as e:  # noqa: BLE001 - history cleanup must not break the grid
             log.warning("sync_my_calendar: booking reconcile skipped: %s", e)
 
     summary = {
+        # Several users' syncs interleave in the log at up to five lines a minute,
+        # and without an identity `events: 13` and `events: 5` are impossible to
+        # tell apart — let alone attribute to the scout that triggered them.
+        "user": me_email or me,
         "events": len(events),
         "rows": len(upserts),
         "promoted": promoted,

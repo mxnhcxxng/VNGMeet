@@ -274,7 +274,10 @@ def _read_availability_cache(
         return {}
     rows = (
         sb.table("room_availability")
-        .select("room_id, date, slots, slot_owner_ids, slot_attendee_ids, meetings, updated_at")
+        .select(
+            "room_id, date, slots, slot_owner_ids, slot_attendee_ids, meetings, "
+            "updated_at, graph_synced_at"
+        )
         .in_("room_id", room_ids)
         .gte("date", day_list[0])
         .lte("date", day_list[-1])

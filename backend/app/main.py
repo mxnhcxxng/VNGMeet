@@ -129,9 +129,17 @@ async def lifespan(app: FastAPI):
         # so rows sat `expired` overnight and /api/auth/me had no expiry to show.
         # Every 5 minutes is just the polling grain; a user is only re-exchanged
         # when their token is inside _RENEW_MARGIN, i.e. roughly once an hour.
+        # second=20, NOT second=0. The availability refresh above runs every minute
+        # at second 0, so at every 5th minute both jobs used to start on the same
+        # instant — one holding the event loop with synchronous Supabase calls
+        # while the other fired multi-megabyte upserts from its worker threads.
+        # Every 504 Supabase logged for this app landed on a 5-minute mark
+        # (04:30, 04:15, 04:10, 01:50, 00:50, 23:45, 23:10, 13:00 — 8 of 8), which
+        # is the signature of that collision, not of any one query being slow.
+        # Twenty seconds of separation is enough: the refresh finishes in ~8s.
         scheduler.add_job(
             _safe_renew_pool_tokens,
-            CronTrigger(minute="*/5", timezone=settings.timezone),
+            CronTrigger(minute="*/5", second=20, timezone=settings.timezone),
             id="renew_pool_tokens",
             max_instances=1,
             coalesce=True,
@@ -238,7 +246,10 @@ async def _safe_process_room_scouts() -> None:
     if _fire_blackout("process_room_scouts"):
         return
     try:
-        await process_room_scouts()
+        # The summary was computed and thrown away, which is why a scout re-booking
+        # the same declined room every minute for fifteen minutes left no trace in
+        # the log at all — the only evidence was the rows piling up in the database.
+        log.info("process_room_scouts done: %s", await process_room_scouts())
     except Exception as e:  # noqa: BLE001
         log.exception("process_room_scouts failed: %s", e)
 

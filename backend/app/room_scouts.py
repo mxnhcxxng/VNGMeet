@@ -410,6 +410,54 @@ def _scout_rooms_in_browse_order(sb, scout: dict) -> list[dict]:
     return rooms
 
 
+# A scout can only be turned down by so many room+window pairs before something is
+# structurally wrong; the cap keeps the persisted list (and the row) bounded.
+MAX_DECLINED_ATTEMPTS = 200
+
+
+def _declined_attempt_list(value: object) -> list[dict]:
+    """Normalise `room_scouts.declined_attempts` into a list of dict entries.
+
+    Postgres jsonb comes back already decoded, but a row written before the column
+    existed reads as None and a hand-edited row could hold anything — so anything
+    that is not a list of dicts is treated as "nothing declined yet"."""
+    if not isinstance(value, list):
+        return []
+    return [entry for entry in value if isinstance(entry, dict)]
+
+
+def _declined_slot_map(
+    entries: list[dict],
+    room_id_by_email: dict[str, str],
+    avail: int,
+) -> dict[tuple[str, str], set[int]]:
+    """Declined room+window pairs as busy slot indices, keyed (room_id, day).
+
+    Shaped exactly like the `reserved` map in `process_room_scouts` so the two can
+    be unioned straight into `_earliest_free_block`: a declined window is simply a
+    window this scout must not pick again.
+
+    Only the declined SLOTS are blocked, never the whole room. A room that refused
+    14:00-15:00 may still accept 16:00-17:00 — declines are often a conflict the
+    free/busy view had not caught up with, not a blanket refusal, and blacklisting
+    the room outright would throw away a candidate over one bad window.
+    """
+    blocked: dict[tuple[str, str], set[int]] = {}
+    for entry in entries:
+        room_id = room_id_by_email.get(str(entry.get("room_email") or "").strip().lower())
+        day = str(entry.get("date") or "")
+        start_min = _time_to_minutes(entry.get("start_time"))
+        end_min = _time_to_minutes(entry.get("end_time"))
+        if not room_id or not day or start_min is None or end_min is None:
+            continue
+        start_idx = start_min // avail
+        end_idx = (end_min + avail - 1) // avail
+        if end_idx <= start_idx:
+            continue
+        blocked.setdefault((room_id, day), set()).update(range(start_idx, end_idx))
+    return blocked
+
+
 async def process_room_scouts() -> dict:
     if not settings.supabase_enabled:
         raise RuntimeError("Supabase not configured; cannot process room scouts.")
@@ -435,7 +483,7 @@ async def process_room_scouts() -> dict:
         .select(
             "id, user_id, auth_user_id, email, duration_minutes, capacity_size, capacity_sizes, "
             "scout_date, scout_start_time, scout_end_time, ignore_lunch_break, office, "
-            "graph_access_token, pending_activity_id, created_at"
+            "graph_access_token, pending_activity_id, declined_attempts, created_at"
         )
         .eq("status", "active")
         .gt("expires_at", now.isoformat())
@@ -483,6 +531,49 @@ async def process_room_scouts() -> dict:
         scout_day = str(scout.get("scout_date") or "")
         user_profile_id = scout.get("user_id")
         checked_at = datetime.now(timezone.utc).isoformat()
+        # Room+window pairs this scout already had declined, as busy slot indices
+        # keyed (room_id, day). `reserved` above only lives for the duration of ONE
+        # process_room_scouts() call, so without a persisted equivalent the scout
+        # has no memory across cycles: the decline deletes the event and frees the
+        # slots, and a minute later the cache looks exactly as it did before.
+        declined_attempts = _declined_attempt_list(scout.get("declined_attempts"))
+        declined = _declined_slot_map(declined_attempts, room_id_by_email, avail)
+
+        def _record_decline(
+            room_email,
+            day,
+            start_label,
+            end_label,
+            *,
+            _scout_id=scout_id,
+            _attempts=declined_attempts,
+            _blocked=declined,
+        ):
+            """Persist a room's decline so later cycles treat that window as busy."""
+            entry = {
+                "room_email": str(room_email or ""),
+                "date": str(day or ""),
+                "start_time": str(start_label or ""),
+                "end_time": str(end_label or ""),
+            }
+            if not entry["room_email"] or not entry["start_time"]:
+                return
+            if entry in _attempts:
+                return
+            _attempts.append(entry)
+            del _attempts[:-MAX_DECLINED_ATTEMPTS]
+            _blocked.clear()
+            _blocked.update(_declined_slot_map(_attempts, room_id_by_email, avail))
+            log.warning(
+                "room scout %s: %s DECLINED %s %s-%s (%d declined window(s) so far) "
+                "- will not ask that room for that window again",
+                _scout_id, entry["room_email"], entry["date"],
+                entry["start_time"], entry["end_time"], len(_attempts),
+            )
+            sb.table("room_scouts").update(
+                {"declined_attempts": _attempts}
+            ).eq("id", _scout_id).execute()
+
         try:
             token = await _room_scout_graph_token(scout)
 
@@ -538,6 +629,10 @@ async def process_room_scouts() -> dict:
                         user_profile_id, act.get("room_email"), a_day,
                         act.get("start_time"), act.get("end_time"),
                     )
+                    _record_decline(
+                        act.get("room_email"), a_day,
+                        act.get("start_time"), act.get("end_time"),
+                    )
                     sb.table("room_scouts").update(
                         {"pending_activity_id": None}
                     ).eq("id", scout_id).execute()
@@ -561,22 +656,30 @@ async def process_room_scouts() -> dict:
             # stopped writing (Graph can no longer read it) — better to scout no
             # room than to auto-book one whose availability we are guessing at.
             fresh_cutoff = datetime.now(timezone.utc) - AVAILABILITY_CACHE_TTL
+            stale_rooms: list[str] = []
             for room in rooms:
                 row = cache.get((room["id"], scout_day))
                 slots = list(row.get("slots") or []) if row else []
                 if len(slots) != availability.SLOTS_PER_DAY:
                     continue
-                row_updated_at = _parse_cache_updated_at(row.get("updated_at"))
-                if not row_updated_at or row_updated_at < fresh_cutoff:
-                    log.warning(
-                        "room scout %s: skipping %s - availability cache stale (updated_at=%s)",
-                        scout_id, room.get("email"), row.get("updated_at"),
-                    )
+                # graph_synced_at, NOT updated_at. Every writer of this row stamps
+                # updated_at — including _mark_room_availability_owner and
+                # _release_room_availability_owner, which this very loop calls — so
+                # the scout's own booking churn refreshed the timestamp its
+                # staleness guard reads, and a room Graph had not answered for in
+                # hours still looked one second old. graph_synced_at is written
+                # only by refresh_availability_delegated. NULL means never synced,
+                # which fails closed: better to scout no room than to auto-book one
+                # whose availability we are guessing at.
+                row_synced_at = _parse_cache_updated_at(row.get("graph_synced_at"))
+                if not row_synced_at or row_synced_at < fresh_cutoff:
+                    stale_rooms.append(str(room.get("email") or ""))
                     continue
                 slots = _apply_lunch_break(slots, skip_lunch)
                 block = _earliest_free_block(
                     slots, scan_start, scan_end, duration_slots,
-                    reserved.get((room["id"], scout_day)),
+                    reserved.get((room["id"], scout_day), set())
+                    | declined.get((room["id"], scout_day), set()),
                 )
                 if block is None:
                     continue
@@ -595,6 +698,10 @@ async def process_room_scouts() -> dict:
                     attendees=[],
                     body=None,
                 )
+                log.info(
+                    "room scout %s: booking %s %s %s-%s",
+                    scout_id, room["email"], scout_day, start_label, end_label,
+                )
                 ev = await graph.create_event(
                     token, payload.subject,
                     f"{scout_day}T{start_label}:00", f"{scout_day}T{end_label}:00",
@@ -605,20 +712,46 @@ async def process_room_scouts() -> dict:
                     auth_user_id=scout.get("auth_user_id"),
                     graph_event_id=ev.get("id"), web_link=ev.get("webLink"),
                 )
+                # The event now EXISTS in Outlook and in the room's mailbox, and
+                # nothing outside this block knows about it. _log_user_booking_activity
+                # swallows its own errors and returns None — a Supabase 504 on that
+                # insert is not hypothetical, the project logs them — and the old code
+                # then fell through to `status = "pending"` and broke out of the loop
+                # WITHOUT recording pending_activity_id. The next cycle saw no pending
+                # booking, booked a different room, and the first event stayed behind
+                # as a ghost the app could neither see nor cancel; if that room
+                # accepted, the user silently held a room nobody could release.
+                #
+                # So: no row means no booking. Undo the half-made one and move on.
+                if not activity_id:
+                    log.error(
+                        "room scout %s: could not record the booking of %s %s %s-%s "
+                        "(event %s) - deleting the event so it cannot become a ghost",
+                        scout_id, room["email"], scout_day, start_label, end_label,
+                        ev.get("id"),
+                    )
+                    try:
+                        if not ev.get("id"):
+                            raise RuntimeError("Graph returned no event id")
+                        await graph.delete_event(token, ev["id"])
+                    except Exception as e:  # noqa: BLE001 - logged, next room still tried
+                        log.error(
+                            "room scout %s: FAILED to delete unrecorded event %s in %s "
+                            "(%s %s-%s) - it is now orphaned in Outlook and must be "
+                            "removed by hand: %s",
+                            scout_id, ev.get("id"), room["email"], scout_day,
+                            start_label, end_label, e,
+                        )
+                    continue
                 _mark_room_availability_owner(user_profile_id, payload)
                 _reserve(room["id"], scout_day, block, block + duration_slots)
-                if activity_id:
-                    sb.table("room_scouts").update(
-                        {"pending_activity_id": activity_id}
-                    ).eq("id", scout_id).execute()
+                sb.table("room_scouts").update(
+                    {"pending_activity_id": activity_id}
+                ).eq("id", scout_id).execute()
 
-                status = (
-                    await poll_booking_room_response(
-                        token, user_profile_id, scout["email"], activity_id, sb,
-                        offsets=SCOUT_SYNC_OFFSETS_SECONDS,
-                    )
-                    if activity_id
-                    else "pending"
+                status = await poll_booking_room_response(
+                    token, user_profile_id, scout["email"], activity_id, sb,
+                    offsets=SCOUT_SYNC_OFFSETS_SECONDS,
                 )
                 if status == "success":
                     sb.table("room_scouts").update(
@@ -643,11 +776,31 @@ async def process_room_scouts() -> dict:
                 _release_room_availability_owner(
                     user_profile_id, room["email"], scout_day, start_label, end_label
                 )
+                _record_decline(room["email"], scout_day, start_label, end_label)
                 sb.table("room_scouts").update(
                     {"pending_activity_id": None}
                 ).eq("id", scout_id).execute()
 
+            # One line for the whole cycle, not one per room: right after a deploy
+            # every row is unsynced until the next refresh tick, and 46 separate
+            # warnings for one expected minute is noise that trains you to ignore
+            # the line that matters.
+            if stale_rooms:
+                log.warning(
+                    "room scout %s: skipped %d room(s) with no fresh Graph "
+                    "free/busy (graph_synced_at older than %s): %s",
+                    scout_id, len(stale_rooms), AVAILABILITY_CACHE_TTL,
+                    ", ".join(sorted(stale_rooms)),
+                )
             if outcome is None:
+                log.info(
+                    "room scout %s: no bookable room for %s %s-%s "
+                    "(%d candidate room(s), %d declined window(s) remembered)",
+                    scout_id, scout_day,
+                    _minutes_to_label(scan_start * avail),
+                    _minutes_to_label(scan_end * avail),
+                    len(rooms), len(declined_attempts),
+                )
                 sb.table("room_scouts").update(
                     {"last_checked_at": checked_at, "updated_at": checked_at}
                 ).eq("id", scout_id).execute()
