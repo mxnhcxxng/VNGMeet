@@ -867,7 +867,7 @@ def _capacity_size_for_people(value: object) -> str | None:
         return None
     if value <= 4:
         return "small"
-    if value <= 12:
+    if value <= 8:
         return "medium"
     return "large"
 

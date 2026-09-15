@@ -42,19 +42,21 @@ function durationLabel(minutes: number): string {
   return `${minutes / 60}h`;
 }
 
-// Cỡ sức chứa (khớp find-room): capacity số → nhóm; hoặc dùng capacity_size sẵn.
+// Cỡ sức chứa (khớp find-room): ưu tiên capacity_size từ BE, chỉ suy ra từ số
+// capacity khi thiếu — cùng thứ tự với backend (_effective_capacity_size).
 const CAP_RANGE: Record<CapacitySize, string> = {
   small: "≤4",
-  medium: "5–12",
-  large: "13+",
+  medium: "5–8",
+  large: "9+",
 };
 function capacitySize(room: FreeRoom): CapacitySize | null {
+  if (room.capacity_size) return room.capacity_size;
   if (typeof room.capacity === "number") {
     if (room.capacity <= 4) return "small";
-    if (room.capacity <= 12) return "medium";
+    if (room.capacity <= 8) return "medium";
     return "large";
   }
-  return room.capacity_size ?? null;
+  return null;
 }
 
 const DEFAULT_DURATION = 60; // tab "1h" chọn sẵn (khớp Figma)

@@ -87,21 +87,23 @@ function cellKind(status: number): CellKind {
   return "busy"; // 1, 4 = người khác đặt
 }
 
-// Cỡ sức chứa (khớp web): capacity số → nhóm; hoặc dùng capacity_size sẵn có.
+// Cỡ sức chứa (khớp web): ưu tiên capacity_size từ BE, chỉ suy ra từ số capacity
+// khi thiếu — cùng thứ tự với backend (_effective_capacity_size).
 type CapSize = "small" | "medium" | "large";
 // Khoảng số người (không đổi theo ngôn ngữ); nhãn "Nhỏ/Vừa/Lớn" dịch qua cap.*.
 const CAP_RANGE: Record<CapSize, string> = {
   small: "≤4",
-  medium: "5–12",
-  large: "13+",
+  medium: "5–8",
+  large: "9+",
 };
 function capacitySize(room: ScheduleRoom): CapSize | null {
+  if (room.capacity_size) return room.capacity_size;
   if (typeof room.capacity === "number") {
     if (room.capacity <= 4) return "small";
-    if (room.capacity <= 12) return "medium";
+    if (room.capacity <= 8) return "medium";
     return "large";
   }
-  return room.capacity_size ?? null;
+  return null;
 }
 
 // ------------------------------------------------------------------ //

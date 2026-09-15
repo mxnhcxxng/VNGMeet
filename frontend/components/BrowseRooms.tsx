@@ -178,24 +178,22 @@ const CAPACITY_RANK: Record<string, number> = {
 };
 
 function capacityRank(room: ScheduleRoom) {
-  if (typeof room.capacity === "number") {
-    if (room.capacity <= 4) return CAPACITY_RANK.small;
-    if (room.capacity <= 12) return CAPACITY_RANK.medium;
-    return CAPACITY_RANK.large;
-  }
-  if (room.capacity_size) return CAPACITY_RANK[room.capacity_size] ?? 3;
-  return 3;
+  const size = capacitySize(room);
+  return size ? (CAPACITY_RANK[size] ?? 3) : 3;
 }
 
+// Cỡ sức chứa: ưu tiên `capacity_size` từ BE (nguồn sự thật), chỉ suy ra từ số
+// `capacity` khi cột thiếu — cùng thứ tự với backend (_effective_capacity_size).
 function capacitySize(
   room: ScheduleRoom
 ): "small" | "medium" | "large" | null {
+  if (room.capacity_size) return room.capacity_size;
   if (typeof room.capacity === "number") {
     if (room.capacity <= 4) return "small";
-    if (room.capacity <= 12) return "medium";
+    if (room.capacity <= 8) return "medium";
     return "large";
   }
-  return room.capacity_size ?? null;
+  return null;
 }
 
 const CAPACITY_LABEL: Record<
@@ -203,8 +201,8 @@ const CAPACITY_LABEL: Record<
   { labelKey: TranslationKey; range: string }
 > = {
   small: { labelKey: "browse.capSmall", range: "4-" },
-  medium: { labelKey: "browse.capMedium", range: "5-12" },
-  large: { labelKey: "browse.capLarge", range: "13+" },
+  medium: { labelKey: "browse.capMedium", range: "5-8" },
+  large: { labelKey: "browse.capLarge", range: "9+" },
 };
 
 function numericFloor(floor?: string) {
@@ -626,7 +624,7 @@ export function BrowseRooms({
       startTime: t,
       thumbnail: room.thumbnail_link,
       schedule,
-      capacitySize: room.capacity_size,
+      capacitySize: capacitySize(room) ?? undefined,
       floor: room.floor,
       location: venueLabel(room.building),
     });

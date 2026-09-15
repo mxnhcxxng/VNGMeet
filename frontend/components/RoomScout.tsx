@@ -174,8 +174,8 @@ function capacityLabel(t: TFunction, size?: CapacitySize | null) {
 // BookingModal's CAPACITY_RANGE so the two surfaces read identically.
 function capacityRange(size?: CapacitySize | null): string {
   if (size === "small") return "≤4";
-  if (size === "medium") return "5-12";
-  if (size === "large") return "13+";
+  if (size === "medium") return "5-8";
+  if (size === "large") return "9+";
   return "";
 }
 

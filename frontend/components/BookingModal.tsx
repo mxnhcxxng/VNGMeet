@@ -37,12 +37,12 @@ export interface BookingSlot {
   location?: string; // building / zone group → location chip
 }
 
-// Capacity chip shows a headcount range next to a people icon (e.g. "5-12"),
+// Capacity chip shows a headcount range next to a people icon (e.g. "5-8"),
 // mapped from the room's capacity_size band.
 const CAPACITY_RANGE: Record<CapacitySize, string> = {
   small: "≤4",
-  medium: "5-12",
-  large: "13+",
+  medium: "5-8",
+  large: "9+",
 };
 
 export function BookingModal({

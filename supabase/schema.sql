@@ -339,14 +339,14 @@ create policy "manage own favorites" on favorite_rooms
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 -- Nhóm sức chứa cho meeting_room_metadata, dùng cho filter Browse rooms/chatbot.
--- Quy ước hiện tại: <=4 Nhỏ, 5-12 Vừa, 13+ Lớn.
+-- Quy ước hiện tại: <=4 Nhỏ, 5-8 Vừa, 9+ Lớn.
 alter table meeting_room_metadata
   add column if not exists capacity_size text generated always as (
     case
       when capacity is null then null::text
       when capacity <= 4 then 'small'::text
-      when capacity between 5 and 12 then 'medium'::text
-      when capacity > 12 then 'large'::text
+      when capacity between 5 and 8 then 'medium'::text
+      when capacity > 8 then 'large'::text
       else null::text
     end
   ) stored;

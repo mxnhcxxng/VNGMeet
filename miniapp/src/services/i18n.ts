@@ -261,8 +261,8 @@ const en = {
   "scout.dur180": "3 hours",
   "scout.durFallback": "{n} min",
   "scout.capSmall": "Small (≤4)",
-  "scout.capMedium": "Medium (5–12)",
-  "scout.capLarge": "Large (13+)",
+  "scout.capMedium": "Medium (5–8)",
+  "scout.capLarge": "Large (9+)",
   "scout.capAny": "Any",
   // Validation (snackbar)
   "scout.chooseDate": "Please choose a date within the next 14 days.",
@@ -551,8 +551,8 @@ const vi: Partial<Record<TranslationKey, string>> = {
   "scout.dur180": "3 giờ",
   "scout.durFallback": "{n} phút",
   "scout.capSmall": "Nhỏ (≤4)",
-  "scout.capMedium": "Vừa (5–12)",
-  "scout.capLarge": "Lớn (13+)",
+  "scout.capMedium": "Vừa (5–8)",
+  "scout.capLarge": "Lớn (9+)",
   "scout.capAny": "Bất kỳ",
   // Kiểm tra dữ liệu (snackbar)
   "scout.chooseDate": "Vui lòng chọn ngày trong phạm vi 14 ngày tới.",
