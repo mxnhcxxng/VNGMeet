@@ -113,13 +113,17 @@ def _av_char_to_status(ch: str, *, scheduled_day: bool = False) -> int:
 
 
 def _in_use_rooms() -> list[dict]:
-    """Rooms flagged in_use=true, with the fields the job needs."""
+    """Rooms flagged in_use=true, with the fields the job needs.
+
+    `name` is carried so a booking row whose room was changed in Outlook can have
+    its room_name re-synced alongside room_email (see `_outlook_edit_changes`).
+    """
     from .supabase_client import get_supabase
 
     rows = (
         get_supabase()
         .table("meeting_room_metadata")
-        .select("id, email")
+        .select("id, email, name")
         .eq("in_use", True)
         .execute()
         .data
@@ -678,6 +682,53 @@ def _profile_ids_by_email(sb, emails: set[str]) -> dict[str, str]:
     }
 
 
+def _outlook_edit_changes(
+    row: dict, live: dict, room_name_by_id: dict[str, str]
+) -> dict:
+    """Columns of a booking row that Outlook has since changed, or {} if none.
+
+    `live` is the calendarView event matched to the row by graph_event_id (see
+    `sync_my_calendar`), so every difference here is an edit the user made in
+    Outlook and the app never heard about — the app's own edit endpoint writes
+    both sides. Times are normalised to "HH:MM" because Postgres hands `09:00`
+    back as `09:00:00`.
+
+    The room is only re-synced when the event's room resolves to a room the app
+    actually polls: pointing a row at an unknown mailbox would leave it forever
+    unverifiable by `_reconcile_room_usage`. `body` is never synced — calendarView
+    returns `bodyPreview`, which is truncated, so writing it back would quietly
+    destroy the stored text.
+    """
+    changes: dict = {}
+    if str(row.get("date") or "") != live["date"]:
+        changes["date"] = live["date"]
+    if str(row.get("start_time") or "")[:5] != live["start"]:
+        changes["start_time"] = live["start"]
+    if str(row.get("end_time") or "")[:5] != live["end"]:
+        changes["end_time"] = live["end"]
+    if (
+        live["room_id"]
+        and live["room_email"]
+        and (row.get("room_email") or "").strip().lower() != live["room_email"]
+    ):
+        changes["room_email"] = live["room_email"]
+        name = room_name_by_id.get(live["room_id"])
+        if name:
+            changes["room_name"] = name
+    if live["subject"] and (row.get("subject") or "") != live["subject"]:
+        changes["subject"] = live["subject"]
+    stored_attendees = sorted(
+        {
+            addr
+            for a in (row.get("attendees") or [])
+            if (addr := str(a).strip().lower())
+        }
+    )
+    if stored_attendees != live["attendees"]:
+        changes["attendees"] = live["attendees"]
+    return changes
+
+
 def _event_room_attendee(ev: dict) -> dict | None:
     """The event's type="resource" attendee (the booked room), or None."""
     for att in ev.get("attendees") or []:
@@ -744,6 +795,9 @@ async def sync_my_calendar(
 
     rooms = _in_use_rooms()
     room_id_by_email = {r["email"].strip().lower(): r["id"] for r in rooms}
+    # Display names, for re-syncing room_name when a booking's room is swapped in
+    # Outlook. Rooms without a name in metadata simply keep the row's stored name.
+    room_name_by_id = {r["id"]: r["name"] for r in rooms if r.get("name")}
     if not room_id_by_email:
         return {"events": len(events or []), "rows": 0}
     # NB: do not early-return on empty events — an empty calendarView means the user
@@ -784,27 +838,79 @@ async def sync_my_calendar(
     # explicit start/end so two back-to-back bookings (1-2, 2-3) stay distinct and
     # the read-only view / date dots have subject/attendees/body.
     fresh_meetings: dict[tuple[str, str], list[dict]] = {}
+    # Every event THIS user organizes, keyed by its Graph id — the primary key the
+    # booking-history reconcile matches on. An event edited in Outlook (moved to
+    # another time, renamed, attendees added, even its room attendee rewritten by
+    # the client) keeps its id, so an id hit proves the booking is still alive and
+    # its stored slot just needs re-syncing. Slot matching alone read every such
+    # edit as "the event is gone" and cancelled the row.
+    mine_events_by_id: dict[str, dict] = {}
+    me_lower = (me_email or "").strip().lower()
     for ev in events:
-        room_att = _event_room_attendee(ev)
-        if not room_att:
-            continue
-        room_email = ((room_att.get("emailAddress") or {}).get("address") or "").strip().lower()
-        room_id = room_id_by_email.get(room_email)
-        if not room_id:
-            continue
         start_dt = _parse_graph_local((ev.get("start") or {}).get("dateTime"))
         end_dt = _parse_graph_local((ev.get("end") or {}).get("dateTime"))
         if not start_dt or not end_dt or end_dt <= start_dt:
             continue
 
+        org_email = (((ev.get("organizer") or {}).get("emailAddress") or {}).get("address") or "").strip().lower()
+        owner_pid = profile_id_by_email.get(org_email)
+
+        room_att = _event_room_attendee(ev)
+        room_email = (
+            ((room_att.get("emailAddress") or {}).get("address") or "").strip().lower()
+            if room_att
+            else ""
+        )
+        room_id = room_id_by_email.get(room_email) if room_email else None
+
         # Room response: "accepted" -> confirmed; "declined" -> rejected; anything
         # else ("none"/"notResponded"/"tentativelyAccepted") -> still awaiting.
-        room_response = ((room_att.get("status") or {}).get("response") or "").lower()
+        room_response = ((room_att.get("status") or {}).get("response") or "").lower() if room_att else ""
         room_declined = room_response == "declined"
         room_accepted = room_response == "accepted"
 
-        org_email = (((ev.get("organizer") or {}).get("emailAddress") or {}).get("address") or "").strip().lower()
-        owner_pid = profile_id_by_email.get(org_email)
+        # Index the user's own events BEFORE the room checks below: an event whose
+        # room attendee the Outlook client rewrote (resource -> required) no longer
+        # resolves to a room, but it is still very much on the calendar and its
+        # booking row must not be cancelled for it.
+        ev_id = (ev.get("id") or "").strip()
+        if ev_id and ((owner_pid and owner_pid == me) or (me_lower and org_email == me_lower)):
+            day_end = datetime.combine(
+                start_dt.date() + timedelta(days=1), datetime.min.time()
+            )
+            end_hhmm = min(end_dt, day_end).strftime("%H:%M")
+            if end_hhmm == "00:00":
+                end_hhmm = "24:00"  # ran to (or past) midnight
+            mine_events_by_id[ev_id] = {
+                # room_id is None when the room can't be resolved; the reconcile
+                # then leaves the row's room columns alone rather than guessing.
+                "room_id": room_id,
+                "room_email": room_email or None,
+                "date": start_dt.date().isoformat(),
+                "start": start_dt.strftime("%H:%M"),
+                "end": end_hhmm,
+                "accepted": room_accepted,
+                "declined": room_declined,
+                "subject": (ev.get("subject") or "").strip(),
+                # Real people only: the organizer is not their own guest, and a
+                # room the Outlook client demoted from "resource" to "required" is
+                # still a room — writing a room mailbox into the row's attendee
+                # list is exactly the corruption this re-sync must not introduce.
+                "attendees": sorted(
+                    {
+                        addr
+                        for att in (ev.get("attendees") or [])
+                        if (att.get("type") or "").lower() != "resource"
+                        and (addr := ((att.get("emailAddress") or {}).get("address") or "").strip().lower())
+                        and addr != org_email
+                        and addr not in room_id_by_email
+                    }
+                ),
+            }
+
+        if not room_att or not room_id:
+            continue  # no known room -> nothing to attribute in the grid
+
         attendee_pids = {
             profile_id_by_email[addr]
             for att in (ev.get("attendees") or [])
@@ -967,8 +1073,7 @@ async def sync_my_calendar(
     # 2b) Replace THIS user's meeting entries with the fresh set, keeping meetings
     #     contributed by other users' syncs. This adds new, updates changed, and
     #     drops cancelled meetings of the user in one pass.
-    if me_email:
-        me_lower = me_email.strip().lower()
+    if me_lower:
         for key in set(working.keys()) | set(fresh_meetings.keys()):
             w = working.get(key)
             if w is None:
@@ -1020,17 +1125,30 @@ async def sync_my_calendar(
     #    which is exactly how normal room usage used to land in history as `failed`.
     #    Declined `success` rows still get their orphaned event cleaned up below.
     #    Only rows with a real graph_event_id are touched, so scheduled bookings that
-    #    haven't fired yet (pending, no event) are left alone. Using the slot (not
-    #    graph_event_id matching) avoids id-encoding mismatches. Rooms not in_use
+    #    haven't fired yet (pending, no event) are left alone. Rooms not in_use
     #    can't be verified -> skipped.
-    promoted = canceled = declined = 0
+    #
+    #    Matching is by graph_event_id FIRST, falling back to the stored slot. An
+    #    Outlook-side edit (moved time, renamed, attendees added, room swapped)
+    #    keeps the event id but changes the slot, so slot-only matching read it as
+    #    "event gone" and cancelled a perfectly live booking. On an id hit the row
+    #    is instead re-synced FROM Outlook (`_outlook_edit_changes`). The slot
+    #    fallback still covers ids calendarView re-issues and recurring
+    #    occurrences, whose ids never match the stored single-event id.
+    promoted = canceled = declined = resynced = revived = 0
     if me:
         try:
             rows = (
                 sb.table("user_activity")
-                .select("id, room_email, date, start_time, status, graph_event_id, created_at, processed_at")
+                .select(
+                    "id, room_email, room_name, date, start_time, end_time, subject, "
+                    "attendees, status, note, graph_event_id, created_at, processed_at"
+                )
                 .eq("user_id", me)
-                .in_("status", ["ok", "pending", "success", "ongoing"])
+                # "canceled" is in the set only so a row THIS bug already cancelled
+                # can be revived once its event is found again by id; the revive is
+                # further narrowed to note="canceled_outlook" below.
+                .in_("status", ["ok", "pending", "success", "ongoing", "canceled"])
                 .gte("date", window_dates[0])
                 .lte("date", window_dates[-1])
                 .execute()
@@ -1048,18 +1166,65 @@ async def sync_my_calendar(
             cancel_ids: list[str] = []
             declined_ids: list[str] = []
             declined_event_ids: list[str] = []
+            # row id -> column changes pulled back from Outlook (moved slot,
+            # renamed, attendee list edited), applied one row at a time below.
+            resync: dict[str, dict] = {}
             for r in rows:
-                if not r.get("graph_event_id"):
+                ev_id = (r.get("graph_event_id") or "").strip()
+                if not ev_id:
                     continue  # scheduled booking not yet fired -> no real event
+                cur = r.get("status")
+                # A row the room already accepted is owned by the room-usage
+                # reconcile from here on; this pass must not restate its outcome.
+                settled = cur in ("success", "ongoing")
+
+                live = mine_events_by_id.get(ev_id)
+                if live is not None:
+                    if live["declined"]:
+                        if cur == "canceled":
+                            # Already written off. Leave the calendar alone — the
+                            # orphan cleanup below deletes real events, and a row
+                            # this pass is not reviving has no claim on one.
+                            continue
+                        # Always clean up the orphaned event (see the delete loop
+                        # below), but only call it a failure while the room had yet
+                        # to accept.
+                        declined_event_ids.append(ev_id)
+                        if not settled:
+                            declined_ids.append(r["id"])
+                        continue
+                    # The event is still on the calendar under this id, wherever it
+                    # has been moved to. Pull the edit back into the row so the
+                    # room-usage reconcile — which reads the room's free/busy at the
+                    # row's STORED slot — grades the slot the meeting actually
+                    # occupies now.
+                    changes = _outlook_edit_changes(r, live, room_name_by_id)
+                    if cur == "canceled":
+                        # Cancelled by an earlier pass of this very bug, yet the
+                        # event is demonstrably alive: restore it. A booking the
+                        # user cancelled in the app has its event deleted first and
+                        # is noted "canceled_by_user", so it never matches here, and
+                        # a room auto-release is noted differently too.
+                        if r.get("note") != "canceled_outlook":
+                            continue
+                        changes["status"] = "success" if live["accepted"] else "ok"
+                        changes["note"] = "resynced_outlook"
+                    elif live["accepted"] and cur in ("pending", "ok"):
+                        # Alive and accepted -> promote; never downgrade a success.
+                        success_ids.append(r["id"])
+                    if changes:
+                        resync[r["id"]] = changes
+                    continue
+
+                # No id match — a recurring occurrence, or an id Outlook re-issued.
+                # Fall back to verifying the row's stored slot.
+                if cur == "canceled":
+                    continue  # nothing to verify a cancelled row against
                 room_id = room_id_by_email.get((r.get("room_email") or "").strip().lower())
                 start_idx = _time_to_slot_index(r.get("start_time"))
                 if not room_id or start_idx is None:
                     continue  # can't verify -> leave as-is
                 key = (room_id, str(r.get("date")), start_idx)
-                cur = r.get("status")
-                # A row the room already accepted is owned by the room-usage
-                # reconcile from here on; this pass must not restate its outcome.
-                settled = cur in ("success", "ongoing")
                 if key in mine_owner_now:
                     # Alive (accepted or awaiting). Promote pending/ok->success on
                     # accept; never downgrade a confirmed success.
@@ -1068,7 +1233,7 @@ async def sync_my_calendar(
                 elif key in mine_declined_now:
                     # Always clean up the orphaned event (see the delete loop below),
                     # but only call it a failure while the room had yet to accept.
-                    declined_event_ids.append(r["graph_event_id"])
+                    declined_event_ids.append(ev_id)
                     if not settled:
                         declined_ids.append(r["id"])
                 elif not settled:
@@ -1084,6 +1249,45 @@ async def sync_my_calendar(
                     if stamps and max(stamps) > cutoff:
                         continue  # too fresh to trust as deleted (propagation lag)
                     cancel_ids.append(r["id"])
+            if resync:
+                # Per-row UPDATE: every row carries a different change set. A slot
+                # move also restamps processed_at, which is what buys the row its
+                # propagation grace in _reconcile_room_usage — that job reads the
+                # room's getSchedule free/busy, a different Graph surface from the
+                # calendarView this sync just read, and without the restamp one
+                # lagging free/busy read at the new slot would cancel the booking
+                # straight back again.
+                for row_id, changes in resync.items():
+                    if any(
+                        k in changes
+                        for k in ("date", "start_time", "end_time", "room_email", "status")
+                    ):
+                        changes["processed_at"] = now_iso
+                    try:
+                        sb.table("user_activity").update(changes).eq(
+                            "id", row_id
+                        ).eq("user_id", me).execute()
+                    except Exception as e:  # noqa: BLE001 - one bad row must not stop the rest
+                        log.warning(
+                            "sync_my_calendar: could not re-sync booking %s: %s",
+                            row_id, e,
+                        )
+                        continue
+                    if changes.get("status"):
+                        revived += 1
+                    else:
+                        resynced += 1
+                log.info(
+                    "sync_my_calendar: re-synced %d booking(s) from Outlook for %s "
+                    "(%d revived): %s",
+                    resynced + revived,
+                    me_email or me,
+                    revived,
+                    "; ".join(
+                        f"{row_id}:{','.join(k for k in changes if k != 'processed_at')}"
+                        for row_id, changes in resync.items()
+                    ),
+                )
             if success_ids:
                 # Stamp the promotion. processed_at is this row's "backend last
                 # advanced it" marker, and it is what gives _reconcile_room_usage
@@ -1153,6 +1357,8 @@ async def sync_my_calendar(
         "promoted": promoted,
         "canceled": canceled,
         "declined": declined,
+        "resynced": resynced,
+        "revived": revived,
     }
     log.info("sync_my_calendar done: %s", summary)
     return summary
