@@ -34,6 +34,8 @@ services:
       # Containers default to 8080 (AgentBase); keep local dev on 3000.
       PORT: "3000"
     ports:
-      - "3000:3000"
+      # Host port only; container stays on 3000. Agent Base shares one host with
+      # other apps, so 3000 collides there - override locally if you want it back.
+      - "${FRONTEND_HOST_PORT:-13000}:3000"
     depends_on:
       - backend
