@@ -3,7 +3,7 @@
 // Đang trỏ về endpoint AgentBase public để deploy/test trên điện thoại thật.
 // (Local dưới đây chỉ dùng khi chạy web/simulator cùng máy với backend.)
 export const API_BASE =
-  "https://endpoint-43d00107-bcbd-4907-ade0-e87008a842b3.agentbase-runtime.aiplatform.vngcloud.vn/api";
+  "https://anhdt11-vng-meet-api.ai.zalopay.xyz/api";
 // export const API_BASE = "http://localhost:8000/api";
 
 // --- Đăng nhập Microsoft (màn chặn) ------------------------------------------
@@ -25,7 +25,7 @@ export const SUPABASE_URL: string = "https://uaibsnqnnutqonveusui.supabase.co";
 // Endpoint AgentBase đổi khi redeploy web thì sửa ở đây (giống API_BASE). Để rỗng
 // = dùng "Site URL" cấu hình trong Supabase. KHÔNG có dấu "/" ở cuối.
 export const WEB_URL: string =
-  "https://endpoint-eccce4e2-81f8-4d05-8daf-6920f5190439.agentbase-runtime.aiplatform.vngcloud.vn";
+  "https://anhdt11-vng-meet.ai.zalopay.xyz";
 
 // Giữ khớp với SCOPES ở frontend/lib/api.ts: xin thiếu/thừa scope là Microsoft
 // bắt user consent lại dù đã consent từ web.
