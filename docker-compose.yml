@@ -22,6 +22,15 @@ services:
       LLM_BASE_URL: ${LLM_BASE_URL}
       LLM_API_KEY: ${LLM_API_KEY}
       LLM_MODEL: ${LLM_MODEL}
+      SESSION_SECRET: ${SESSION_SECRET}
+      SCHEDULED_TOKEN_ENCRYPTION_KEY: ${SCHEDULED_TOKEN_ENCRYPTION_KEY}
+      # Zalo Mini App
+      ZALO_APP_SECRET_KEY: ${ZALO_APP_SECRET_KEY}
+      MINIAPP_SESSION_SECRET: ${MINIAPP_SESSION_SECRET}
+      BOT_MINIAPP_LINK: ${BOT_MINIAPP_LINK}
+      # Zalo Bot Platform - both are required or the bot stays disabled.
+      ZALO_BOT_TOKEN: ${ZALO_BOT_TOKEN}
+      ZALO_BOT_SECRET_TOKEN: ${ZALO_BOT_SECRET_TOKEN}
 
   frontend:
     build:
