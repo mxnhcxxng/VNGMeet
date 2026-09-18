@@ -20,10 +20,11 @@ Auth states per conversation:
 from __future__ import annotations
 
 import asyncio
-import asyncio
 import hmac
 import re
 import secrets
+import time
+from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -41,6 +42,10 @@ router = APIRouter()
 _BG_TASKS: set = set()
 
 BOT_API_TIMEOUT = 30
+# Zalo chỉ giữ trạng thái "đang soạn tin" khoảng 5 giây cho mỗi sendChatAction,
+# nên phải gửi lại theo chu kỳ ngắn hơn trong lúc agent còn đang xử lý.
+TYPING_REFRESH_SECONDS = 4
+TYPING_MAX_SECONDS = 300  # chặn vòng lặp chạy mãi nếu agent treo
 ZALO_MAX_TEXT = 2000
 EVENT_TEXT = "message.text.received"
 RECENT_LIMIT = 10
@@ -521,7 +526,8 @@ async def _resolve_booking(sb, link: dict, action: str, pending: dict) -> None:
         booking=booking,
     )
     try:
-        result = await chat_booking_action(_linked_request(link), action_req)
+        async with _typing_while(chat_id):
+            result = await chat_booking_action(_linked_request(link), action_req)
     except HTTPException as e:
         if e.status_code == 401:
             await _send(chat_id, _msg_session_expired())
@@ -650,6 +656,36 @@ async def _send_photo(chat_id: str, url: str, caption: str | None = None) -> Non
 
 async def _typing(chat_id: str) -> None:
     await _bot_api("sendChatAction", {"chat_id": chat_id, "action": "typing"})
+
+
+@asynccontextmanager
+async def _typing_while(chat_id: str):
+    """Giữ trạng thái "đang soạn tin" cho tới khi block bên trong kết thúc.
+
+    Một lần sendChatAction chỉ có hiệu lực ~5s, nên gửi lại mỗi
+    TYPING_REFRESH_SECONDS; nếu không user sẽ thấy bot im lặng trong lúc agent
+    còn đang chạy. Vòng lặp dừng khi block kết thúc (kể cả khi có lỗi) hoặc khi
+    chạm TYPING_MAX_SECONDS.
+    """
+
+    async def _loop() -> None:
+        deadline = time.monotonic() + TYPING_MAX_SECONDS
+        while time.monotonic() < deadline:
+            try:
+                await _typing(chat_id)
+            except Exception as e:  # noqa: BLE001 — keepalive không được làm hỏng request
+                log.warning("bot typing keepalive error: %s", e)
+            await asyncio.sleep(TYPING_REFRESH_SECONDS)
+
+    task = asyncio.create_task(_loop())
+    _BG_TASKS.add(task)
+    task.add_done_callback(_BG_TASKS.discard)
+    try:
+        yield
+    finally:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
 
 
 # --------------------------------------------------------------------------- #
@@ -791,10 +827,10 @@ async def _dispatch_chat(sb, link: dict, chat_id: str, from_id: str | None, text
     if state == "S2":
         await _send(chat_id, _msg_session_expired())
         return
-    await _typing(chat_id)
     link = _get_link(sb, chat_id) or link  # re-read: current_thread_id may have changed
     try:
-        reply, images, card = await _forward_to_agent(sb, link, text)
+        async with _typing_while(chat_id):
+            reply, images, card = await _forward_to_agent(sb, link, text)
     except HTTPException as e:
         if e.status_code == 401:
             await _send(chat_id, _msg_session_expired())
