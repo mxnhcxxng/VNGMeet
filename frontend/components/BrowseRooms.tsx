@@ -32,7 +32,7 @@ import {
   PersonFill,
 } from "@gravity-ui/icons";
 import { I18nProvider } from "react-aria-components";
-import { parseDate, parseTime } from "@internationalized/date";
+import { isSameMonth, parseDate, parseTime } from "@internationalized/date";
 import { api, type Booking, type ScheduleResponse, type ScheduleRoom } from "@/lib/api";
 import { useLanguage } from "@/app/providers";
 import type { TranslationKey } from "@/lib/i18n";
@@ -40,6 +40,7 @@ import { BookingModal, type BookingSlot } from "./BookingModal";
 import { EditBookingModal } from "./EditBookingModal";
 import { clearBookingHistoryCache } from "./BookingHistory";
 import { patchUrlParams, readUrlParams } from "@/lib/urlState";
+import { roomFlag } from "@/lib/roomFlags";
 
 const SLOT_H = 48; // px per slot row (half hour → 96px per hour)
 const TIME_COL = 72; // px width of the left time-label column
@@ -869,72 +870,97 @@ export function BrowseRooms({
   const renderDayPicker = (
     trigger: ReactNode,
     popoverTriggerRef: RefObject<HTMLButtonElement | null>,
-  ) => (
-            <DatePicker
-              aria-label={tr("browse.datePicker")}
-              value={parseDate(data.days[dayIndex])}
-              minValue={parseDate(data.days[0])}
-              maxValue={parseDate(data.days[maxDayIndex])}
-              onChange={(date) => {
-                if (!date) return;
-                const idx = data.days.indexOf(date.toString());
-                if (idx >= 0) setDayIndex(() => idx);
-              }}
-            >
-              {trigger}
-              <DatePicker.Popover triggerRef={popoverTriggerRef} className="!max-w-none w-fit">
-                <Calendar
-                  firstDayOfWeek="mon"
-                  minValue={parseDate(data.days[0])}
-                  maxValue={parseDate(data.days[maxDayIndex])}
-                >
-                  <Calendar.Header>
-                    <Calendar.Heading className="text-left first-letter:uppercase" />
-                    <div className="flex items-center gap-1">
-                      <Calendar.NavButton slot="previous" />
-                      <Calendar.NavButton slot="next" />
-                    </div>
-                  </Calendar.Header>
-                  <Calendar.Grid>
-                    <Calendar.GridHeader>
-                      {(day) => {
-                        const label = formatCalendarHeaderDay(day, datePickerLocale);
+  ) => {
+    const minIso = data.days[0];
+    const maxIso = data.days[maxDayIndex];
+    const renderCellContent = (label: string, iso: string, muted: boolean) => (
+      <>
+        <span className={isWeekendIso(iso) && !muted ? "text-danger" : undefined}>{label}</span>
+        {bookedDates.has(iso) && <Calendar.CellIndicator className="!bg-green-500" />}
+      </>
+    );
+    return (
+      <DatePicker
+        aria-label={tr("browse.datePicker")}
+        value={parseDate(data.days[dayIndex])}
+        minValue={parseDate(minIso)}
+        maxValue={parseDate(maxIso)}
+        onChange={(date) => {
+          if (!date) return;
+          const idx = data.days.indexOf(date.toString());
+          if (idx >= 0) setDayIndex(() => idx);
+        }}
+      >
+        {trigger}
+        <DatePicker.Popover triggerRef={popoverTriggerRef} className="!max-w-none w-fit">
+          <Calendar firstDayOfWeek="mon" minValue={parseDate(minIso)} maxValue={parseDate(maxIso)}>
+            {({ state }) => (
+              <>
+                <Calendar.Header>
+                  <Calendar.Heading className="text-left first-letter:uppercase" />
+                  <div className="flex items-center gap-1">
+                    <Calendar.NavButton slot="previous" />
+                    <Calendar.NavButton slot="next" />
+                  </div>
+                </Calendar.Header>
+                <Calendar.Grid>
+                  <Calendar.GridHeader>
+                    {(day) => {
+                      const label = formatCalendarHeaderDay(day, datePickerLocale);
+                      return (
+                        <Calendar.HeaderCell
+                          className={isWeekendHeaderLabel(label) ? "text-danger" : undefined}
+                        >
+                          {label}
+                        </Calendar.HeaderCell>
+                      );
+                    }}
+                  </Calendar.GridHeader>
+                  <Calendar.GridBody>
+                    {(date) => {
+                      const iso = date.toString();
+                      // React Aria always disables the neighbouring-month days it
+                      // draws in the first/last week. When such a day is still
+                      // inside the bookable window we render our own cell so that
+                      // e.g. clicking 1 Oct from the September grid jumps straight
+                      // to October instead of doing nothing.
+                      const spillover = !isSameMonth(date, state.visibleRange.start);
+                      if (spillover && iso >= minIso && iso <= maxIso) {
                         return (
-                          <Calendar.HeaderCell
-                            className={isWeekendHeaderLabel(label) ? "text-danger" : undefined}
-                          >
-                            {label}
-                          </Calendar.HeaderCell>
+                          <td role="gridcell">
+                            <div
+                              className="calendar__cell"
+                              data-outside-month="true"
+                              role="button"
+                              tabIndex={-1}
+                              aria-label={formatDatePickerLabel(iso, datePickerLocale)}
+                              onClick={() => {
+                                state.setFocusedDate(date);
+                                state.selectDate(date);
+                              }}
+                            >
+                              {renderCellContent(String(date.day), iso, true)}
+                            </div>
+                          </td>
                         );
-                      }}
-                    </Calendar.GridHeader>
-                    <Calendar.GridBody>
-                      {(date) => (
+                      }
+                      return (
                         <Calendar.Cell date={date}>
-                          {({ formattedDate, isSelected, isDisabled }) => (
-                            <>
-                              <span
-                                className={
-                                  isWeekendIso(date.toString()) && !isSelected && !isDisabled
-                                    ? "text-danger"
-                                    : undefined
-                                }
-                              >
-                                {formattedDate}
-                              </span>
-                              {bookedDates.has(date.toString()) && (
-                                <Calendar.CellIndicator className="!bg-green-500" />
-                              )}
-                            </>
-                          )}
+                          {({ formattedDate, isSelected, isDisabled }) =>
+                            renderCellContent(formattedDate, iso, isSelected || isDisabled)
+                          }
                         </Calendar.Cell>
-                      )}
-                    </Calendar.GridBody>
-                  </Calendar.Grid>
-                </Calendar>
-              </DatePicker.Popover>
-            </DatePicker>
-  );
+                      );
+                    }}
+                  </Calendar.GridBody>
+                </Calendar.Grid>
+              </>
+            )}
+          </Calendar>
+        </DatePicker.Popover>
+      </DatePicker>
+    );
+  };
 
   return (
     <div className="flex h-full flex-col bg-white dark:bg-[#0c0e12]">
@@ -1215,6 +1241,7 @@ export function BrowseRooms({
                   const isFavorite = favoriteEmails.has(r.email.toLowerCase());
                   const size = capacitySize(r);
                   const cap = size ? CAPACITY_LABEL[size] : null;
+                  const flag = roomFlag(r.name);
                   return (
                     <div
                       key={r.email}
@@ -1225,6 +1252,7 @@ export function BrowseRooms({
                         {isFavorite && (
                           <HeartFill className="shrink-0 text-[#f97316]" width={14} height={14} />
                         )}
+                        {flag && <span className="shrink-0 text-xs leading-none">{flag}</span>}
                         <p
                           className="truncate text-xs font-semibold text-default-700"
                           title={r.name}
