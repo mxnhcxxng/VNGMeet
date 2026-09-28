@@ -130,7 +130,6 @@ Người dùng lưu các phòng hay dùng để đặt nhanh, và lưu vị trí
 **Lưu trữ và bảo mật.**
 - Access token Microsoft được mã hoá (Fernet, AES-128-CBC) trước khi lưu, có hiệu lực tối đa 24 giờ.
 - Hệ thống lưu: bộ đệm trạng thái trống/bận của phòng (14 ngày tới), hồ sơ cơ bản, phòng yêu thích, yêu cầu đặt trước/săn phòng của người dùng.
-- Đã thực hiện review bảo mật whitebox và kiểm thử lại (xem [SECURITY_REVIEW.md](SECURITY_REVIEW.md), [PENTEST_VERIFICATION_REPORT.md](PENTEST_VERIFICATION_REPORT.md)); không ghi nhận lỗ hổng cho phép người dùng truy cập dữ liệu của người khác.
 
 ## 5. Cách dùng
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import difflib
 import json
 from datetime import date as date_cls, datetime, timedelta, timezone
 from uuid import uuid4
@@ -96,6 +97,7 @@ Luồng chỉ đường:
 - Khi user hỏi "chỉ đường", "đường đến", "map", "ở đâu", "vị trí" kèm tên phòng, gọi function get_room_directions.
 - Nếu tìm thấy phòng, trả tên phòng, office/building/floor/zone nếu có, direction nếu có, và ẢNH map nếu có map_link. KHÔNG trả map dưới dạng link, chỉ trả dưới dạng ảnh.
 - Nếu user chỉ nói tên như "Chỉ đường đến Tokyo", hiểu Tokyo là tên phòng.
+- Nếu get_room_directions/book_room/schedule_room trả ok=false kèm `suggested_rooms`, KHÔNG trả lời là không có phòng; hãy hỏi lại user có phải đang nói đến phòng trong `suggested_rooms` không (1 phòng thì hỏi thẳng tên đó, nhiều phòng thì liệt kê). Khi user xác nhận thì gọi lại function với đúng tên phòng đó.
 - Nếu user nhập một tên có vẻ là tên phòng nhưng sai chính tả hoặc gần giống một tên phòng đã biết (ví dụ "Tokio" thay vì "Tokyo", "Singapor" thay vì "Singapore"), đừng tự đoán chắc chắn; hãy hỏi lại để xác nhận có phải user muốn nói đến phòng đó không trước khi tra cứu hoặc đặt.
 - Nếu dữ liệu direction/map note trong DB là tiếng Anh nhưng user hỏi bằng tiếng Việt, hãy dịch/diễn đạt lại phần hướng dẫn sang tiếng Việt tự nhiên; không trả nguyên văn tiếng Anh trừ tên riêng, tầng, toà nhà, khu vực hoặc landmark.
 
@@ -1305,6 +1307,117 @@ def _resolve_booking_room_from_metadata(payload: BookingRequest) -> BookingReque
     return payload
 
 
+ROOM_SUGGESTION_LIMIT = 3
+
+
+def _in_use_room_names() -> list[str]:
+    if not settings.supabase_enabled:
+        return []
+    from .supabase_client import get_supabase
+
+    rows = (
+        get_supabase()
+        .table("meeting_room_metadata")
+        .select("name")
+        .eq("in_use", True)
+        .execute()
+        .data
+        or []
+    )
+    return sorted({str(r.get("name") or "").strip() for r in rows} - {""})
+
+
+async def _suggest_similar_room_names(query: object) -> list[str]:
+    """Hỏi LLM 1 lần xem tên phòng user gõ (sai chính tả, thiếu dấu, viết tắt...)
+    có gần giống phòng nào trong meeting_room_metadata không. Chỉ trả về tên có
+    thật trong DB; LLM lỗi thì rơi về difflib."""
+    query_str = " ".join(str(query or "").split())
+    if not query_str:
+        return []
+    try:
+        names = _in_use_room_names()
+    except Exception as e:  # noqa: BLE001 - suggestion must not break the reply
+        log.warning("room suggestion: load names failed: %s", e)
+        return []
+    if not names:
+        return []
+    by_norm = {_norm_room_lookup(n): n for n in names}
+
+    def fallback() -> list[str]:
+        hits = difflib.get_close_matches(
+            _norm_room_lookup(query_str), list(by_norm), n=ROOM_SUGGESTION_LIMIT, cutoff=0.6
+        )
+        return [by_norm[h] for h in hits]
+
+    try:
+        headers = {
+            "Authorization": f"Bearer {settings.llm_api_key}",
+            "Content-Type": "application/json",
+        }
+        async with httpx.AsyncClient(timeout=20) as client:
+            res = await client.post(
+                _chat_completion_url(),
+                headers=headers,
+                json={
+                    "model": settings.llm_model,
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": (
+                                "Bạn so khớp tên phòng họp. User gõ một tên phòng không có "
+                                "trong danh sách (có thể sai chính tả, thiếu dấu, đảo chữ, "
+                                "viết tắt, dịch sang tiếng Việt...). Chọn tối đa "
+                                f"{ROOM_SUGGESTION_LIMIT} tên trong DANH SÁCH có khả năng cao "
+                                "là phòng user muốn nói, sắp theo độ giống giảm dần. Chỉ dùng "
+                                "tên có trong danh sách, chép đúng nguyên văn. Nếu không có tên "
+                                "nào thực sự gần giống thì trả mảng rỗng. Chỉ trả JSON dạng "
+                                '{"matches": ["..."]}, không giải thích.'
+                            ),
+                        },
+                        {
+                            "role": "user",
+                            "content": (
+                                f"Tên user gõ: {query_str}\n"
+                                "DANH SÁCH:\n" + "\n".join(names)
+                            ),
+                        },
+                    ],
+                    "temperature": 0,
+                },
+            )
+        if res.status_code >= 400:
+            log.warning("room suggestion failed: %s", res.text)
+            return fallback()
+        msg = (res.json().get("choices") or [{}])[0].get("message") or {}
+        text = str(msg.get("content") or "")
+        start, end = text.find("{"), text.rfind("}")
+        data = json.loads(text[start : end + 1]) if start >= 0 and end > start else {}
+        picked: list[str] = []
+        for item in data.get("matches") or []:
+            name = by_norm.get(_norm_room_lookup(item))
+            if name and name not in picked:
+                picked.append(name)
+        return picked[:ROOM_SUGGESTION_LIMIT]
+    except Exception as e:  # noqa: BLE001 - suggestion must not break the reply
+        log.warning("room suggestion failed: %s", e)
+        return fallback()
+
+
+def _room_not_found_result(query: str, suggestions: list[str]) -> dict:
+    result: dict = {
+        "ok": False,
+        "error": "Không tìm thấy phòng này trong meeting_room_metadata.",
+        "room_query": query,
+    }
+    if suggestions:
+        result["suggested_rooms"] = suggestions
+        result["hint"] = (
+            "Hỏi lại user có phải đang nói đến một trong suggested_rooms không; "
+            "KHÔNG tự tra cứu/đặt phòng khi user chưa xác nhận."
+        )
+    return result
+
+
 async def _tool_get_room_directions(args: dict) -> dict:
     room_name = str(args.get("room_name") or "").strip()
     if not room_name:
@@ -1312,10 +1425,9 @@ async def _tool_get_room_directions(args: dict) -> dict:
 
     room = _find_room_metadata(room_name)
     if not room:
-        return {
-            "ok": False,
-            "error": "Không tìm thấy phòng này trong meeting_room_metadata.",
-        }
+        return _room_not_found_result(
+            room_name, await _suggest_similar_room_names(room_name)
+        )
 
     return {
         "ok": True,
@@ -1445,7 +1557,24 @@ async def _rewrite_direction_for_user_language(
 
 async def _room_direction_reply(result: dict, user_content: str = "") -> str:
     if not result.get("ok"):
-        return f"Mình chưa tìm thấy phòng này. {result.get('error') or ''}".strip()
+        query = str(result.get("room_query") or "").strip()
+        label = f"phòng “{query}”" if query else "phòng này"
+        suggestions = result.get("suggested_rooms") or []
+        if len(suggestions) == 1:
+            return (
+                f"Mình chưa tìm thấy {label}. "
+                f"Có phải bạn đang nói đến phòng **{suggestions[0]}** không?"
+            )
+        if suggestions:
+            options = "\n".join(f"- **{name}**" for name in suggestions)
+            return (
+                f"Mình chưa tìm thấy {label}. "
+                f"Có phải bạn đang nói đến một trong các phòng sau không?\n{options}"
+            )
+        return (
+            f"Mình chưa tìm thấy {label} trong danh sách phòng họp. "
+            "Bạn kiểm tra lại tên phòng giúp mình nhé."
+        )
     room = result.get("room") or {}
     name = room.get("name") or "phòng này"
     details = [
@@ -1828,7 +1957,10 @@ async def _tool_book_room(
     try:
         payload = _resolve_booking_room_from_metadata(payload)
     except HTTPException as e:
-        return {"ok": False, "error": str(e.detail)}
+        query = str(payload.room_name or payload.room_email or "").strip()
+        if not query:
+            return {"ok": False, "error": str(e.detail)}
+        return _room_not_found_result(query, await _suggest_similar_room_names(query))
 
     # If the user previously opted in, book immediately without a confirmation card.
     if profile and profile.get("book_without_confirmation"):
