@@ -22,3 +22,7 @@ npm-debug.log*
 
 # AgentBase token cache
 .agentbase/
+*.tsbuildinfo
+
+# Local Codex settings
+.codex/
