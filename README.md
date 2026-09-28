@@ -1,178 +1,174 @@
-# 🏢 VNGMeet — Vì Starter xứng đáng có phòng họp
+# VNGMeet
 
 ![VNGMeet](vngmeet_thumbnail.png)
 
-VNGMeet là AI agent tích hợp trực tiếp với hệ thống đặt phòng nội bộ của VNG — giúp Starter tìm, book, và quản lý phòng họp một cách thông minh, không cần mò phòng từng giờ; không cần thức khuya canh phòng, mà vẫn có phòng họp phù hợp cho cả team.
+VNGMeet là AI agent tích hợp với hệ thống đặt phòng họp Microsoft 365 của VNG, hỗ trợ nhân viên (Starter) tìm, đặt và quản lý phòng họp bằng ngôn ngữ tự nhiên.
+
+**Team:** Texas Chicken (CuongDM4, HuyenNN, AnhDT11)
+**Truy cập:** https://vng-meet.ai.zalopay.xyz
+**Mã nguồn:** https://github.com/mxnhcxxng/VNGMeet
 
 ---
 
-## 😩 PROBLEM
+## 1. Mục đích
 
-Gọi phòng họp ở VNG là vàng vì ngày nào Starter cũng đào mãi mà không ra.
+Đặt phòng họp qua Outlook hiện gặp ba vấn đề:
 
-**😤 Không tìm được phòng trống nhanh chóng.** Trên Outlook không có view tổng quan — muốn biết khung giờ nào còn phòng, Starter phải tự mò vào từng slot một như đi đào vàng. Ăn may thì có phòng, không thì thôi. Kết quả là mất 10–15 phút chỉ để biết "hết phòng rồi."
+- **Không có cái nhìn tổng quan về phòng trống.** Outlook không có view tổng hợp; người dùng phải kiểm tra từng phòng, từng khung giờ, thường mất 10–15 phút chỉ để biết khung giờ cần đã hết phòng.
+- **Phải canh giờ mở lịch.** Phòng chỉ đặt được trước tối đa 14 ngày. Với lịch họp cố định, người dùng phải canh đúng 0:00 - thời điểm lịch mới mở - để giữ phòng.
+- **Không biết khi phòng được trả lại.** Phòng bị huỷ hoặc trả lại trong ngày không được thông báo; người đang cần phòng phải tự kiểm tra thủ công.
 
-**🌙 Phải thức đêm để canh slot mở.** Phòng họp chỉ được đặt trước tối đa 14 ngày. Với các lịch họp cố định, Starter buộc phải ngồi canh đúng 12 giờ đêm — thời điểm slot mới mở ra — để book phòng trước người khác. Không phải săn sale, nhưng cảm giác y chang.
+VNGMeet giải quyết các vấn đề trên: người dùng chỉ cần nêu nhu cầu, agent tra cứu phòng trống theo thời gian thực, đặt phòng, tự động đặt trước khi lịch mở, và tự động giữ phòng khi có phòng được trả lại.
 
-**🎰 Có phòng trống nhưng không ai biết.** Trong ngày, phòng họp bị hủy hoặc trả lại liên tục — nhưng không có cơ chế thông báo. Starter muốn tận dụng slot vừa trống phải tự vào check tay như chơi xổ số. Cơ hội đến rồi đi trong khi Starter đang bận làm việc khác.
+## 2. Đối tượng sử dụng
 
-Phòng họp chỉ là nơi để ngồi họp. Nhưng việc tìm được nó đang tốn thời gian của Starter nhiều hơn cả việc chuẩn bị nội dung buổi họp đó.
-
----
-
-## 👤 USER
-
-| Who | How to Use |
+| Nhóm | Nhu cầu chính |
 |---|---|
-| **Starters** — Nhân viên bất kể cấp bậc | Người trực tiếp book phòng họp hàng ngày — tìm slot, xác nhận phòng, gửi invite cho cả team. Dùng VNGMeet để tìm và book nhanh qua một lệnh chat (Book qua chat) hoặc một lượt scan (Book qua Browse Room). |
-| **Team Leads & Quản lý** | Người có lịch họp cố định — thường cần book phòng xa trước hoặc tìm phòng bất chợt. Dùng VNGMeet để tự động book phòng ngay khi slot mở lúc nửa đêm (Scheduled booking), hoặc tự động chớp phòng trống ngay khi có (Room Scouting). |
+| Nhân viên (mọi cấp bậc) | Tìm và đặt phòng hằng ngày, xem/đổi/huỷ lịch đã đặt, tìm đường đến phòng. Sử dụng qua chat hoặc tab Browse Rooms. |
+| Team Lead, Quản lý | Đặt trước phòng cho lịch họp cố định (Scheduled booking); tự động giữ phòng khi có phòng trống trong khung giờ cần (Room Scout). |
 
----
+## 3. Chức năng
 
-## 💡 SOLUTION
+| Chức năng | Hỗ trợ qua chatbot |
+|---|---|
+| Tìm và đặt phòng | ✅ |
+| Đặt trước (Scheduled booking) | ✅ |
+| Săn phòng (Room Scout) | ✅ Bật và dừng săn phòng; theo dõi trạng thái tại tab **Scout Rooms** |
+| Quản lý lịch | ✅ |
+| Chỉ đường | ✅ |
+| Xem phòng (Browse Rooms) | ❌ Chỉ trên tab **Browse Rooms** |
+| Phòng yêu thích, vị trí chỗ ngồi | ❌ Chỉ cài đặt trên giao diện app |
 
-VNGMeet là AI agent tích hợp trực tiếp với hệ thống đặt phòng nội bộ VNG. Starter không cần nhớ tên phòng, không cần lên Outlook mò — chỉ cần nói nhu cầu.
+Ngoài ra: giao diện song ngữ Tiếng Việt / English (agent trả lời theo ngôn ngữ người dùng nhắn), hỗ trợ Dark / Light mode.
 
-### ✅ Use case 1 — "Đào" phòng
+### 3.1. Tìm và đặt phòng
 
-Thay vì mò vào hệ thống tìm từng slot, Starter chỉ cần nhắn nhu cầu và VNGMeet trả về phòng phù hợp ngay lập tức — bao gồm cả gợi ý slot lân cận nếu khung giờ mong muốn đã kín. Ai lười chat thì có thể dùng chế độ browse để xem toàn bộ phòng trống trực quan và book luôn.
+1. Người dùng mô tả nhu cầu bằng ngôn ngữ tự nhiên: ngày, khung giờ hoặc thời lượng, quy mô phòng.
+2. Agent tra cứu real-time và trả về danh sách phòng trống phù hợp.
+3. Nếu khung giờ yêu cầu đã kín, agent gợi ý khung giờ lân cận còn phòng.
+4. Người dùng chọn phòng → agent tạo phiếu xác nhận → người dùng bấm **Đồng ý** → cuộc họp được tạo trên Outlook. Phòng chỉ được đặt sau khi người dùng xác nhận.
+5. Khi cần đổi giờ hoặc huỷ, người dùng yêu cầu trực tiếp qua chat.
 
-**User flow:**
-
-1. Starter nhập vào khung chat khung giờ họp, số người
-2. VNGMeet search real-time → trả về list phòng trống phù hợp
-3. Nếu không có → VNGMeet gợi ý slot lân cận có phòng trống
-4. Starter chọn phòng → VNGMeet book và gửi confirm qua Outlook
-5. Starter cần chỉnh sửa hoặc hủy phòng họp → Starter chat trực tiếp với VNGMeet
-
-**Ví dụ hội thoại:**
-
-> **Starter:** Mình cần 1 phòng họp lúc 9h sáng mai cho 4 người
+> **Người dùng:** Mình cần 1 phòng họp lúc 9h sáng mai cho 4 người
 >
-> **VNGMeet:** Khung giờ trên hiện tại đã hết phòng trống phù hợp. Tuy nhiên, mình thấy khung 10:00 sáng mai còn 2 phòng phù hợp cho bạn:
-> - 📍 Phòng Amsterdam – V2 – F3 – 4 Seats
-> - 📍 Phòng Beijing – V1 – F1 – 8 Seats
+> **VNGMeet:** Khung giờ trên hiện đã hết phòng phù hợp. Khung 10:00 sáng mai còn 2 phòng:
+> - Phòng Amsterdam – V2 – F3
+> - Phòng Beijing – V1 – F1
 >
-> Bạn muốn book phòng nào?
+> Bạn muốn đặt phòng nào?
 >
-> **Starter:** Amsterdam
+> **Người dùng:** Amsterdam
 >
-> **VNGMeet:** Mình đã book Phòng Amsterdam – V2 – F3 – 4 Seats lúc 10:00–11:00 ngày mai. Bạn có thể check lại Outlook để nhận confirm nhé!
+> **VNGMeet:** Đã tạo phiếu xác nhận phòng Amsterdam, 10:00–11:00 ngày mai. Bạn bấm Đồng ý trên thẻ để xác nhận nhé.
 
----
+### 3.2. Đặt trước (Scheduled booking)
 
-### ✅ Use case 2 — "Đặt gạch" phòng
+1. Người dùng nhập tên phòng và khung giờ trong tương lai, tại ngày chưa mở lịch đặt.
+2. Agent lưu yêu cầu và theo dõi thời điểm lịch mở.
+3. Đúng thời điểm lịch mở, agent tự động đặt phòng.
+4. Người dùng nhận xác nhận qua Outlook.
 
-Với những lịch họp cố định cần book phòng đúng ngày slot book phòng mở, VNGMeet cho phép Starter đăng ký trước ý định — rồi tự động book phòng đúng thời điểm lịch book mở mà không cần ai thức canh. Starter không cần thức khuya để có phòng đẹp nữa.
-
-**User flow:**
-
-1. Starter nhập vào khung chat tên phòng + khung giờ mong muốn trong tương lai
-2. VNGMeet lưu yêu cầu và theo dõi thời điểm slot mở
-3. Đúng lúc hệ thống mở đăng ký → VNGMeet tự động book
-4. Starter nhận confirm qua Outlook — không cần thức khuya canh
-
-**Ví dụ hội thoại:**
-
-> **Starter:** Tôi muốn book phòng Amsterdam lúc 9:00 sáng ngày 01/07.
+> **Người dùng:** Tôi muốn đặt phòng Amsterdam lúc 9:00 sáng ngày 01/07.
 >
-> **VNGMeet:** Phòng này hiện chưa cho phép Starter book. Mình sẽ book phòng Amsterdam, 9:00 sáng ngày 01/07 ngay khi phòng này mở cho Starter book nhé!
+> **VNGMeet:** Phòng này hiện chưa mở lịch đặt. Mình sẽ tự động đặt phòng Amsterdam, 9:00 sáng ngày 01/07 ngay khi lịch mở.
 >
 > *(Ngày 17/06, 00:01)*
 >
-> **VNGMeet:** Mình đã book thành công Phòng Amsterdam, 9:00 sáng ngày 01/07. Bạn có thể check lại Outlook để nhận confirm nhé!
+> **VNGMeet:** Đã đặt thành công phòng Amsterdam, 9:00 sáng ngày 01/07. Bạn kiểm tra Outlook để nhận xác nhận.
 
----
+### 3.3. Săn phòng (Room Scout)
 
-### ✅ Use case 3 — "Trinh sát" phòng
+1. Người dùng nhập khung giờ cần phòng, thời lượng họp và quy mô phòng (qua chat hoặc tab **Scout Rooms**).
+2. Agent kiểm tra hệ thống mỗi phút.
+3. Khi phát hiện phòng thoả điều kiện, agent tự động đặt khối giờ trống sớm nhất trong khung.
+4. Cuộc họp xuất hiện trên lịch người dùng, xác nhận gửi về Outlook.
 
-Đôi khi phòng họp bị hủy giữa chừng và trả lại — nhưng người thật sự cần thì không biết. VNGMeet giải quyết bằng cách chủ động rà soát mỗi phút và **tự động đặt luôn** phòng phù hợp đầu tiên xuất hiện trong ngày, không cần Starter thao tác thêm.
-
-**User flow:**
-
-1. Starter nhập vào tab "Scout Rooms" khung giờ muốn có phòng, thời lượng họp, số người
-2. VNGMeet tự động check hệ thống mỗi phút
-3. VNGMeet phát hiện phòng thoả mãn → đặt luôn khối giờ trống sớm nhất trong khung
-4. Meeting xuất hiện trên lịch Starter, confirm về Outlook — không cần book thủ công
-
-**Ví dụ thao tác:**
-
-> **Starter** điền các nội dung tương ứng:
-> - Office: Campus
-> - Duration: 1 hour
-> - Scout Range: 14:00 – 18:00
-> - Capacity: 4 people
+> Người dùng điền: Office: Campus · Duration: 1 hour · Scout Range: 14:00–18:00 · Capacity: 4 people
 >
-> **VNGMeet:** Đã bật chế độ tìm phòng trống. Tôi sẽ check mỗi phút và tự động đặt ngay khi có phòng trống phù hợp.
+> **VNGMeet:** Đã bật săn phòng. Hệ thống sẽ kiểm tra mỗi phút và tự động đặt khi có phòng phù hợp.
 >
-> *(2 tiếng sau — meeting tự lên lịch, confirm về Outlook)*
+> *(2 giờ sau)*
 >
-> **VNGMeet:** ✅ Đã đặt phòng trống phù hợp: Phòng Amsterdam – V2 – F3 – 4 Seats, lúc 14:00 – 15:00 hôm nay. Check Outlook để nhận confirm nhé!
+> **VNGMeet:** Đã đặt phòng Amsterdam – V2 – F3, 14:00–15:00 hôm nay. Bạn kiểm tra Outlook để nhận xác nhận.
 
----
+### 3.4. Quản lý lịch
 
-### ✅ Add-in Function — "Soi" phòng
+Người dùng xem, đổi giờ hoặc huỷ các cuộc họp đã đặt qua chat. Agent chỉ hiển thị lịch của chính người dùng; thao tác huỷ luôn yêu cầu xác nhận.
 
-Starter vào tab Browse để thấy toàn bộ availability của tất cả phòng họp theo dạng calendar, filter theo vị trí, ngày, hoặc khung giờ, và book luôn tại chỗ mà không cần chat.
+### 3.5. Chỉ đường
 
-**User flow:**
+Agent trả vị trí phòng (toà, tầng, khu vực), hướng dẫn đường đi và bản đồ đến phòng họp.
 
-1. Starter vào tab "Browse"
-2. VNGMeet hiển thị toàn bộ phòng và availability theo dạng calendar
-3. Starter filter theo vị trí / ngày / khung giờ nếu cần
-4. Starter thấy phòng phù hợp → click book luôn, không cần quay lại chat
+### 3.6. Xem phòng (Browse Rooms)
 
-**Ví dụ thao tác:**
+1. Người dùng mở tab **Browse Rooms**.
+2. Hệ thống hiển thị toàn bộ phòng và trạng thái trống/bận dạng calendar.
+3. Người dùng lọc theo vị trí, ngày hoặc khung giờ.
+4. Người dùng chọn phòng phù hợp và đặt trực tiếp, không cần chat.
 
-> Starter mở tab "Browse Rooms", filter vị trí "Campus", thời gian "Thứ 4, 17/06/2026" → Starter thấy ngay Phòng Amsterdam trống 2h–4h chiều trong khi các phòng khác đã kín. Starter click book luôn, và nhận confirm qua Outlook. Starter không cần nhắn một chữ nào.
+### 3.7. Phòng yêu thích, vị trí chỗ ngồi
 
----
+Người dùng lưu các phòng hay dùng để đặt nhanh, và lưu vị trí chỗ ngồi để được ưu tiên gợi ý phòng gần.
 
-### ✅ More Convenience
+## 4. Phạm vi dữ liệu
 
-- **Map nội bộ** — Tích hợp map chỉ đường đến bất kỳ phòng họp nào
-- **Phòng yêu thích** — Lưu vị trí ngồi làm việc để được ưu tiên gợi ý những phòng gần mình nhất. Lưu các phòng hay dùng để book nhanh hơn lần sau
-- **Giao diện song ngữ** — Tiếng Việt / English, tự động theo ngôn ngữ Starter nhắn
-- **Dark / Light mode** — Muốn mình trông dễ thương hay quyến rũ?
+**Nguồn dữ liệu.** Agent chỉ làm việc với Microsoft 365 (qua Microsoft Graph) trong quyền của chính người dùng đăng nhập, cùng dữ liệu vị trí/bản đồ phòng do team tự xây dựng.
 
----
-
-## 🎯 VALUES
-
-- 🔍 **Tìm được phòng họp:** Không còn tìm phòng phút chót, họp muộn, hủy họp, hay.... họp đứng.
-- 😴 **Ngủ ngon vẫn có phòng:** Đặt phòng trước bất cứ lúc nào, tới đúng ngày giờ là có phòng để họp mà không cần thức khuya canh phòng
-- 🔔 **Canh phòng trống tự động:** Có phòng vừa trống là biết ngay, không cần ngồi canh mà vẫn làm được việc khác
-- 📅 **Nhìn toàn bộ phòng trên Calendar:** Thấy ngay toàn cảnh phòng trống một lượt — không cần mò từng slot như lật bài
-- 🗺️ **Đến đúng phòng, đúng giờ:** 1 câu lệnh duy nhất để có map tới bất cứ phòng họp nào
-
----
-
-## 🔧 TECHNICAL NOTE
-
-Do giới hạn thời gian, hệ thống hiện tại xác thực người dùng bằng **Microsoft Graph access token** dán thủ công, thay vì luồng OAuth đầy đủ qua Azure AD.
-
-**Lưu ý quan trọng:** Token có hiệu lực tối đa **24 giờ**. Khi hết hạn, các tính năng sẽ ngừng hoạt động và người dùng cần đăng nhập lại bằng cách cung cấp token mới.
-
-**Bảo mật:** Token được mã hoá bằng **Fernet (AES-128-CBC)** trước khi lưu vào hệ thống, và chỉ được sử dụng cho các mục đích sau:
-
-| Permission | Mục đích |
+| Quyền Microsoft Graph | Mục đích |
 |---|---|
-| `Place.Read.All` | Liệt kê danh sách phòng họp trong tổ chức |
-| `Calendars.Read.Shared` | Đọc trạng thái trống/bận của phòng (free-busy) |
-| `Calendars.ReadWrite` | Đặt phòng, chỉnh sửa, huỷ meeting trên lịch người dùng |
-| `Mail.Send` | Gửi email thông báo (dự phòng; Room Scout hiện tự động đặt phòng nên không dùng) |
-| `User.Read` | Đọc thông tin cơ bản của người dùng đang đăng nhập |
+| `Place.Read.All` | Liệt kê danh sách phòng họp |
+| `Calendars.Read.Shared` | Đọc trạng thái trống/bận của phòng (không đọc nội dung cuộc họp) |
+| `Calendars.ReadWrite` | Đặt, đổi, huỷ cuộc họp trên lịch của chính người dùng |
+| `Mail.Send` | Gửi email thông báo (dự phòng; Room Scout hiện tự động đặt phòng nên không sử dụng) |
+| `User.Read` | Đọc thông tin cơ bản của người dùng đăng nhập |
 
----
+**Giới hạn truy cập.**
+- Agent luôn hành động thay cho đúng người dùng của phiên hiện tại; danh tính do hệ thống xác định, không lấy từ nội dung chat.
+- Không đọc, không tiết lộ lịch hay dữ liệu của người dùng khác. Với phòng họp, agent chỉ biết trạng thái trống/bận.
+- Chỉ trả lời trong phạm vi đặt phòng và lịch họp; các yêu cầu khác bị từ chối.
 
-## 🙌 CREDIT
+**Lưu trữ và bảo mật.**
+- Access token Microsoft được mã hoá (Fernet, AES-128-CBC) trước khi lưu, có hiệu lực tối đa 24 giờ.
+- Hệ thống lưu: bộ đệm trạng thái trống/bận của phòng (14 ngày tới), hồ sơ cơ bản, phòng yêu thích, yêu cầu đặt trước/săn phòng của người dùng.
+- Đã thực hiện review bảo mật whitebox và kiểm thử lại (xem [SECURITY_REVIEW.md](SECURITY_REVIEW.md), [PENTEST_VERIFICATION_REPORT.md](PENTEST_VERIFICATION_REPORT.md)); không ghi nhận lỗ hổng cho phép người dùng truy cập dữ liệu của người khác.
 
-Dự án được phát triển bởi team **Texas Chicken** gồm 3 starter: CuongDM4, HuyenNN, AnhDT11
+## 5. Cách dùng
 
-- Auth: Microsoft Access Token
-- Server: GreenNode AgentBase
-- Model: MiniMax M2.5
-- Library UI: Hero UI
-- Icon: Gravity Icon
-- Image/thumbnail: My VNG & Fanpage VNG
-- Inspired by: HoanDN
+1. Truy cập https://vng-meet.ai.zalopay.xyz và đăng nhập theo một trong hai cách:
+   - Đăng nhập trực tiếp bằng tài khoản Microsoft công ty.
+   - Dán Microsoft Graph access token.
+2. Mở tab **Chat** và nhập yêu cầu, ví dụ:
+   - `Chiều nay có phòng nào 1 tiếng không?`
+   - `Đặt phòng Madrid 16h-17h hôm nay`
+   - `Chiều nay tôi có lịch nào không?` → `Huỷ giúp tôi`
+   - `Chỉ đường đến phòng Madrid`
+3. Kiểm tra phiếu xác nhận và bấm **Đồng ý** để đặt. Cuộc họp xuất hiện trên Outlook ngay sau đó.
+4. Các tab khác:
+   - **Browse Rooms** - xem toàn bộ phòng trống dạng calendar và đặt trực tiếp.
+   - **Scout Rooms** - bật săn phòng: chọn ngày, khung giờ, thời lượng, quy mô phòng.
+
+**Giới hạn hiện tại:**
+- Chỉ đặt được phòng trong vòng 15 ngày kể từ hôm nay; khung giờ làm việc 09:00–18:00.
+- Với cách đăng nhập bằng Microsoft Graph access token, token có hiệu lực tối đa 24 giờ; khi hết hạn, người dùng cần đăng nhập lại.
+
+## 6. Giá trị mang lại
+
+- **Tìm được phòng nhanh:** giảm tình trạng tìm phòng phút chót, họp muộn hoặc phải huỷ họp vì không có phòng.
+- **Không cần canh giờ mở lịch:** đăng ký trước, agent tự đặt đúng thời điểm.
+- **Tận dụng phòng được trả lại:** phòng vừa trống được tự động giữ cho người cần.
+- **Tổng quan toàn bộ phòng:** xem trạng thái tất cả phòng trên một calendar thay vì kiểm tra từng slot.
+- **Đến đúng phòng:** một câu lệnh để có chỉ đường và bản đồ đến bất kỳ phòng họp nào.
+
+## 7. Công nghệ và ghi nhận
+
+| Hạng mục | Sử dụng |
+|---|---|
+| Xác thực | Đăng nhập Microsoft, Microsoft Graph access token |
+| Hạ tầng | ZaloPay Agent Base |
+| Mô hình ngôn ngữ | MiniMax M2.5 (qua GreenNode AgentBase) |
+| Backend | FastAPI, Supabase |
+| Frontend | Next.js, Hero UI |
+| Icon | Gravity Icon |
+| Hình ảnh / thumbnail | My VNG & Fanpage VNG |
+
+Ý tưởng lấy cảm hứng từ HoanDN.
