@@ -1237,8 +1237,14 @@ def _norm_room_lookup(value: object) -> str:
     return " ".join(str(value or "").strip().lower().split())
 
 
-def _find_room_metadata(room_name: object = None, room_email: object = None) -> dict | None:
-    """Find one in-use room by exact or fuzzy name/email metadata."""
+def _find_room_metadata(
+    room_name: object = None, room_email: object = None, in_use_only: bool = True
+) -> dict | None:
+    """Find one room by exact or fuzzy name/email metadata.
+
+    Booking keeps the default in_use_only=True; directions pass False so rooms
+    that can't be booked through the app can still be located.
+    """
     if not settings.supabase_enabled:
         return None
 
@@ -1249,18 +1255,19 @@ def _find_room_metadata(room_name: object = None, room_email: object = None) -> 
 
     from .supabase_client import get_supabase
 
-    rows = (
+    query = (
         get_supabase()
         .table("meeting_room_metadata")
         .select(
             "id, name, email, office, building, floor, zone, capacity, capacity_size, "
-            "map_link, direction"
+            "map_link, direction, in_use"
         )
-        .eq("in_use", True)
-        .execute()
-        .data
-        or []
     )
+    if in_use_only:
+        query = query.eq("in_use", True)
+    rows = query.execute().data or []
+    # Same name on an in-use and a retired row -> the in-use one wins.
+    rows.sort(key=lambda r: not r.get("in_use"))
 
     def room_name_matches(row: dict) -> bool:
         name = _norm_room_lookup(row.get("name"))
@@ -1310,24 +1317,21 @@ def _resolve_booking_room_from_metadata(payload: BookingRequest) -> BookingReque
 ROOM_SUGGESTION_LIMIT = 3
 
 
-def _in_use_room_names() -> list[str]:
+def _room_names(in_use_only: bool = True) -> list[str]:
     if not settings.supabase_enabled:
         return []
     from .supabase_client import get_supabase
 
-    rows = (
-        get_supabase()
-        .table("meeting_room_metadata")
-        .select("name")
-        .eq("in_use", True)
-        .execute()
-        .data
-        or []
-    )
+    query = get_supabase().table("meeting_room_metadata").select("name")
+    if in_use_only:
+        query = query.eq("in_use", True)
+    rows = query.execute().data or []
     return sorted({str(r.get("name") or "").strip() for r in rows} - {""})
 
 
-async def _suggest_similar_room_names(query: object) -> list[str]:
+async def _suggest_similar_room_names(
+    query: object, in_use_only: bool = True
+) -> list[str]:
     """Hỏi LLM 1 lần xem tên phòng user gõ (sai chính tả, thiếu dấu, viết tắt...)
     có gần giống phòng nào trong meeting_room_metadata không. Chỉ trả về tên có
     thật trong DB; LLM lỗi thì rơi về difflib."""
@@ -1335,7 +1339,7 @@ async def _suggest_similar_room_names(query: object) -> list[str]:
     if not query_str:
         return []
     try:
-        names = _in_use_room_names()
+        names = _room_names(in_use_only)
     except Exception as e:  # noqa: BLE001 - suggestion must not break the reply
         log.warning("room suggestion: load names failed: %s", e)
         return []
@@ -1423,10 +1427,11 @@ async def _tool_get_room_directions(args: dict) -> dict:
     if not room_name:
         return {"ok": False, "error": "Thiếu tên phòng cần chỉ đường."}
 
-    room = _find_room_metadata(room_name)
+    # Directions cover every room in the table, not just bookable (in_use) ones.
+    room = _find_room_metadata(room_name, in_use_only=False)
     if not room:
         return _room_not_found_result(
-            room_name, await _suggest_similar_room_names(room_name)
+            room_name, await _suggest_similar_room_names(room_name, in_use_only=False)
         )
 
     return {

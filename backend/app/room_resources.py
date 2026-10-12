@@ -74,7 +74,7 @@ _AVAILABILITY_REFRESH_LOCK = None
 ROOM_LAYOUT_COUNTS_BY_OFFICE = {
     # Hardcoded for the browse loading grid. Update these when room metadata
     # changes so the skeleton column count stays stable before availability loads.
-    "campus": 32,
+    "campus": 35,
     "sala": 4,
     "tnr": 10,
 }
@@ -82,10 +82,10 @@ ROOM_LAYOUT_COUNTS_BY_OFFICE = {
 def _rooms_from_metadata() -> list[dict]:
     """In-use meeting rooms straight from `meeting_room_metadata` (Room shape).
 
-    This is the single source of truth for the room list — the same table the
-    availability cache, free-today, directory, and the background refresh job all
-    read from. Sourcing /api/rooms and /api/schedule here too means the app no
-    longer depends on Graph `findRooms`, which Exchange 403s for this app's
+    This is the single source of truth for the bookable room list — the same table
+    the availability cache, free-today, and the background refresh job all read
+    from (the directions directory reads it too, but without the in_use filter).
+    Sourcing /api/rooms and /api/schedule here too means the app no longer depends on Graph `findRooms`, which Exchange 403s for this app's
     registration (its appid isn't Microsoft first-party). getSchedule still needs
     a Graph token, but the room *list* never does.
     """
@@ -930,7 +930,8 @@ async def rooms_directory(request: Request):
     """Danh sách phòng cho màn "Chỉ đường" của Mini App.
 
     Đọc thẳng meeting_room_metadata (KHÔNG cần Graph token, giống free-today) nên
-    user Zalo chưa link Microsoft vẫn xem được. Trả kèm chỉ đường (direction) và
+    user Zalo chưa link Microsoft vẫn xem được. KHÔNG lọc in_use: phòng không đặt
+    được qua app vẫn cần chỉ đường. Trả kèm chỉ đường (direction) và
     ảnh sơ đồ (map_link) để dựng màn chi tiết. Client tự nhóm theo office (Campus /
     TNR — Sala không có chỉ đường nên client bỏ tab đó) rồi theo chữ cái đầu."""
     _request_identity(request)
@@ -946,7 +947,6 @@ async def rooms_directory(request: Request):
             "name, email, building, floor, zone, capacity, capacity_size, "
             "office, thumbnail_link, direction, map_link"
         )
-        .eq("in_use", True)
         .execute()
         .data
         or []
