@@ -254,7 +254,10 @@ export interface MinigameQuestion {
   hint?: string;
   kind?: "floor" | "building" | "direction";
   roomName?: string;
+  // floor: "1" | "2" | "3" | "unknown"; building: "V1" | "V2"; direction: the
+  // English text, with `optionsVi` the same options in Vietnamese.
   options?: string[];
+  optionsVi?: string[] | null;
   image?: string | null;
   office?: string | null;
   building?: string | null;
@@ -287,7 +290,8 @@ export interface MinigameStart {
 }
 
 export interface MinigameAnswerResult extends MinigameSummary {
-  result?: "correct" | "close" | "wrong" | "skipped" | "duplicate";
+  // "unknown": the quiz's "don't know" option, worth a consolation point.
+  result?: "correct" | "close" | "wrong" | "skipped" | "duplicate" | "unknown";
   points?: number;
   roomName?: string;
   correctIndex?: number;

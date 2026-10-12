@@ -2,7 +2,8 @@
 
 - guess:  see a room's photo, type its name.
 - recall: type every room name you can remember.
-- quiz:   see a room, pick its floor / building / directions from 4 options.
+- quiz:   see a room (only rooms with a photo), pick its floor (1/2/3/don't know), building (V1/V2) or
+          directions (4 options, Vietnamese and English).
 
 Only rooms with a country flag (room_flags.py) are asked or scored. Each round
 is played under a VNG domain (the email username): a normal user always plays
@@ -26,6 +27,7 @@ import threading
 import time
 import unicodedata
 import uuid
+from difflib import SequenceMatcher
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -105,14 +107,12 @@ def _load_rooms() -> list[dict]:
     room to the player. Prefers the row that has a photo / directions."""
     from .supabase_client import get_supabase
 
-    rows = (
-        get_supabase()
-        .table("meeting_room_metadata")
-        .select("name, building, floor, zone, capacity, office, thumbnail_link, direction")
-        .execute()
-        .data
-        or []
-    )
+    columns = "name, building, floor, zone, capacity, office, thumbnail_link, direction"
+    table = get_supabase().table("meeting_room_metadata")
+    try:
+        rows = table.select(columns + ", direction_vi").execute().data or []
+    except Exception:  # noqa: BLE001 - before migrate_room_direction_vi.sql runs
+        rows = table.select(columns).execute().data or []
     by_name: dict[str, dict] = {}
     for r in rows:
         name = (r.get("name") or "").strip()
@@ -191,33 +191,114 @@ def _recall_answer(session: dict, answer: str) -> dict:
 
 
 # --------------------------------------------------------------------------- #
-# quiz: room -> pick floor / building / directions
+# quiz: room -> pick floor (1/2/3/unknown), building (V1/V2) or directions
 # --------------------------------------------------------------------------- #
-def _quiz_value(room: dict, kind: str) -> str | None:
-    value = room.get(kind)
-    return str(value).strip() if value not in (None, "") else None
+# Floor questions only cover these floors; "unknown" is the honest way out and
+# earns a consolation point.
+QUIZ_FLOORS = ("1", "2", "3")
+QUIZ_UNKNOWN = "unknown"
+POINTS_UNKNOWN = 1
+# Building questions are a fixed V1-vs-V2 pick (the client adds the landmarks).
+QUIZ_BUILDINGS = ("V1", "V2")
+_MASK = "___"
+# Directions in one question must not start the same way, nor be this similar.
+_MAX_SIMILARITY = 0.8
+
+
+def _room_floor(room: dict) -> str | None:
+    """"F3" / "3" -> "3"."""
+    digits = re.sub(r"\D", "", str(room.get("floor") or ""))
+    return digits.lstrip("0") or None
+
+
+def _room_building(room: dict) -> str | None:
+    building = str(room.get("building") or "").strip().upper()
+    return building if building in QUIZ_BUILDINGS else None
+
+
+def _mask_names(text: str, names: set[str]) -> str:
+    """Hide room names so an option can't give the answer away."""
+    for name in sorted(names, key=len, reverse=True):
+        text = re.sub(re.escape(name), _MASK, text, flags=re.IGNORECASE)
+    return text
+
+
+def _first_route(direction: str | None) -> str:
+    """Directions often list two routes, one per line ("From the 7-Eleven…" /
+    "From the Main Lobby…"); one is enough to recognise, and keeps the four
+    answer tiles a similar length."""
+    return (direction or "").strip().split("\n")[0].strip()
+
+
+def _opening(direction: str) -> str:
+    """The first stretch of a route ("Go to the 3rd floor, turn left at…")."""
+    return _normalize(direction[:50])
+
+
+def _direction_question(session: dict, room: dict) -> tuple[list[str], list[str], int] | None:
+    """Up to 4 clearly different directions (en + vi), one of them the room's own."""
+    if not (room.get("direction") or "").strip():
+        return None
+    # Mask each room's own name first, then group: many rooms share one route,
+    # and "The Lyon meeting room…" / "The Yale meeting room…" become the same
+    # option once masked — the answer must never reappear as a distractor.
+    by_text: dict[str, str] = {}
+    answer = ""
+    for r in session["all_rooms"]:
+        text = _first_route(r.get("direction"))
+        if not text:
+            continue
+        names = {r["name"], room["name"]}
+        en = _mask_names(text, names)
+        by_text.setdefault(en, _mask_names(_first_route(r.get("direction_vi")) or text, names))
+        if r is room:
+            answer = en
+    # Near-identical routes (same walk, one extra clause) make a muddled quiz;
+    # only keep distractors that read clearly different from what's picked.
+    candidates = [t for t in by_text if t != answer]
+    random.shuffle(candidates)
+    picked = [answer]
+    for text in candidates:
+        if len(picked) == QUIZ_OPTIONS:
+            break
+        if all(
+            _opening(text) != _opening(p)
+            and SequenceMatcher(None, text, p).ratio() < _MAX_SIMILARITY
+            for p in picked
+        ):
+            picked.append(text)
+    if len(picked) < 2:
+        return None
+    random.shuffle(picked)
+    return picked, [by_text[t] for t in picked], picked.index(answer)
 
 
 def _quiz_build(session: dict) -> dict | None:
-    """Next question with 4 shuffled options; None once rooms run out."""
+    """Next question; None once rooms run out."""
     rooms = session["rooms"]
     while session["index"] < len(rooms):
         room = rooms[session["index"]]
-        kinds = [k for k in ("floor", "building", "direction") if _quiz_value(room, k)]
-        random.shuffle(kinds)
-        for kind in kinds:
-            answer = _quiz_value(room, kind)
-            pool = {_quiz_value(r, kind) for r in session["all_rooms"]} - {answer, None}
-            if not pool:
-                continue
-            options = random.sample(sorted(pool), min(QUIZ_OPTIONS - 1, len(pool))) + [answer]
-            random.shuffle(options)
-            session["current"] = {"answer": options.index(answer), "kind": kind}
+        candidates: list[tuple[str, list[str], list[str] | None, int]] = []
+        floor = _room_floor(room)
+        if floor in QUIZ_FLOORS:
+            options = [*QUIZ_FLOORS, QUIZ_UNKNOWN]
+            candidates.append(("floor", options, None, options.index(floor)))
+        building = _room_building(room)
+        if building:
+            options = list(QUIZ_BUILDINGS)
+            candidates.append(("building", options, None, options.index(building)))
+        directions = _direction_question(session, room)
+        if directions:
+            candidates.append(("direction", directions[0], directions[1], directions[2]))
+        if candidates:
+            kind, options, options_vi, answer = random.choice(candidates)
+            session["current"] = {"answer": answer, "options": options}
             return {
                 "index": session["index"],
                 "kind": kind,
                 "roomName": room["name"],
                 "options": options,
+                "optionsVi": options_vi,
                 **_location(room),
             }
         session["index"] += 1
@@ -230,11 +311,17 @@ def _quiz_answer(session: dict, answer: str) -> dict:
         picked = int(answer)
     except ValueError:
         picked = -1
-    correct = picked == current["answer"]
+    options = current["options"]
     session["index"] += 1
+    if picked == current["answer"]:
+        result, points = "correct", POINTS_QUIZ
+    elif 0 <= picked < len(options) and options[picked] == QUIZ_UNKNOWN:
+        result, points = "unknown", POINTS_UNKNOWN
+    else:
+        result, points = ("skipped" if picked < 0 else "wrong"), 0
     return {
-        "result": "correct" if correct else ("skipped" if picked < 0 else "wrong"),
-        "points": POINTS_QUIZ if correct else 0,
+        "result": result,
+        "points": points,
         "correctIndex": current["answer"],
         "roomName": session["rooms"][session["index"] - 1]["name"],
     }
@@ -266,6 +353,13 @@ def _get_session_locked(email: str | None, game_id: str) -> dict:
     return session
 
 
+def _scores_table():
+    """The leaderboard table. dev_minigame.py swaps it for an in-memory one."""
+    from .supabase_client import get_supabase
+
+    return get_supabase().table("minigame_scores")
+
+
 def _finish_locked(session: dict) -> None:
     """Persist the score exactly once."""
     if session["finished"]:
@@ -274,9 +368,7 @@ def _finish_locked(session: dict) -> None:
     if not settings.supabase_enabled or not session["email"]:
         return
     try:
-        from .supabase_client import get_supabase
-
-        get_supabase().table("minigame_scores").insert(
+        _scores_table().insert(
             {
                 "game": session["game"],
                 "attempt_id": session["id"],
@@ -341,7 +433,14 @@ def start_game(request: Request, payload: StartPayload | None = None):
         raise HTTPException(503, "Minigame requires Supabase configuration.")
     domain = _resolve_domain(email, payload.domain)
     all_rooms = _load_rooms()
-    rooms = _guess_setup(all_rooms) if game == "guess" else list(all_rooms)
+    if game == "guess":
+        rooms = _guess_setup(all_rooms)
+    elif game == "quiz":
+        # The photo is half the question; photo-less rooms are never asked
+        # (their directions still serve as distractors).
+        rooms = [r for r in all_rooms if r.get("thumbnail_link")]
+    else:
+        rooms = list(all_rooms)
     if not rooms:
         raise HTTPException(503, "No rooms available.")
     random.shuffle(rooms)
@@ -452,11 +551,8 @@ def leaderboard(
     _request_identity(request)
     if not settings.supabase_enabled:
         return {"entries": [], "me": None}
-    from .supabase_client import get_supabase
-
     rows = (
-        get_supabase()
-        .table("minigame_scores")
+        _scores_table()
         .select("attempt_id, domain, email, score, correct, close, created_at")
         .eq("game", game)
         .order("score", desc=True)

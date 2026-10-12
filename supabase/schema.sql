@@ -355,6 +355,8 @@ alter table meeting_room_metadata add column if not exists map_link text;
 alter table meeting_room_metadata add column if not exists direction text;
 comment on column meeting_room_metadata.map_link is 'Link bản đồ / vị trí phòng họp.';
 comment on column meeting_room_metadata.direction is 'Hướng dẫn đi đến phòng họp dạng text.';
+alter table meeting_room_metadata add column if not exists direction_vi text;
+comment on column meeting_room_metadata.direction_vi is 'Hướng dẫn đi đến phòng họp (tiếng Việt).';
 
 -- Cache availability phòng họp. Một background job (app-only Graph) refresh mỗi
 -- 15 phút; frontend đọc grid từ đây thay vì gọi Graph trực tiếp.

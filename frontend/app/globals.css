@@ -270,6 +270,15 @@ html.dark .chip.chip-finished {
 .tile-success {
   --tile: var(--success);
 }
+.tile-danger {
+  --tile: var(--danger);
+}
+.tile-neutral {
+  --tile: #71717a;
+}
+html.dark .tile-neutral {
+  --tile: #94979c;
+}
 @keyframes game-pop {
   from {
     opacity: 0;

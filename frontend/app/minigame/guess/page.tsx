@@ -2,9 +2,9 @@
 
 // Minigame 1: see a room's photo, type its name.
 
+import { CircleCheck, ForwardStep, Keyboard, Pencil, Picture } from "@gravity-ui/icons";
 import {
   AnswerInput,
-  FeedbackBanner,
   GAME_SECONDS,
   GameShell,
   type GameFeedback,
@@ -33,14 +33,20 @@ function feedbackLabel(t: TFunction, f: GameFeedback): string {
 
 export default function GuessGamePage() {
   const t = useT();
-  const state = useMinigame("guess");
-  const { question, feedback, summary } = state;
+  const state = useMinigame("guess", (f) => feedbackLabel(t, f));
+  const { question, summary } = state;
 
   return (
     <GameShell
       title={t("game.title")}
       subtitle={t("game.subtitle", { seconds: GAME_SECONDS })}
-      rules={t("game.rules", { exact: 100, close: 50 })}
+      rules={[
+        { icon: Picture, text: t("game.rule.guess.look"), tone: "accent" },
+        { icon: CircleCheck, text: t("game.rule.exact"), points: "+100", tone: "success" },
+        { icon: Pencil, text: t("game.rule.typo"), points: "+50", tone: "warning" },
+        { icon: Keyboard, text: t("game.rule.spaces") },
+        { icon: ForwardStep, text: t("game.rule.skip") },
+      ]}
       state={state}
       results={<p className="text-sm text-[#71717a] dark:text-[#94979c]">{t("game.stats", { ...summary })}</p>}
     >
@@ -58,11 +64,8 @@ export default function GuessGamePage() {
           >
             <RoomPhoto question={question} />
           </Stage>
-          {feedback?.result && (
-            <FeedbackBanner result={feedback.result} label={feedbackLabel(t, feedback)} />
-          )}
           <AnswerInput state={state} placeholder={t("game.placeholder")} focusKey={question.index} />
-          <p className="text-center text-xs text-[#a4a7ae] dark:text-[#94979c]">{t("game.skipHint")}</p>
+          <p className="text-center text-xs text-[#a4a7ae] dark:text-[#94979c]">{t("game.rule.skip")}</p>
           {state.error && <p className="text-sm text-danger">{state.error}</p>}
         </>
       )}

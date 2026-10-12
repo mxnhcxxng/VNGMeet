@@ -3,9 +3,9 @@
 // Minigame 2: type every meeting room name you can remember in 60 seconds.
 
 import { useEffect, useState } from "react";
+import { Bulb, CircleCheck, Copy, Keyboard, Pencil } from "@gravity-ui/icons";
 import {
   AnswerInput,
-  FeedbackBanner,
   GAME_SECONDS,
   GameShell,
   type GameFeedback,
@@ -29,6 +29,8 @@ function feedbackLabel(t: TFunction, f: GameFeedback): string {
       return t("game.recall.close", vars);
     case "duplicate":
       return t("game.recall.duplicate", vars);
+    case "skipped":
+      return "";
     default:
       return t("game.recall.wrong");
   }
@@ -50,7 +52,7 @@ function RoomTag({ name, index, muted }: { name: string; index: number; muted?: 
 
 export default function RecallGamePage() {
   const t = useT();
-  const state = useMinigame("recall");
+  const state = useMinigame("recall", (f) => feedbackLabel(t, f));
   const { feedback, finalResult, totalRooms, phase } = state;
   // Rooms named this round, newest first.
   const [found, setFound] = useState<string[]>([]);
@@ -72,7 +74,13 @@ export default function RecallGamePage() {
     <GameShell
       title={t("game.recall.title")}
       subtitle={t("game.recall.subtitle", { seconds: GAME_SECONDS })}
-      rules={t("game.recall.rules", { exact: 100, close: 50 })}
+      rules={[
+        { icon: Bulb, text: t("game.rule.recall.type"), tone: "accent" },
+        { icon: CircleCheck, text: t("game.rule.recall.new"), points: "+100", tone: "success" },
+        { icon: Pencil, text: t("game.rule.typo"), points: "+50", tone: "warning" },
+        { icon: Copy, text: t("game.rule.recall.duplicate"), points: "0" },
+        { icon: Keyboard, text: t("game.rule.spaces") },
+      ]}
       state={state}
       results={
         <div className="flex w-full flex-col gap-4 text-left">
@@ -108,7 +116,7 @@ export default function RecallGamePage() {
     >
       <QuestionBar>{t("game.recall.question")}</QuestionBar>
       <Stage state={state} side={<StatBubble value={counter} label={t("game.recall.rooms")} />}>
-        <div className="flex min-h-[240px] flex-col gap-3 rounded-2xl bg-white p-4 pt-16 shadow-sm dark:bg-[#0c0e12] sm:min-h-[300px] sm:pt-4">
+        <div className="flex h-full flex-col gap-3 overflow-y-auto rounded-2xl bg-white p-4 pt-16 shadow-sm dark:bg-[#0c0e12] sm:pt-4">
           <span className="text-sm font-medium text-[#71717a] dark:text-[#94979c] sm:hidden">
             {t("game.recall.found", { found: found.length, total: totalRooms })}
           </span>
@@ -119,9 +127,6 @@ export default function RecallGamePage() {
           </div>
         </div>
       </Stage>
-      {feedback?.result && feedback.result !== "skipped" && (
-        <FeedbackBanner result={feedback.result} label={feedbackLabel(t, feedback)} />
-      )}
       <AnswerInput state={state} placeholder={t("game.recall.placeholder")} />
       {state.error && <p className="text-sm text-danger">{state.error}</p>}
     </GameShell>
