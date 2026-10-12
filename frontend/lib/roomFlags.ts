@@ -1,7 +1,8 @@
 // Meeting rooms are named after world cities / universities. We map each name
 // to its country's flag emoji here — client-side, so no database column is
 // needed. Keyed by the lowercased room name; unknown names (e.g. "FA Meeting")
-// simply get no flag. Extend this map when new rooms are added.
+// simply get no flag. Extend this map when new rooms are added — and mirror it
+// in backend/app/room_flags.py, which limits the minigames to flagged rooms.
 const ROOM_FLAGS: Record<string, string> = {
   amsterdam: "🇳🇱",
   athens: "🇬🇷",

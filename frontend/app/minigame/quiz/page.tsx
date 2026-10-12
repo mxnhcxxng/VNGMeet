@@ -4,13 +4,15 @@
 
 import { Button } from "@heroui/react";
 import {
-  FeedbackChip,
+  AnswerTiles,
+  FeedbackBanner,
   GAME_SECONDS,
-  GameLobby,
   GameShell,
   type GameFeedback,
+  QuestionBar,
   RoomPhoto,
-  TimerBar,
+  Stage,
+  StatBubble,
   useMinigame,
 } from "@/components/Minigame";
 import { useT } from "@/app/providers";
@@ -42,60 +44,51 @@ function feedbackLabel(t: TFunction, f: GameFeedback): string {
 export default function QuizGamePage() {
   const t = useT();
   const state = useMinigame("quiz");
-  const { question, feedback } = state;
+  const { question, feedback, summary } = state;
   const flag = roomFlag(question?.roomName);
 
   return (
     <GameShell
       title={t("game.quiz.title")}
       subtitle={t("game.quiz.subtitle", { seconds: GAME_SECONDS })}
+      rules={t("game.quiz.rules", { points: 100 })}
       state={state}
+      results={
+        <p className="text-sm text-[#71717a] dark:text-[#94979c]">
+          {t("game.quiz.stats", { correct: summary.correct, attempted: summary.attempted })}
+        </p>
+      }
     >
-      {state.phase === "playing" && question ? (
-        <div className="flex flex-col gap-3">
-          <TimerBar state={state} />
-          <RoomPhoto
-            question={question}
-            showLocation={false}
-            className="aspect-[16/9] sm:aspect-[21/9]"
-            overlay={
-              <p className="text-center text-xl font-bold text-white sm:text-2xl">
-                {flag && <span className="mr-2">{flag}</span>}
-                {question.roomName}
-              </p>
-            }
-          />
-          <p className="text-base font-semibold text-[#181d27] dark:text-[#f7f7f7]">
-            {questionLabel(t, question)}
-          </p>
-          <div
-            className={`grid gap-2 ${
-              question.kind === "direction" ? "grid-cols-1" : "grid-cols-2"
-            }`}
+      {question && (
+        <>
+          <QuestionBar>{questionLabel(t, question)}</QuestionBar>
+          <Stage
+            state={state}
+            side={<StatBubble value={summary.attempted} label={t("game.quiz.answered")} />}
           >
-            {(question.options ?? []).map((option, i) => (
-              <Button
-                key={`${question.index}-${i}`}
-                variant="secondary"
-                className={`h-auto min-h-12 w-full justify-start whitespace-normal rounded-xl px-4 py-3 text-left ${
-                  question.kind === "direction" ? "text-sm" : "text-base"
-                }`}
-                isDisabled={state.submitting}
-                onPress={() => void state.submit(String(i))}
-              >
-                <span className="mr-2 font-semibold text-[#f97316]">
-                  {String.fromCharCode(65 + i)}.
-                </span>
-                {optionLabel(t, question, option)}
-              </Button>
-            ))}
-          </div>
-          <div className="flex min-h-7 items-center justify-between gap-3">
-            {feedback?.result ? (
-              <FeedbackChip label={feedbackLabel(t, feedback)} result={feedback.result} />
-            ) : (
-              <span />
-            )}
+            <RoomPhoto
+              question={question}
+              showLocation={false}
+              className="aspect-[16/9] sm:aspect-[21/9]"
+              overlay={
+                <p className="text-center text-2xl font-bold text-white">
+                  {flag && <span className="mr-2">{flag}</span>}
+                  {question.roomName}
+                </p>
+              }
+            />
+          </Stage>
+          {feedback?.result && (
+            <FeedbackBanner result={feedback.result} label={feedbackLabel(t, feedback)} />
+          )}
+          <AnswerTiles
+            key={question.index}
+            options={(question.options ?? []).map((o) => optionLabel(t, question, o))}
+            singleColumn={question.kind === "direction"}
+            disabled={state.submitting}
+            onPick={(i) => void state.submit(String(i))}
+          />
+          <div className="flex justify-end">
             <Button
               size="sm"
               variant="ghost"
@@ -106,21 +99,8 @@ export default function QuizGamePage() {
             </Button>
           </div>
           {state.error && <p className="text-sm text-danger">{state.error}</p>}
-        </div>
-      ) : state.phase === "idle" || state.phase === "over" ? (
-        <GameLobby
-          state={state}
-          rules={t("game.quiz.rules", { points: 100 })}
-          stats={t("game.quiz.stats", {
-            correct: state.summary.correct,
-            attempted: state.summary.attempted,
-          })}
-        >
-          {feedback?.result && (
-            <FeedbackChip label={feedbackLabel(t, feedback)} result={feedback.result} />
-          )}
-        </GameLobby>
-      ) : null}
+        </>
+      )}
     </GameShell>
   );
 }

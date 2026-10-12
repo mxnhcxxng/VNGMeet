@@ -4,6 +4,11 @@
 - recall: type every room name you can remember.
 - quiz:   see a room, pick its floor / building / directions from 4 options.
 
+Only rooms with a country flag (room_flags.py) are asked or scored. Each round
+is played under a VNG domain (the email username): a normal user always plays
+as themselves, an admin types in the domain of whoever is at the keyboard (e.g.
+an event booth). Every round is its own leaderboard entry.
+
 Unlisted in the UI — reachable only by link. Scoring happens here, not in the
 browser, so the leaderboard can't be farmed by posting a made-up score: the
 client never learns an answer until it has answered.
@@ -27,7 +32,8 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from .app_context import log, settings
-from .profiles import _request_identity
+from .profiles import _read_user_profile, _request_identity
+from .room_flags import room_flag
 
 router = APIRouter()
 
@@ -50,6 +56,8 @@ _lock = threading.Lock()
 
 class StartPayload(BaseModel):
     game: GameKind = "guess"
+    # Only read for admins; everyone else plays as their own domain.
+    domain: str | None = None
 
 
 class AnswerPayload(BaseModel):
@@ -109,7 +117,7 @@ def _load_rooms() -> list[dict]:
     for r in rows:
         name = (r.get("name") or "").strip()
         key = _normalize(name)
-        if not key:
+        if not key or not room_flag(name):
             continue
         richness = bool(r.get("thumbnail_link")) + bool(r.get("direction"))
         current = by_name.get(key)
@@ -271,6 +279,8 @@ def _finish_locked(session: dict) -> None:
         get_supabase().table("minigame_scores").insert(
             {
                 "game": session["game"],
+                "attempt_id": session["id"],
+                "domain": session["domain"],
                 "auth_user_id": session["auth_user_id"],
                 "email": session["email"],
                 "score": session["score"],
@@ -292,12 +302,44 @@ def _summary(session: dict) -> dict:
     }
 
 
+_DOMAIN_RE = re.compile(r"^[a-z0-9._-]{1,64}$")
+
+
+def _is_admin(email: str | None) -> bool:
+    profile = _read_user_profile(None, email) if email else None
+    return (profile or {}).get("role") == "admin"
+
+
+def _resolve_domain(email: str | None, requested: str | None) -> str:
+    """The domain this round is scored under."""
+    own = (email or "").split("@")[0].lower()
+    if not _is_admin(email):
+        return own
+    # Accept a pasted email too: "cuongdm4@vng.com.vn" -> "cuongdm4".
+    domain = (requested or "").strip().lower().split("@")[0]
+    if not _DOMAIN_RE.match(domain):
+        raise HTTPException(400, "A valid domain is required.")
+    return domain
+
+
+@router.get("/api/minigame/player")
+def player(request: Request):
+    """Who the next round is played as; admins must type a domain in instead."""
+    _, email = _request_identity(request)
+    return {
+        "isAdmin": _is_admin(email),
+        "domain": (email or "").split("@")[0].lower(),
+    }
+
+
 @router.post("/api/minigame/start")
 def start_game(request: Request, payload: StartPayload | None = None):
-    game = (payload or StartPayload()).game
+    payload = payload or StartPayload()
+    game = payload.game
     auth_user_id, email = _request_identity(request)
     if not settings.supabase_enabled:
         raise HTTPException(503, "Minigame requires Supabase configuration.")
+    domain = _resolve_domain(email, payload.domain)
     all_rooms = _load_rooms()
     rooms = _guess_setup(all_rooms) if game == "guess" else list(all_rooms)
     if not rooms:
@@ -306,6 +348,8 @@ def start_game(request: Request, payload: StartPayload | None = None):
     now = time.time()
     game_id = uuid.uuid4().hex
     session = {
+        "id": game_id,
+        "domain": domain,
         "game": game,
         "auth_user_id": auth_user_id,
         "email": (email or "").lower(),
@@ -331,6 +375,7 @@ def start_game(request: Request, payload: StartPayload | None = None):
     return {
         "gameId": game_id,
         "game": game,
+        "domain": domain,
         "durationSeconds": GAME_SECONDS,
         "totalRooms": len(rooms),
         "question": question,
@@ -396,8 +441,15 @@ def finish(payload: FinishPayload, request: Request):
 
 
 @router.get("/api/minigame/leaderboard")
-def leaderboard(request: Request, game: GameKind = Query("guess")):
-    _, email = _request_identity(request)
+def leaderboard(
+    request: Request,
+    game: GameKind = Query("guess"),
+    attempt: str | None = Query(None),
+):
+    """Top rounds for a game — every round is its own row, so one player can
+    hold several places. `attempt` (a gameId) is highlighted and ranked even
+    when it falls outside the top."""
+    _request_identity(request)
     if not settings.supabase_enabled:
         return {"entries": [], "me": None}
     from .supabase_client import get_supabase
@@ -405,31 +457,25 @@ def leaderboard(request: Request, game: GameKind = Query("guess")):
     rows = (
         get_supabase()
         .table("minigame_scores")
-        .select("email, score, correct, close, created_at")
+        .select("attempt_id, domain, email, score, correct, close, created_at")
         .eq("game", game)
         .order("score", desc=True)
         .order("created_at")
-        .limit(1000)
+        .limit(5000)
         .execute()
         .data
         or []
     )
-    # Best run per player; rows arrive best-first, so the first seen wins.
-    best: dict[str, dict] = {}
-    for r in rows:
-        key = (r.get("email") or "").lower()
-        if key and key not in best:
-            best[key] = r
     ranked = [
         {
             "rank": i,
-            "name": key.split("@")[0],
+            "name": r.get("domain") or (r.get("email") or "").split("@")[0],
             "score": r["score"],
             "correct": r.get("correct") or 0,
             "close": r.get("close") or 0,
-            "isMe": key == (email or "").lower(),
+            "isMe": bool(attempt) and r.get("attempt_id") == attempt,
         }
-        for i, (key, r) in enumerate(best.items(), 1)
+        for i, r in enumerate(rows, 1)
     ]
     me = next((e for e in ranked if e["isMe"]), None)
     return {"entries": ranked[:LEADERBOARD_SIZE], "me": me}

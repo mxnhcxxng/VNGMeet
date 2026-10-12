@@ -630,3 +630,10 @@ alter table minigame_scores add column if not exists game text not null default 
 drop index if exists idx_minigame_scores_score;
 create index if not exists idx_minigame_scores_game_score
   on minigame_scores (game, score desc, created_at);
+-- Mỗi lượt chơi là 1 dòng trên bảng vàng (1 người có thể có nhiều lượt), hiển thị
+-- theo domain. Admin có thể chơi hộ người khác (vd quầy sự kiện) nên domain không
+-- nhất thiết trùng email người đăng nhập. attempt_id = gameId để đánh dấu lượt
+-- vừa chơi trên bảng vàng.
+alter table minigame_scores add column if not exists domain text;
+update minigame_scores set domain = split_part(email, '@', 1) where domain is null;
+alter table minigame_scores add column if not exists attempt_id text;

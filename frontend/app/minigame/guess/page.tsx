@@ -4,13 +4,14 @@
 
 import {
   AnswerInput,
-  FeedbackChip,
+  FeedbackBanner,
   GAME_SECONDS,
-  GameLobby,
   GameShell,
   type GameFeedback,
+  QuestionBar,
   RoomPhoto,
-  TimerBar,
+  Stage,
+  StatBubble,
   useMinigame,
 } from "@/components/Minigame";
 import { useT } from "@/app/providers";
@@ -33,47 +34,38 @@ function feedbackLabel(t: TFunction, f: GameFeedback): string {
 export default function GuessGamePage() {
   const t = useT();
   const state = useMinigame("guess");
-  const { question, feedback } = state;
+  const { question, feedback, summary } = state;
 
   return (
     <GameShell
       title={t("game.title")}
       subtitle={t("game.subtitle", { seconds: GAME_SECONDS })}
+      rules={t("game.rules", { exact: 100, close: 50 })}
       state={state}
+      results={<p className="text-sm text-[#71717a] dark:text-[#94979c]">{t("game.stats", { ...summary })}</p>}
     >
-      {state.phase === "playing" && question ? (
-        <div className="flex flex-col gap-3">
-          <TimerBar state={state} />
-          <RoomPhoto
-            question={question}
-            overlay={
-              <p className="font-mono text-xl font-bold tracking-wider text-white sm:text-2xl">
-                {question.hint}
-              </p>
-            }
-          />
-          <AnswerInput state={state} placeholder={t("game.placeholder")} focusKey={question.index} />
-          <div className="flex min-h-7 items-center justify-between gap-3">
-            {feedback?.result ? (
-              <FeedbackChip label={feedbackLabel(t, feedback)} result={feedback.result} />
-            ) : (
-              <span />
-            )}
-            <span className="text-xs text-[#a4a7ae] dark:text-[#94979c]">{t("game.skipHint")}</span>
-          </div>
-          {state.error && <p className="text-sm text-danger">{state.error}</p>}
-        </div>
-      ) : state.phase === "idle" || state.phase === "over" ? (
-        <GameLobby
-          state={state}
-          rules={t("game.rules", { exact: 100, close: 50 })}
-          stats={t("game.stats", { ...state.summary })}
-        >
+      {question && (
+        <>
+          <QuestionBar>
+            <span className="block text-sm font-medium text-[#71717a] dark:text-[#94979c]">
+              {t("game.guess.question")}
+            </span>
+            <span className="font-mono tracking-wider">{question.hint}</span>
+          </QuestionBar>
+          <Stage
+            state={state}
+            side={<StatBubble value={summary.correct + summary.close} label={t("game.guess.right")} />}
+          >
+            <RoomPhoto question={question} />
+          </Stage>
           {feedback?.result && (
-            <FeedbackChip label={feedbackLabel(t, feedback)} result={feedback.result} />
+            <FeedbackBanner result={feedback.result} label={feedbackLabel(t, feedback)} />
           )}
-        </GameLobby>
-      ) : null}
+          <AnswerInput state={state} placeholder={t("game.placeholder")} focusKey={question.index} />
+          <p className="text-center text-xs text-[#a4a7ae] dark:text-[#94979c]">{t("game.skipHint")}</p>
+          {state.error && <p className="text-sm text-danger">{state.error}</p>}
+        </>
+      )}
     </GameShell>
   );
 }

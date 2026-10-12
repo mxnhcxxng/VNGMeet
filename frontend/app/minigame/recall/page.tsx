@@ -3,20 +3,22 @@
 // Minigame 2: type every meeting room name you can remember in 60 seconds.
 
 import { useEffect, useState } from "react";
-import { Chip } from "@heroui/react";
 import {
   AnswerInput,
-  FeedbackChip,
+  FeedbackBanner,
   GAME_SECONDS,
-  GameLobby,
   GameShell,
   type GameFeedback,
-  TimerBar,
+  QuestionBar,
+  Stage,
+  StatBubble,
   useMinigame,
 } from "@/components/Minigame";
 import { useT } from "@/app/providers";
 import { roomFlag } from "@/lib/roomFlags";
 import type { TFunction } from "@/lib/i18n";
+
+const TAG_TONES = ["tile-accent", "tile-blue", "tile-warning", "tile-success"];
 
 function feedbackLabel(t: TFunction, f: GameFeedback): string {
   const vars = { name: f.roomName ?? "", points: f.points ?? 0 };
@@ -32,106 +34,96 @@ function feedbackLabel(t: TFunction, f: GameFeedback): string {
   }
 }
 
-function RoomTag({ name, tone }: { name: string; tone: "found" | "missed" }) {
+function RoomTag({ name, index, muted }: { name: string; index: number; muted?: boolean }) {
   const flag = roomFlag(name);
   return (
-    <Chip size="sm" variant="soft" color={tone === "found" ? "success" : "default"}>
-      {flag && <span className="mr-1">{flag}</span>}
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-medium text-[#181d27] dark:text-[#f7f7f7] ${
+        muted ? "bg-default" : `game-tile ${TAG_TONES[index % TAG_TONES.length]}`
+      }`}
+    >
+      {flag && <span>{flag}</span>}
       {name}
-    </Chip>
+    </span>
   );
 }
 
 export default function RecallGamePage() {
   const t = useT();
   const state = useMinigame("recall");
-  const { feedback, finalResult } = state;
+  const { feedback, finalResult, totalRooms, phase } = state;
   // Rooms named this round, newest first.
   const [found, setFound] = useState<string[]>([]);
-  const [total, setTotal] = useState(0);
 
   useEffect(() => {
-    if (state.phase === "playing" && state.summary.attempted === 0) {
-      setFound([]);
-      setTotal(0);
-    }
-  }, [state.phase, state.summary.attempted]);
+    if (phase === "lobby") setFound([]);
+  }, [phase]);
 
   useEffect(() => {
-    if (!feedback) return;
-    if (feedback.totalRooms) setTotal(feedback.totalRooms);
-    const name = feedback.roomName;
-    if ((feedback.result === "correct" || feedback.result === "close") && name) {
+    const name = feedback?.roomName;
+    if ((feedback?.result === "correct" || feedback?.result === "close") && name) {
       setFound((prev) => (prev.includes(name) ? prev : [name, ...prev]));
     }
   }, [feedback]);
 
-  const counter = total ? t("game.recall.found", { found: found.length, total }) : null;
+  const counter = `${found.length}/${totalRooms}`;
 
   return (
     <GameShell
       title={t("game.recall.title")}
       subtitle={t("game.recall.subtitle", { seconds: GAME_SECONDS })}
+      rules={t("game.recall.rules", { exact: 100, close: 50 })}
       state={state}
-    >
-      {state.phase === "playing" ? (
-        <div className="flex flex-col gap-3">
-          <TimerBar
-            state={state}
-            extra={
-              counter && (
-                <span className="font-normal text-[#71717a] dark:text-[#94979c]">{counter}</span>
-              )
-            }
-          />
-          <AnswerInput state={state} placeholder={t("game.recall.placeholder")} />
-          <div className="flex min-h-7 items-center">
-            {feedback?.result && feedback.result !== "skipped" && (
-              <FeedbackChip label={feedbackLabel(t, feedback)} result={feedback.result} />
-            )}
-          </div>
-          <div className="flex min-h-[240px] flex-wrap content-start gap-1.5 rounded-2xl bg-[#fafafa] p-3 dark:bg-[#13161b]">
-            {found.map((name) => (
-              <RoomTag key={name} name={name} tone="found" />
-            ))}
-          </div>
-          {state.error && <p className="text-sm text-danger">{state.error}</p>}
-        </div>
-      ) : state.phase === "idle" || state.phase === "over" ? (
-        <GameLobby
-          state={state}
-          rules={t("game.recall.rules", { exact: 100, close: 50 })}
-          stats={t("game.recall.stats", {
-            found: found.length,
-            total: total || found.length + (finalResult?.missed?.length ?? 0),
-          })}
-        >
+      results={
+        <div className="flex w-full flex-col gap-4 text-left">
+          <p className="text-center text-sm text-[#71717a] dark:text-[#94979c]">
+            {t("game.recall.stats", { found: found.length, total: totalRooms })}
+          </p>
           {found.length > 0 && (
-            <div className="flex w-full max-w-[560px] flex-col gap-2 text-left">
+            <div className="flex flex-col gap-2">
               <p className="text-sm font-medium text-[#181d27] dark:text-[#f7f7f7]">
                 {t("game.recall.foundList")}
               </p>
               <div className="flex flex-wrap gap-1.5">
-                {found.map((name) => (
-                  <RoomTag key={name} name={name} tone="found" />
+                {found.map((name, i) => (
+                  <RoomTag key={name} name={name} index={i} />
                 ))}
               </div>
             </div>
           )}
           {finalResult?.missed && finalResult.missed.length > 0 && (
-            <div className="flex w-full max-w-[560px] flex-col gap-2 text-left">
+            <div className="flex flex-col gap-2">
               <p className="text-sm font-medium text-[#181d27] dark:text-[#f7f7f7]">
                 {t("game.recall.missed", { count: finalResult.missed.length })}
               </p>
               <div className="flex max-h-[200px] flex-wrap gap-1.5 overflow-y-auto">
-                {finalResult.missed.map((name) => (
-                  <RoomTag key={name} name={name} tone="missed" />
+                {finalResult.missed.map((name, i) => (
+                  <RoomTag key={name} name={name} index={i} muted />
                 ))}
               </div>
             </div>
           )}
-        </GameLobby>
-      ) : null}
+        </div>
+      }
+    >
+      <QuestionBar>{t("game.recall.question")}</QuestionBar>
+      <Stage state={state} side={<StatBubble value={counter} label={t("game.recall.rooms")} />}>
+        <div className="flex min-h-[240px] flex-col gap-3 rounded-2xl bg-white p-4 pt-16 shadow-sm dark:bg-[#0c0e12] sm:min-h-[300px] sm:pt-4">
+          <span className="text-sm font-medium text-[#71717a] dark:text-[#94979c] sm:hidden">
+            {t("game.recall.found", { found: found.length, total: totalRooms })}
+          </span>
+          <div className="flex flex-wrap content-start gap-1.5">
+            {found.map((name, i) => (
+              <RoomTag key={name} name={name} index={found.length - 1 - i} />
+            ))}
+          </div>
+        </div>
+      </Stage>
+      {feedback?.result && feedback.result !== "skipped" && (
+        <FeedbackBanner result={feedback.result} label={feedbackLabel(t, feedback)} />
+      )}
+      <AnswerInput state={state} placeholder={t("game.recall.placeholder")} />
+      {state.error && <p className="text-sm text-danger">{state.error}</p>}
     </GameShell>
   );
 }

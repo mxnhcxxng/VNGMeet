@@ -270,9 +270,17 @@ export interface MinigameSummary {
   attempted: number;
 }
 
+export interface MinigamePlayer {
+  // Admins type in the player's domain before each round; everyone else plays
+  // as `domain` (their own email username).
+  isAdmin: boolean;
+  domain: string;
+}
+
 export interface MinigameStart {
   gameId: string;
   game: MinigameKind;
+  domain: string;
   durationSeconds: number;
   totalRooms: number;
   question: MinigameQuestion | null;
@@ -366,11 +374,12 @@ export const api = {
   touchUserActivity: () =>
     req<{ ok: boolean }>("/api/users/me/activity", { method: "POST" }),
   rooms: () => req<Room[]>("/api/rooms"),
-  minigameStart: (game: MinigameKind) =>
+  minigamePlayer: () => req<MinigamePlayer>("/api/minigame/player"),
+  minigameStart: (game: MinigameKind, domain?: string) =>
     req<MinigameStart>("/api/minigame/start", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ game }),
+      body: JSON.stringify({ game, domain }),
     }),
   minigameAnswer: (gameId: string, answer: string) =>
     req<MinigameAnswerResult>("/api/minigame/answer", {
@@ -384,8 +393,10 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ gameId }),
     }),
-  minigameLeaderboard: (game: MinigameKind) =>
-    req<MinigameLeaderboard>(`/api/minigame/leaderboard?game=${game}`),
+  minigameLeaderboard: (game: MinigameKind, attempt?: string | null) =>
+    req<MinigameLeaderboard>(
+      `/api/minigame/leaderboard?game=${game}${attempt ? `&attempt=${attempt}` : ""}`,
+    ),
   // Cached availability served from Supabase. The backend refreshes it on demand
   // with the current user's delegated Graph token when rows are older than 5 min.
   // Same shape as schedule() — preferred for the browse grid.
