@@ -246,6 +246,66 @@ export interface ChatBookingActionPayload {
   book_without_confirmation?: boolean;
 }
 
+export type MinigameKind = "guess" | "recall" | "quiz";
+
+export interface MinigameQuestion {
+  index: number;
+  // guess: masked name. quiz: what's asked, the room, and the 4 options.
+  hint?: string;
+  kind?: "floor" | "building" | "direction";
+  roomName?: string;
+  options?: string[];
+  image?: string | null;
+  office?: string | null;
+  building?: string | null;
+  floor?: string | null;
+  zone?: string | null;
+  capacity?: number | null;
+}
+
+export interface MinigameSummary {
+  score: number;
+  correct: number;
+  close: number;
+  attempted: number;
+}
+
+export interface MinigameStart {
+  gameId: string;
+  game: MinigameKind;
+  durationSeconds: number;
+  totalRooms: number;
+  question: MinigameQuestion | null;
+}
+
+export interface MinigameAnswerResult extends MinigameSummary {
+  result?: "correct" | "close" | "wrong" | "skipped" | "duplicate";
+  points?: number;
+  roomName?: string;
+  correctIndex?: number;
+  found?: number;
+  totalRooms?: number;
+  // recall: rooms the player never named, revealed at the end.
+  missed?: string[];
+  finished: boolean;
+  timeUp?: boolean;
+  question?: MinigameQuestion | null;
+}
+
+export interface MinigameLeaderboardEntry {
+  rank: number;
+  name: string;
+  score: number;
+  correct: number;
+  close: number;
+  isMe: boolean;
+}
+
+export interface MinigameLeaderboard {
+  entries: MinigameLeaderboardEntry[];
+  me: MinigameLeaderboardEntry | null;
+}
+
 // Profile options (offices/floors/buildings/rooms) are effectively static for a
 // session, so cache the in-flight/resolved promise and reuse it across Settings
 // remounts and the page-level prefetch instead of re-hitting the endpoint.
@@ -306,6 +366,26 @@ export const api = {
   touchUserActivity: () =>
     req<{ ok: boolean }>("/api/users/me/activity", { method: "POST" }),
   rooms: () => req<Room[]>("/api/rooms"),
+  minigameStart: (game: MinigameKind) =>
+    req<MinigameStart>("/api/minigame/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ game }),
+    }),
+  minigameAnswer: (gameId: string, answer: string) =>
+    req<MinigameAnswerResult>("/api/minigame/answer", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ gameId, answer }),
+    }),
+  minigameFinish: (gameId: string) =>
+    req<MinigameAnswerResult>("/api/minigame/finish", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ gameId }),
+    }),
+  minigameLeaderboard: (game: MinigameKind) =>
+    req<MinigameLeaderboard>(`/api/minigame/leaderboard?game=${game}`),
   // Cached availability served from Supabase. The backend refreshes it on demand
   // with the current user's delegated Graph token when rows are older than 5 min.
   // Same shape as schedule() — preferred for the browse grid.

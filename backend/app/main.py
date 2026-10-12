@@ -21,6 +21,7 @@ from .bookings import (
 )
 from .bot import router as bot_router
 from .chat import router as chat_router
+from .minigame import router as minigame_router
 from .profiles import router as profiles_router
 from .room_resources import router as room_resources_router
 from .room_scouts import process_room_scouts, router as room_scouts_router
@@ -281,6 +282,7 @@ app.include_router(profiles_router)
 app.include_router(room_resources_router)
 app.include_router(room_scouts_router)
 app.include_router(chat_router)
+app.include_router(minigame_router)
 app.include_router(bookings_router)
 app.include_router(bot_router)
 app.include_router(zalo_webhook_router)
