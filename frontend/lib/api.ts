@@ -248,6 +248,96 @@ export interface ChatBookingActionPayload {
 
 export type MinigameKind = "guess" | "recall" | "quiz";
 
+// --- Admin dashboard (backend/app/admin.py) --------------------------------
+export type AdminLevel = "ok" | "warn" | "down";
+export type AdminRoomSize = "small" | "medium" | "large";
+export type AdminBookingType = "instant" | "scheduled" | "scout";
+
+export interface AdminKpi {
+  value: number | null;
+  prev: number | null;
+  /** One value per week in `AdminOverview.weeks`; the last week is partial. */
+  series: (number | null)[];
+}
+
+export interface AdminActivityRow {
+  id: string;
+  createdAt: string | null;
+  email: string | null;
+  room: string | null;
+  date: string | null;
+  startTime: string | null;
+  bookingType: AdminBookingType | null;
+  method: "manual" | "chatbot" | null;
+  status: string | null;
+  error: string | null;
+}
+
+export interface AdminHealth {
+  availability: { updatedAt: string | null; ageMinutes: number | null; level: AdminLevel };
+  tokenPool: {
+    active: number;
+    expired: number;
+    invalid: number;
+    lastError: { error: string; at: string | null } | null;
+    level: AdminLevel;
+  };
+  failures24h: { failed: number; total: number; rate: number | null; level: AdminLevel };
+  stuckPending: { count: number; rows: AdminActivityRow[]; level: AdminLevel };
+}
+
+export interface AdminRoomCount {
+  name: string | null;
+  office: string | null;
+  count: number;
+}
+
+export interface AdminOverview {
+  generatedAt: string;
+  range: { days: number; start: string; end: string };
+  health: AdminHealth;
+  kpis: Record<"activeUsers" | "bookings" | "successRate" | "chatToBooking", AdminKpi>;
+  weeks: string[];
+  bookingsByDay: ({ date: string } & Record<AdminBookingType, number>)[];
+  statusCounts: Record<"success" | "failed" | "canceled" | "pending", number>;
+  methods: Record<"manual" | "chatbot", number>;
+  topRooms: AdminRoomCount[];
+  leastRooms: AdminRoomCount[];
+  users: {
+    total: number;
+    newByWeek: number[];
+    retention: { week: string; cohort: number; returned: number; partial: boolean }[];
+    byOffice: { office: string | null; count: number }[];
+    zaloLinked: number;
+    botLinks: number;
+    revocations: number;
+  };
+  chatbot: {
+    conversations: number;
+    chatbotBookings: number;
+    rate: number | null;
+    feedback: { positive: number; negative: number };
+    recentNegative: { at: string | null; email: string | null; content: string }[];
+  };
+  scouts: {
+    total: number;
+    byStatus: Record<string, number>;
+    successRate: number | null;
+    demandBySize: { size: string; count: number; unmet: number }[];
+    demandByHour: { hour: number; count: number }[];
+  };
+  recentFailures: AdminActivityRow[];
+  offices: string[];
+}
+
+export interface AdminHeatmap {
+  hours: number[];
+  /** Weekdays only, from today to the end of the cached window. */
+  days: { date: string; weekday: number; cells: (number | null)[] }[];
+  rooms: { name: string | null; office: string | null; size: AdminRoomSize | null; busy: number | null }[];
+  roomCount: number;
+}
+
 export interface MinigameQuestion {
   index: number;
   // guess: masked name. quiz: what's asked, the room, and the 4 options.
@@ -400,6 +490,16 @@ export const api = {
   minigameLeaderboard: (game: MinigameKind, attempt?: string | null) =>
     req<MinigameLeaderboard>(
       `/api/minigame/leaderboard?game=${game}${attempt ? `&attempt=${attempt}` : ""}`,
+    ),
+  // Admin dashboard (/admin). 403 for anyone whose profile role isn't "admin".
+  adminMe: () => req<{ isAdmin: boolean }>("/api/admin/me"),
+  adminOverview: (days: number, office?: string | null) =>
+    req<AdminOverview>(
+      `/api/admin/overview?days=${days}${office ? `&office=${encodeURIComponent(office)}` : ""}`,
+    ),
+  adminHeatmap: (office?: string | null, size?: AdminRoomSize | null) =>
+    req<AdminHeatmap>(
+      `/api/admin/heatmap?${new URLSearchParams({ ...(office ? { office } : {}), ...(size ? { size } : {}) })}`,
     ),
   // Cached availability served from Supabase. The backend refreshes it on demand
   // with the current user's delegated Graph token when rows are older than 5 min.

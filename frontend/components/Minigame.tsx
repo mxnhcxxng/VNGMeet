@@ -631,11 +631,15 @@ export function Stage({
       <div className="hidden sm:block">
         <TimerCircle state={state} />
       </div>
-      <div className="relative h-full min-w-0 flex-1">
-        <div className="absolute left-2 top-2 z-10 sm:hidden">
-          <TimerCircle state={state} size={52} />
+      <div className="flex h-full min-w-0 flex-1 justify-center">
+        {/* Capped so a wide screen doesn't stretch the photo into a thin strip;
+            the timer and counter stay pinned to the screen edges. */}
+        <div className="relative h-full w-full max-w-[960px]">
+          <div className="absolute left-2 top-2 z-10 sm:hidden">
+            <TimerCircle state={state} size={52} />
+          </div>
+          {children}
         </div>
-        {children}
       </div>
       {side && <div className="hidden sm:block">{side}</div>}
     </div>

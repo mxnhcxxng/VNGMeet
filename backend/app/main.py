@@ -19,6 +19,7 @@ from .bookings import (
     process_scheduled_bookings,
     router as bookings_router,
 )
+from .admin import router as admin_router
 from .bot import router as bot_router
 from .chat import router as chat_router
 from .minigame import router as minigame_router
@@ -286,6 +287,7 @@ app.include_router(minigame_router)
 app.include_router(bookings_router)
 app.include_router(bot_router)
 app.include_router(zalo_webhook_router)
+app.include_router(admin_router)
 
 
 @app.get("/api/health")
