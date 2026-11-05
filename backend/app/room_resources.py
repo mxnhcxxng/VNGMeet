@@ -941,16 +941,16 @@ async def rooms_directory(request: Request):
     from .supabase_client import get_supabase
 
     sb = get_supabase()
-    rows = (
-        sb.table("meeting_room_metadata")
-        .select(
-            "name, email, building, floor, zone, capacity, capacity_size, "
-            "office, thumbnail_link, direction, map_link"
-        )
-        .execute()
-        .data
-        or []
+    columns = (
+        "name, email, building, floor, zone, capacity, capacity_size, "
+        "office, thumbnail_link, direction, map_link"
     )
+    table = sb.table("meeting_room_metadata")
+    try:
+        # direction_vi = Vietnamese directions (supabase/migrate_room_direction_vi.sql).
+        rows = table.select(columns + ", direction_vi").execute().data or []
+    except Exception:  # noqa: BLE001 - before that migration runs
+        rows = table.select(columns).execute().data or []
     rooms = [
         {
             "name": r.get("name"),
@@ -962,6 +962,7 @@ async def rooms_directory(request: Request):
             "office": r.get("office"),
             "image": r.get("thumbnail_link"),
             "direction": r.get("direction"),
+            "direction_vi": r.get("direction_vi"),
             "map": r.get("map_link"),
         }
         for r in rows

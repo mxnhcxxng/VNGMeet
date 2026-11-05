@@ -39,7 +39,7 @@ export interface BookingSlot {
 
 // Capacity chip shows a headcount range next to a people icon (e.g. "5-8"),
 // mapped from the room's capacity_size band.
-const CAPACITY_RANGE: Record<CapacitySize, string> = {
+export const CAPACITY_RANGE: Record<CapacitySize, string> = {
   small: "≤4",
   medium: "5-8",
   large: "9+",

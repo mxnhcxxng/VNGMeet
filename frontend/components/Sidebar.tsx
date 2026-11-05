@@ -10,6 +10,7 @@ import {
   ArrowRightFromSquare,
   ClockArrowRotateLeft,
   Binoculars,
+  Compass,
   TrashBin,
   Xmark,
 } from "@gravity-ui/icons";
@@ -19,7 +20,13 @@ import { useT } from "@/app/providers";
 import { useTokenExpiry } from "./TokenExpiryProvider";
 import { BrandIcon } from "./BrandIcon";
 
-export type View = "browse" | "chat" | "settings" | "bookingHistory" | "roomScout";
+export type View =
+  | "browse"
+  | "chat"
+  | "settings"
+  | "bookingHistory"
+  | "roomScout"
+  | "roomWiki";
 
 // Shared pill-button layout for the nav / setting rows (matches the design).
 const ROW =
@@ -311,6 +318,7 @@ export function Sidebar({
   onDeleteThread,
   open = false,
   onClose,
+  showRoomWiki = false,
 }: {
   view: View;
   onChange: (v: View) => void;
@@ -330,6 +338,8 @@ export function Sidebar({
   // navigation row (picking a destination should reveal it, not hide it).
   open?: boolean;
   onClose?: () => void;
+  // Room Wiki: Campus rooms only, admin-only for now (decided by the page).
+  showRoomWiki?: boolean;
 }) {
   const t = useT();
   const display = username || t("common.user");
@@ -425,6 +435,16 @@ export function Sidebar({
           <ClockArrowRotateLeft width={16} height={16} />
           {t("sidebar.bookingHistory")}
         </button>
+        {showRoomWiki && (
+          <button
+            type="button"
+            onClick={navigate(() => onChange("roomWiki"))}
+            className={`${ROW} ${view === "roomWiki" ? "bg-[var(--default)]" : "hover:bg-[#f5f5f5] dark:hover:bg-[#22262f]"}`}
+          >
+            <Compass width={16} height={16} />
+            {t("sidebar.roomWiki")}
+          </button>
+        )}
       </div>
 
       {/* Recents (chat threads) */}

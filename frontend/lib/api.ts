@@ -179,6 +179,22 @@ export interface Booking {
 
 export type CapacitySize = "small" | "medium" | "large";
 
+// One row of /api/rooms/directory (meeting_room_metadata, no in_use filter) —
+// the Room Wiki's source: thumbnail, location, directions text and map image.
+export interface DirectoryRoom {
+  name: string;
+  email?: string | null;
+  building?: string | null;
+  floor?: string | null;
+  capacity?: number | null;
+  capacity_size?: CapacitySize | null;
+  office?: string | null;
+  image?: string | null; // thumbnail_link
+  direction?: string | null; // English directions, one paragraph per line
+  direction_vi?: string | null; // Vietnamese directions (may be missing)
+  map?: string | null; // map_link — route map image
+}
+
 export interface RoomScout {
   id: string;
   email: string;
@@ -540,6 +556,7 @@ export const api = {
   // history row is kept with its status flipped to "canceled".
   cancelBooking: (id: string) =>
     req<{ ok: boolean }>(`/api/bookings/${id}`, { method: "DELETE" }),
+  roomsDirectory: () => req<{ rooms: DirectoryRoom[] }>("/api/rooms/directory"),
   roomScouts: () =>
     req<{ scouts: RoomScout[]; can_send_mail: boolean }>("/api/room-scouts"),
   createRoomScout: (payload: RoomScoutPayload) =>

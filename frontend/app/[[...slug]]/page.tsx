@@ -57,6 +57,7 @@ import {
   clearBookingHistoryCache,
 } from "@/components/BookingHistory";
 import { RoomScout, clearRoomScoutCache } from "@/components/RoomScout";
+import { RoomWiki } from "@/components/RoomWiki";
 import { usePathname } from "next/navigation";
 
 // Keep the browse range aligned with backend availability_days.
@@ -115,12 +116,14 @@ const VIEW_TO_PATH: Record<Exclude<View, "chat">, string> = {
   settings: "/settings",
   bookingHistory: "/booking-history",
   roomScout: "/room-scout",
+  roomWiki: "/room-wiki",
 };
 const SEGMENT_TO_VIEW: Record<string, View> = {
   browse: "browse",
   settings: "settings",
   "booking-history": "bookingHistory",
   "room-scout": "roomScout",
+  "room-wiki": "roomWiki",
   chat: "chat",
 };
 
@@ -868,6 +871,7 @@ const MOBILE_TITLE_KEY: Record<View, TranslationKey> = {
   browse: "sidebar.browseRooms",
   chat: "sidebar.chat",
   roomScout: "sidebar.roomScout",
+  roomWiki: "sidebar.roomWiki",
   bookingHistory: "sidebar.bookingHistory",
   settings: "sidebar.settings",
 };
@@ -967,6 +971,17 @@ export default function Home() {
   const canEnterBooking = Boolean(
     me?.authenticated && me.profileComplete !== false,
   );
+  // Room Wiki only documents Campus rooms, and for now is admin-only: shown to
+  // Campus users whose profile role is admin.
+  const canSeeRoomWiki =
+    (me?.profile?.office ?? "").trim().toLowerCase() === "campus" &&
+    me?.profile?.role === "admin";
+
+  // Anyone else landing on /room-wiki (shared link, office/role changed) falls
+  // back to the default view instead of a blank screen.
+  useEffect(() => {
+    if (canEnterBooking && view === "roomWiki" && !canSeeRoomWiki) setView("chat");
+  }, [canEnterBooking, view, canSeeRoomWiki]);
 
   // Mirror the active view/thread into the URL. We only sync once the user is
   // past auth/profile gating (those screens own the URL otherwise). The first
@@ -1489,6 +1504,7 @@ export default function Home() {
         username={me.username}
         onLogout={handleLogout}
         scoutingActive={scoutingActive}
+        showRoomWiki={canSeeRoomWiki}
         chatThreads={chatThreads}
         chatThreadsLoading={chatThreadsLoading}
         activeThreadId={activeThreadId}
@@ -1550,6 +1566,8 @@ export default function Home() {
         <div className="min-h-0 flex-1">
           {view === "bookingHistory" ? (
             <BookingHistory />
+          ) : view === "roomWiki" && canSeeRoomWiki ? (
+            <RoomWiki buildingOptions={profileOptions?.building ?? []} />
           ) : view === "roomScout" ? (
             <RoomScout
               userName={
