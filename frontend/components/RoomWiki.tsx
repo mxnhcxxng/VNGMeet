@@ -2,14 +2,19 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Button, Chip, Spinner } from "@heroui/react";
-import { ChevronLeft, Persons } from "@gravity-ui/icons";
+import { ChevronLeft, MapPin, Persons } from "@gravity-ui/icons";
 import { api, type DirectoryRoom, type UserProfileOption } from "@/lib/api";
 import { roomFlag } from "@/lib/roomFlags";
 import { useLanguage, useT } from "@/app/providers";
 import { CAPACITY_RANGE } from "./BookingModal";
+import { CampusMap } from "./CampusMap";
+import { Lightbox } from "./Lightbox";
 
 // Room Wiki only documents Campus rooms (the menu entry is gated to Campus users).
 const WIKI_OFFICE = "campus";
+
+// Pseudo selection key for the "Campus map" row at the top of the list.
+const MAP_KEY = "__campus_map__";
 
 // Directory is effectively static for a session: keep it module-level so going
 // back to the tab renders instantly, then revalidate in the background.
@@ -56,14 +61,13 @@ export function RoomWiki({
   };
   useEffect(load, []);
 
-  const campusRooms = useMemo(() => {
+  // Every Campus room (the map shows sizes even for rooms without directions).
+  const allCampusRooms = useMemo(() => {
     // meeting_room_metadata has some duplicated wiki-only rows (same name, no
     // email) — keep one per name/email so the list doesn't repeat.
     const seen = new Set<string>();
     return (rooms ?? [])
       .filter((r) => (r.office ?? "").trim().toLowerCase() === WIKI_OFFICE)
-      // Only rooms that actually have directions (text in either language).
-      .filter((r) => Boolean((r.direction || r.direction_vi || "").trim()))
       .filter((r) => {
         const k = (r.email || r.name).trim().toLowerCase();
         if (seen.has(k)) return false;
@@ -72,6 +76,12 @@ export function RoomWiki({
       })
       .sort((a, b) => a.name.localeCompare(b.name, "vi"));
   }, [rooms]);
+
+  // The list only has rooms that actually have directions (either language).
+  const campusRooms = useMemo(
+    () => allCampusRooms.filter((r) => Boolean((r.direction || r.direction_vi || "").trim())),
+    [allCampusRooms],
+  );
 
   const groups = useMemo(() => {
     const byLetter = new Map<string, DirectoryRoom[]>();
@@ -83,8 +93,12 @@ export function RoomWiki({
   }, [campusRooms]);
 
   const keyOf = (r: DirectoryRoom) => r.email || r.name;
+  // The campus map (top row) is the default view.
   const selected =
-    campusRooms.find((r) => keyOf(r) === selectedKey) ?? campusRooms[0] ?? null;
+    selectedKey && selectedKey !== MAP_KEY
+      ? campusRooms.find((r) => keyOf(r) === selectedKey) ?? null
+      : null;
+  const showMap = !selected;
 
   const buildingLabel = (building?: string | null) => {
     const value = (building ?? "").trim();
@@ -116,14 +130,6 @@ export function RoomWiki({
     );
   }
 
-  if (!campusRooms.length) {
-    return (
-      <div className="flex h-full items-center justify-center text-sm text-[#71717a]">
-        {t("roomWiki.empty")}
-      </div>
-    );
-  }
-
   return (
     <div className="flex h-full min-h-0 p-1">
       {/* Room list, grouped by first letter */}
@@ -135,6 +141,27 @@ export function RoomWiki({
         {/* Per Figma: each group = letter row (16px semibold, muted) + divider
             + pill buttons (h-10, gap 4px); group internals spaced 8px apart. */}
         <div className="flex flex-col gap-6">
+          {/* Campus map row stays pinned at the top while the list scrolls; it
+              covers the list's top padding so rooms don't show above it. */}
+          <div className="sticky -top-5 z-10 -mx-1 -mt-5 -mb-4 bg-white px-1 pb-4 pt-5 dark:bg-[#0c0e12]">
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedKey(MAP_KEY);
+              setMobileDetail(true);
+            }}
+            aria-current={showMap ? "true" : undefined}
+            className={`flex h-10 w-full shrink-0 items-center gap-2 rounded-full px-4 text-left text-base font-medium leading-6 text-[#18181b] transition-colors dark:text-[#f7f7f7] ${
+              showMap ? "bg-[var(--default)]" : "hover:bg-[#f5f5f5] dark:hover:bg-[#22262f]"
+            }`}
+          >
+            <MapPin width={16} height={16} className="shrink-0" />
+            <span className="truncate">{t("roomWiki.campusMap")}</span>
+          </button>
+          </div>
+          {!campusRooms.length && (
+            <p className="px-4 text-sm text-[#71717a]">{t("roomWiki.empty")}</p>
+          )}
           {groups.map(([letter, items]) => (
             <section key={letter} className="flex flex-col gap-2">
               <div className="flex h-6 items-center px-4 text-base font-semibold leading-6 text-[#717680] dark:text-[#94979c]">
@@ -148,6 +175,7 @@ export function RoomWiki({
                   return (
                     <button
                       key={keyOf(room)}
+                      data-room-key={keyOf(room)}
                       type="button"
                       onClick={() => {
                         setSelectedKey(keyOf(room));
@@ -190,12 +218,42 @@ export function RoomWiki({
             onBack={() => setMobileDetail(false)}
           />
         ) : (
-          <div className="flex h-full items-center justify-center text-sm text-[#71717a]">
-            {t("roomWiki.selectRoom")}
+          <div className="flex flex-col gap-6 sm:gap-10">
+            <BackButton onBack={() => setMobileDetail(false)} />
+            <CampusMap
+              rooms={allCampusRooms}
+              onSelectRoom={(room) => {
+                // Only rooms in the list (i.e. with directions) have a page.
+                if (campusRooms.some((r) => keyOf(r) === keyOf(room))) {
+                  setSelectedKey(keyOf(room));
+                  setMobileDetail(true);
+                  // Bring the picked room into view in the list (desktop).
+                  requestAnimationFrame(() =>
+                    document
+                      .querySelector(`[data-room-key="${CSS.escape(keyOf(room))}"]`)
+                      ?.scrollIntoView({ block: "nearest" }),
+                  );
+                }
+              }}
+            />
           </div>
         )}
       </div>
     </div>
+  );
+}
+
+function BackButton({ onBack }: { onBack: () => void }) {
+  const t = useT();
+  return (
+    <button
+      type="button"
+      onClick={onBack}
+      className="-mb-2 flex items-center gap-1 self-start text-sm font-medium text-[#71717a] hover:text-[#18181b] dark:hover:text-[#f7f7f7] lg:hidden"
+    >
+      <ChevronLeft width={16} height={16} />
+      {t("roomWiki.back")}
+    </button>
   );
 }
 
@@ -220,77 +278,63 @@ function RoomDetail({
       : room.direction || room.direction_vi,
   );
 
-  return (
-    <div className="flex flex-col gap-6 sm:gap-10">
-      <button
-        type="button"
-        onClick={onBack}
-        className="-mb-2 flex items-center gap-1 self-start text-sm font-medium text-[#71717a] hover:text-[#18181b] dark:hover:text-[#f7f7f7] lg:hidden"
-      >
-        <ChevronLeft width={16} height={16} />
-        {t("roomWiki.back")}
-      </button>
+  const [mapOpen, setMapOpen] = useState(false);
 
-      {/* Cover: thumbnail + gradient + name, email and metadata chips */}
-      <div className="relative h-[200px] w-full shrink-0 overflow-hidden rounded-lg bg-default-100">
+  // Layout per Figma (VNG Meet 75:8526): 100px cover with name + email, then
+  // "Room info" chips, directions text and the route map — 24px apart.
+  return (
+    <div className="flex flex-col gap-6">
+      <BackButton onBack={onBack} />
+
+      <div className="relative h-[100px] w-full shrink-0 overflow-hidden rounded-lg bg-default-100">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={room.image || "/default-room-thumbnail.png"}
           alt={room.name}
           className="absolute inset-0 h-full w-full object-cover"
         />
-        <div className="absolute inset-0 bg-gradient-to-b from-transparent via-black/60 via-45% to-black/90" />
-        <div className="absolute inset-x-0 bottom-0 flex flex-col gap-2 p-6 text-white">
-          <div>
-            <p className="text-2xl font-bold leading-8">
-              {flag && <span className="mr-2">{flag}</span>}
-              {room.name}
-            </p>
-            {room.email && (
-              <p className="truncate text-sm font-medium leading-5">{room.email}</p>
-            )}
-          </div>
-          <div className="flex flex-wrap gap-1">
+        <div className="absolute inset-0 bg-gradient-to-b from-transparent from-25% to-black" />
+        <div className="absolute inset-x-0 bottom-0 flex flex-col justify-center p-6 text-white">
+          <p className="truncate text-2xl font-bold leading-8">
+            {flag && <span className="mr-2">{flag}</span>}
+            {room.name}
+          </p>
+          {room.email && <p className="truncate text-sm font-medium leading-5">{room.email}</p>}
+        </div>
+      </div>
+
+      {(room.capacity_size || floor || building) && (
+        <section className="flex flex-col gap-2">
+          <h2 className="text-xl font-semibold leading-[30px] text-[#18181b] dark:text-[#f7f7f7]">
+            {t("roomWiki.infoTitle")}
+          </h2>
+          <div className="flex flex-wrap gap-2">
             {room.capacity_size && (
-              <Chip size="md" color="accent" variant="primary" className="backdrop-blur-sm">
-                <span className="inline-flex items-center gap-1">
+              <Chip size="md" color="accent" variant="primary">
+                <span className="inline-flex items-center gap-0.5">
                   <Persons width={14} height={14} />
                   {CAPACITY_RANGE[room.capacity_size]}
                 </span>
               </Chip>
             )}
             {floor && (
-              <Chip size="md" color="accent" variant="secondary" className="backdrop-blur-sm">
+              <Chip size="md" color="accent" variant="secondary">
                 {t("booking.floor", { floor })}
               </Chip>
             )}
             {building && (
-              <Chip size="md" color="accent" variant="secondary" className="backdrop-blur-sm">
+              <Chip size="md" color="accent" variant="secondary">
                 {building}
               </Chip>
             )}
           </div>
-        </div>
-      </div>
+        </section>
+      )}
 
-      {/* Directions: map image + text */}
-      <div className="flex flex-col gap-6">
-        <h2 className="text-xl font-semibold leading-7 text-[#18181b] dark:text-[#f7f7f7]">
+      <section className="flex flex-col gap-2">
+        <h2 className="text-xl font-semibold leading-[30px] text-[#18181b] dark:text-[#f7f7f7]">
           {t("roomWiki.directionsTitle")}
         </h2>
-        {room.map && (
-          <a
-            href={room.map}
-            target="_blank"
-            rel="noreferrer"
-            aria-label={t("roomWiki.openMap")}
-            title={t("roomWiki.openMap")}
-            className="block overflow-hidden rounded-xl"
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={room.map} alt={room.name} className="w-full object-cover" />
-          </a>
-        )}
         {steps.length ? (
           <div className="flex flex-col gap-4 text-base font-normal leading-6 text-[#414651] dark:text-[#cecfd2]">
             {steps.map((step, i) => (
@@ -302,7 +346,26 @@ function RoomDetail({
         ) : (
           <p className="text-base leading-6 text-[#71717a]">{t("roomWiki.noDirections")}</p>
         )}
-      </div>
+      </section>
+
+      {room.map && (
+        <>
+          <button
+            type="button"
+            onClick={() => setMapOpen(true)}
+            aria-label={t("roomWiki.openMap")}
+            title={t("roomWiki.openMap")}
+            className="block cursor-zoom-in overflow-hidden rounded-lg"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={room.map} alt={room.name} className="w-full object-cover" />
+          </button>
+          <Lightbox isOpen={mapOpen} onOpenChange={setMapOpen} title={room.name}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={room.map} alt={room.name} className="absolute inset-0 h-full w-full object-contain" />
+          </Lightbox>
+        </>
+      )}
     </div>
   );
 }

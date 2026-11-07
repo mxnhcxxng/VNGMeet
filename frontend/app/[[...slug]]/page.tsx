@@ -116,14 +116,15 @@ const VIEW_TO_PATH: Record<Exclude<View, "chat">, string> = {
   settings: "/settings",
   bookingHistory: "/booking-history",
   roomScout: "/room-scout",
-  roomWiki: "/room-wiki",
+  roomWiki: "/room-list",
 };
 const SEGMENT_TO_VIEW: Record<string, View> = {
   browse: "browse",
   settings: "settings",
   "booking-history": "bookingHistory",
   "room-scout": "roomScout",
-  "room-wiki": "roomWiki",
+  "room-list": "roomWiki",
+  "room-wiki": "roomWiki", // old URL, kept so shared links still work
   chat: "chat",
 };
 
@@ -977,7 +978,7 @@ export default function Home() {
     (me?.profile?.office ?? "").trim().toLowerCase() === "campus" &&
     me?.profile?.role === "admin";
 
-  // Anyone else landing on /room-wiki (shared link, office/role changed) falls
+  // Anyone else landing on /room-list (shared link, office/role changed) falls
   // back to the default view instead of a blank screen.
   useEffect(() => {
     if (canEnterBooking && view === "roomWiki" && !canSeeRoomWiki) setView("chat");
