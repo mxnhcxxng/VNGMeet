@@ -44,7 +44,8 @@ function RoomLabel({
   const room = label.room;
   const flag = roomFlag(label.name);
   const floor = (room?.floor ?? "").trim().replace(/^f(?=\d)/i, "");
-  const hasDirections = Boolean((room?.direction || room?.direction_vi || "").trim());
+  // Same rule as the room list: a room has a page when it has a route map.
+  const hasDirections = Boolean((room?.map || "").trim());
 
   return (
     <Tooltip delay={0} closeDelay={0}>

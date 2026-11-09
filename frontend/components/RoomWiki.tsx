@@ -61,7 +61,7 @@ export function RoomWiki({
   };
   useEffect(load, []);
 
-  // Every Campus room (the map shows sizes even for rooms without directions).
+  // Every Campus room (the map shows sizes even for rooms without a page).
   const allCampusRooms = useMemo(() => {
     // meeting_room_metadata has some duplicated wiki-only rows (same name, no
     // email) — keep one per name/email so the list doesn't repeat.
@@ -77,9 +77,10 @@ export function RoomWiki({
       .sort((a, b) => a.name.localeCompare(b.name, "vi"));
   }, [rooms]);
 
-  // The list only has rooms that actually have directions (either language).
+  // The list only has rooms with a route map (map_link) — independent of
+  // in_use, since many rooms are booked via reception and not bookable here.
   const campusRooms = useMemo(
-    () => allCampusRooms.filter((r) => Boolean((r.direction || r.direction_vi || "").trim())),
+    () => allCampusRooms.filter((r) => Boolean((r.map || "").trim())),
     [allCampusRooms],
   );
 
@@ -223,7 +224,7 @@ export function RoomWiki({
             <CampusMap
               rooms={allCampusRooms}
               onSelectRoom={(room) => {
-                // Only rooms in the list (i.e. with directions) have a page.
+                // Only rooms in the list (i.e. with a route map) have a page.
                 if (campusRooms.some((r) => keyOf(r) === keyOf(room))) {
                   setSelectedKey(keyOf(room));
                   setMobileDetail(true);

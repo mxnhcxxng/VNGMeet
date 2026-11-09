@@ -76,15 +76,16 @@ export const FLOOR_MAPS: Record<CampusFloor, FloorMap> = {
       ["Melbourne", 2079.5, 1336],
     ],
   },
-  // Figma node 645:11763 (Frame 29); the image is cropped slightly in Figma.
+  // Figma node 692:3049 (Frame 62).
   F3: {
     width: 3640,
     height: 1836,
-    image: { src: "/campus-map/floor-3.jpg", x: 143, y: -32.7, width: 3528.1, height: 1907.4 },
+    image: { src: "/campus-map/floor-3.jpg", x: 143, y: -16, width: 3497, height: 1891 },
     labels: [
       ["Rome", 396, 609],
       ["Manchester", 94.5, 756],
-      ["Durham", 482, 935],
+      ["Durham", 492, 935],
+      ["Hangzhou", 325.5, 935],
       ["Bangalore", 1023.5, 242],
       ["Dubai", 556, 166],
       ["Madrid", 123, 859],
@@ -95,6 +96,7 @@ export const FLOOR_MAPS: Record<CampusFloor, FloorMap> = {
       ["Berlin", 384.5, 1168],
       ["Liverpool", 998, 89],
       ["Zurich", 1263.5, 606],
+      ["Oslo", 1697.5, 764],
       ["Venice", 1314, 410],
       ["Tokyo", 1990.5, 496],
       ["Doha", 2327.5, 308],
