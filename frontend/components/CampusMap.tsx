@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Chip, Tabs, Tooltip } from "@heroui/react";
-import { Persons } from "@gravity-ui/icons";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Button, Chip, Tabs, Tooltip } from "@heroui/react";
+import { ArrowsRotateLeft, Minus, Persons, Plus } from "@gravity-ui/icons";
 import type { DirectoryRoom } from "@/lib/api";
 import {
   CAMPUS_FLOORS,
@@ -20,6 +20,9 @@ import { Lightbox } from "./Lightbox";
 // map's scale but never shrink below ~8px text, so they stay readable.
 const LABEL_MIN_SCALE = 0.34;
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+// Full-screen view only: zoom range on top of the fit-to-screen scale.
+const MIN_ZOOM = 1;
+const MAX_ZOOM = 6;
 
 /** Always-visible room label; hovering it drops the room info down (HeroUI Tooltip). */
 function RoomLabel({
@@ -126,6 +129,7 @@ function MapCanvas({
   /** Inline only: clicking the map (not a label) opens the full-screen view. */
   onOpen?: () => void;
 }) {
+  const zoomable = fit === "contain";
   const t = useT();
   const map = FLOOR_MAPS[floor];
   const boxRef = useRef<HTMLDivElement>(null);
@@ -144,14 +148,131 @@ function MapCanvas({
     return () => ro.disconnect();
   }, []);
 
-  const scale =
+  const fitScale =
     fit === "width"
       ? box.width / map.width
       : Math.min(box.width / map.width, box.height / map.height);
-  const w = map.width * scale;
+
+  // Full screen: zoom (× fitScale) and the map's top-left in box px. One state
+  // object so zooming around a point updates both together; a ref mirrors it
+  // for the event handlers.
+  const [view, setView] = useState({ zoom: 1, x: 0, y: 0 });
+  const viewRef = useRef(view);
+  viewRef.current = view;
+
+  // Clamp zoom; keep the map covering the box when bigger, centred when smaller.
+  const settle = useCallback(
+    (v: { zoom: number; x: number; y: number }) => {
+      const zoom = clamp(v.zoom, MIN_ZOOM, MAX_ZOOM);
+      const s = fitScale * zoom;
+      const bound = (p: number, size: number, boxSize: number) =>
+        size <= boxSize ? (boxSize - size) / 2 : clamp(p, boxSize - size, 0);
+      return {
+        zoom,
+        x: bound(v.x, map.width * s, box.width),
+        y: bound(v.y, map.height * s, box.height),
+      };
+    },
+    [fitScale, map.width, map.height, box.width, box.height],
+  );
+
+  const reset = useCallback(() => setView(settle({ zoom: 1, x: 0, y: 0 })), [settle]);
+  // Re-centre whenever the box or the floor changes.
+  useEffect(() => {
+    reset();
+  }, [reset, floor]);
+
+  // Zoom keeping the point (px, py) — box coords — still.
+  const zoomAt = useCallback(
+    (next: number, px: number, py: number) => {
+      const v = viewRef.current;
+      const k = clamp(next, MIN_ZOOM, MAX_ZOOM) / v.zoom;
+      setView(settle({ zoom: v.zoom * k, x: px - (px - v.x) * k, y: py - (py - v.y) * k }));
+    },
+    [settle],
+  );
+  const zoomBy = (factor: number) =>
+    zoomAt(viewRef.current.zoom * factor, box.width / 2, box.height / 2);
+
+  // Wheel / trackpad zoom (non-passive so the page doesn't scroll).
+  useEffect(() => {
+    const el = boxRef.current;
+    if (!el || !zoomable) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const rect = el.getBoundingClientRect();
+      zoomAt(viewRef.current.zoom * Math.exp(-e.deltaY * 0.002), e.clientX - rect.left, e.clientY - rect.top);
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [zoomAt, zoomable]);
+
+  // Drag to pan, pinch to zoom. A real drag swallows the click that follows so
+  // releasing over a label doesn't open that room.
+  const pointers = useRef(new Map<number, { x: number; y: number }>());
+  const gesture = useRef<{ moved: boolean; pinchDist?: number; pinchZoom?: number }>({ moved: false });
+  const [dragging, setDragging] = useState(false);
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointers.current.size === 1) gesture.current = { moved: false };
+    if (pointers.current.size === 2) {
+      const [a, b] = [...pointers.current.values()];
+      gesture.current.pinchDist = Math.hypot(a.x - b.x, a.y - b.y);
+      gesture.current.pinchZoom = viewRef.current.zoom;
+    }
+  };
+
+  const onPointerMove = (e: React.PointerEvent) => {
+    const prev = pointers.current.get(e.pointerId);
+    const el = boxRef.current;
+    if (!prev || !el) return;
+    const cur = { x: e.clientX, y: e.clientY };
+
+    if (pointers.current.size >= 2 && gesture.current.pinchDist) {
+      pointers.current.set(e.pointerId, cur);
+      const [a, b] = [...pointers.current.values()];
+      const rect = el.getBoundingClientRect();
+      gesture.current.moved = true;
+      zoomAt(
+        (gesture.current.pinchZoom ?? 1) * (Math.hypot(a.x - b.x, a.y - b.y) / gesture.current.pinchDist),
+        (a.x + b.x) / 2 - rect.left,
+        (a.y + b.y) / 2 - rect.top,
+      );
+      return;
+    }
+
+    const dx = cur.x - prev.x;
+    const dy = cur.y - prev.y;
+    if (!gesture.current.moved && Math.hypot(dx, dy) < 4) return; // jitter
+    pointers.current.set(e.pointerId, cur);
+    if (!gesture.current.moved) {
+      el.setPointerCapture(e.pointerId);
+      setDragging(true);
+    }
+    gesture.current.moved = true;
+    const v = viewRef.current;
+    setView(settle({ zoom: v.zoom, x: v.x + dx, y: v.y + dy }));
+  };
+
+  const onPointerUp = (e: React.PointerEvent) => {
+    pointers.current.delete(e.pointerId);
+    if (pointers.current.size < 2) gesture.current.pinchDist = undefined;
+    if (!pointers.current.size) setDragging(false);
+  };
+
+  const onClickCapture = (e: React.MouseEvent) => {
+    if (gesture.current.moved) {
+      e.stopPropagation();
+      gesture.current.moved = false;
+    }
+  };
+
+  const scale = zoomable ? fitScale * view.zoom : fitScale;
   const h = map.height * scale;
-  const offsetX = fit === "contain" ? (box.width - w) / 2 : 0;
-  const offsetY = fit === "contain" ? (box.height - h) / 2 : 0;
+  const offsetX = zoomable ? view.x : 0;
+  const offsetY = zoomable ? view.y : 0;
   const labelSize = clamp(scale, LABEL_MIN_SCALE, 1);
   const keyOf = (r: DirectoryRoom) => r.email || r.name;
 
@@ -160,8 +281,19 @@ function MapCanvas({
       ref={boxRef}
       className={`relative w-full overflow-hidden ${
         fit === "width" ? "rounded-xl border border-[color:var(--separator)]" : "h-full"
-      } bg-white`}
-      style={fit === "width" ? { height: h || undefined, aspectRatio: h ? undefined : `${map.width} / ${map.height}` } : undefined}
+      } ${zoomable ? "touch-none select-none" : ""} bg-white`}
+      style={
+        zoomable
+          ? { cursor: dragging ? "grabbing" : "grab" }
+          : { height: h || undefined, aspectRatio: h ? undefined : `${map.width} / ${map.height}` }
+      }
+      {...(zoomable && {
+        onPointerDown,
+        onPointerMove,
+        onPointerUp,
+        onPointerCancel: onPointerUp,
+        onClickCapture,
+      })}
     >
       {scale > 0 && (
         <>
@@ -221,6 +353,19 @@ function MapCanvas({
         </>
       )}
 
+      {zoomable && (
+        <div className="absolute bottom-4 right-4 z-[3] flex flex-col gap-1">
+          <Button isIconOnly size="sm" variant="secondary" aria-label={t("roomWiki.zoomIn")} onPress={() => zoomBy(1.5)}>
+            <Plus width={16} height={16} />
+          </Button>
+          <Button isIconOnly size="sm" variant="secondary" aria-label={t("roomWiki.zoomOut")} onPress={() => zoomBy(1 / 1.5)}>
+            <Minus width={16} height={16} />
+          </Button>
+          <Button isIconOnly size="sm" variant="secondary" aria-label={t("roomWiki.zoomReset")} onPress={reset}>
+            <ArrowsRotateLeft width={16} height={16} />
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
