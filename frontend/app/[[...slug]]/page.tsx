@@ -972,17 +972,8 @@ export default function Home() {
   const canEnterBooking = Boolean(
     me?.authenticated && me.profileComplete !== false,
   );
-  // Room Wiki only documents Campus rooms, and for now is admin-only: shown to
-  // Campus users whose profile role is admin.
-  const canSeeRoomWiki =
-    (me?.profile?.office ?? "").trim().toLowerCase() === "campus" &&
-    me?.profile?.role === "admin";
-
-  // Anyone else landing on /room-list (shared link, office/role changed) falls
-  // back to the default view instead of a blank screen.
-  useEffect(() => {
-    if (canEnterBooking && view === "roomWiki" && !canSeeRoomWiki) setView("chat");
-  }, [canEnterBooking, view, canSeeRoomWiki]);
+  // Room list (Campus rooms + campus map) is open to every signed-in user.
+  const canSeeRoomWiki = canEnterBooking;
 
   // Mirror the active view/thread into the URL. We only sync once the user is
   // past auth/profile gating (those screens own the URL otherwise). The first

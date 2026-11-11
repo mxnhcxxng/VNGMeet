@@ -50,8 +50,7 @@ const en = {
   "roomWiki.selectRoom": "Pick a room to see how to get there.",
   "roomWiki.openMap": "View full screen",
   "roomWiki.back": "Back to room list",
-  "roomWiki.campusMap": "Campus map",
-  "roomWiki.campusMapHint": "Hover a room name to see its details. Click the map to view it full screen.",
+  "roomWiki.campusMap": "VNG Campus map",
   "roomWiki.mapNoSize": "No size info yet",
   "roomWiki.mapClickHint": "Click to see how to get there",
   "roomWiki.zoomIn": "Zoom in",
@@ -132,7 +131,7 @@ const en = {
   "settings.sessionExpiresIn": "Expires in",
   "settings.sessionExpired": "Expired",
   "settings.sessionUnavailable": "No active session.",
-  "settings.feedback": "Send feedback",
+  "sidebar.feedback": "Feedback",
   "settings.feedbackTitle": "Send feedback",
 
   // --- Return to the Zalo Mini App after signing in on its behalf ----------
@@ -705,8 +704,7 @@ const vi: Partial<Record<TranslationKey, string>> = {
   "roomWiki.selectRoom": "Chọn một phòng để xem đường đi.",
   "roomWiki.openMap": "Xem toàn màn hình",
   "roomWiki.back": "Quay lại danh sách phòng",
-  "roomWiki.campusMap": "Bản đồ campus",
-  "roomWiki.campusMapHint": "Di chuột vào tên phòng để xem thông tin. Bấm vào bản đồ để xem toàn màn hình.",
+  "roomWiki.campusMap": "Bản đồ VNG Campus",
   "roomWiki.mapNoSize": "Chưa có thông tin sức chứa",
   "roomWiki.mapClickHint": "Bấm để xem đường đi",
   "roomWiki.zoomIn": "Phóng to",
@@ -787,7 +785,7 @@ const vi: Partial<Record<TranslationKey, string>> = {
   "settings.sessionExpiresIn": "Hết hạn sau",
   "settings.sessionExpired": "Đã hết hạn",
   "settings.sessionUnavailable": "Không có phiên đang hoạt động.",
-  "settings.feedback": "Gửi ý kiến phản hồi",
+  "sidebar.feedback": "Phản hồi",
   "settings.feedbackTitle": "Gửi ý kiến phản hồi",
 
   // --- Login --------------------------------------------------------------

@@ -10,7 +10,6 @@ import {
   type Key,
   Label,
   ListBox,
-  Modal,
   ListBoxItem,
   SearchField,
   Select,
@@ -21,7 +20,6 @@ import {
   toast,
   useFilter,
 } from "@heroui/react";
-import { Comment } from "@gravity-ui/icons";
 import {
   api,
   type Language,
@@ -127,7 +125,6 @@ export function SettingsScreen({
   const [optionsLoading, setOptionsLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [feedbackOpen, setFeedbackOpen] = useState(false);
 
   // Theme + language are applied live (and persisted) through global providers;
   // we still track the last-saved values below so Cancel can revert them.
@@ -613,15 +610,7 @@ export function SettingsScreen({
           )}
 
           {/* Footer buttons */}
-          <div className="flex flex-col gap-3 pb-6 pt-4 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
-            <Button
-              variant="tertiary"
-              className="rounded-full"
-              onPress={() => setFeedbackOpen(true)}
-            >
-              <Comment className="size-4" />
-              {t("settings.feedback")}
-            </Button>
+          <div className="flex flex-col gap-3 pb-6 pt-4 sm:flex-row sm:items-center sm:justify-end sm:gap-2">
             <div className="flex items-center justify-end gap-2">
             <Button
               variant="tertiary"
@@ -644,26 +633,6 @@ export function SettingsScreen({
         </div>
       </div>
 
-      <Modal isOpen={feedbackOpen} onOpenChange={setFeedbackOpen}>
-        <Modal.Backdrop>
-          <Modal.Container size="cover">
-            <Modal.Dialog className="flex flex-col">
-              <Modal.Header className="flex items-center justify-between">
-                <Modal.Heading>{t("settings.feedbackTitle")}</Modal.Heading>
-                <Modal.CloseTrigger />
-              </Modal.Header>
-              <Modal.Body className="flex-1 p-0">
-                <iframe
-                  title={t("settings.feedbackTitle")}
-                  src="https://forms.office.com/r/tqXL5RYBqM?embed=true"
-                  className="h-full min-h-[480px] w-full border-0"
-                  allowFullScreen
-                />
-              </Modal.Body>
-            </Modal.Dialog>
-          </Modal.Container>
-        </Modal.Backdrop>
-      </Modal>
     </div>
   );
 }

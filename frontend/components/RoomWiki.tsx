@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Button, Chip, Spinner } from "@heroui/react";
-import { ChevronLeft, MapPin, Persons } from "@gravity-ui/icons";
+import { ChevronLeft, Persons, PlanetEarth } from "@gravity-ui/icons";
 import { api, type DirectoryRoom, type UserProfileOption } from "@/lib/api";
 import { roomFlag } from "@/lib/roomFlags";
 import { useLanguage, useT } from "@/app/providers";
@@ -156,7 +156,7 @@ export function RoomWiki({
               showMap ? "bg-[var(--default)]" : "hover:bg-[#f5f5f5] dark:hover:bg-[#22262f]"
             }`}
           >
-            <MapPin width={16} height={16} className="shrink-0" />
+            <PlanetEarth width={16} height={16} className="shrink-0" />
             <span className="truncate">{t("roomWiki.campusMap")}</span>
           </button>
           </div>
@@ -208,9 +208,9 @@ export function RoomWiki({
 
       {/* Room detail */}
       <div
-        className={`composer-scroll min-h-0 min-w-0 flex-1 overflow-y-auto p-4 sm:p-8 lg:block ${
-          mobileDetail ? "block" : "hidden"
-        }`}
+        className={`composer-scroll min-h-0 min-w-0 flex-1 lg:block ${
+          showMap ? "overflow-hidden px-4 py-4 lg:px-6 lg:py-5" : "overflow-y-auto p-4 sm:p-8"
+        } ${mobileDetail ? "block" : "hidden"}`}
       >
         {selected ? (
           <RoomDetail
@@ -219,7 +219,7 @@ export function RoomWiki({
             onBack={() => setMobileDetail(false)}
           />
         ) : (
-          <div className="flex flex-col gap-6 sm:gap-10">
+          <div className="flex h-full flex-col gap-6">
             <BackButton onBack={() => setMobileDetail(false)} />
             <CampusMap
               rooms={allCampusRooms}

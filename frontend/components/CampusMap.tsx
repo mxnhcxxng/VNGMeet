@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Button, Chip, Tabs, Tooltip } from "@heroui/react";
+import { Button, ButtonGroup, Chip, Tabs, Tooltip } from "@heroui/react";
 import { ArrowsRotateLeft, Minus, Persons, Plus } from "@gravity-ui/icons";
 import type { DirectoryRoom } from "@/lib/api";
 import {
@@ -14,13 +14,12 @@ import {
 import { roomFlag } from "@/lib/roomFlags";
 import { useT } from "@/app/providers";
 import { CAPACITY_RANGE } from "./BookingModal";
-import { Lightbox } from "./Lightbox";
 
 // Labels are 24px semibold in the design (at 1:1). On screen they follow the
 // map's scale but never shrink below ~8px text, so they stay readable.
 const LABEL_MIN_SCALE = 0.34;
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
-// Full-screen view only: zoom range on top of the fit-to-screen scale.
+// Zoom range on top of the fit-to-box scale.
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 6;
 
@@ -110,27 +109,20 @@ function RoomLabel({
 }
 
 /**
- * The floor drawing + labels, scaled to its box. `fit="width"` (inline) takes
- * the box width and sets its own height; `fit="contain"` (full screen) fits
- * inside the parent and centres.
+ * The floor drawing + labels, fitted inside its box (centred), with wheel /
+ * pinch zoom, drag to pan and the zoom buttons (bottom right).
  */
 function MapCanvas({
   floor,
   labels,
-  fit,
   activeKey,
   onSelectRoom,
-  onOpen,
 }: {
   floor: CampusFloor;
   labels: PlacedLabel[];
-  fit: "width" | "contain";
   activeKey?: string | null;
   onSelectRoom: (room: DirectoryRoom) => void;
-  /** Inline only: clicking the map (not a label) opens the full-screen view. */
-  onOpen?: () => void;
 }) {
-  const zoomable = fit === "contain";
   const t = useT();
   const map = FLOOR_MAPS[floor];
   const boxRef = useRef<HTMLDivElement>(null);
@@ -149,12 +141,13 @@ function MapCanvas({
     return () => ro.disconnect();
   }, []);
 
-  const fitScale =
-    fit === "width"
-      ? box.width / map.width
-      : Math.min(box.width / map.width, box.height / map.height);
+  // Leave a margin around the map at the fit-to-box zoom (Figma: ~30px).
+  const fitScale = Math.max(
+    0,
+    Math.min((box.width - 48) / map.width, (box.height - 128) / map.height),
+  );
 
-  // Full screen: zoom (× fitScale) and the map's top-left in box px. One state
+  // Zoom (× fitScale) and the map's top-left in box px. One state
   // object so zooming around a point updates both together; a ref mirrors it
   // for the event handlers.
   const [view, setView] = useState({ zoom: 1, x: 0, y: 0 });
@@ -198,7 +191,7 @@ function MapCanvas({
   // Wheel / trackpad zoom (non-passive so the page doesn't scroll).
   useEffect(() => {
     const el = boxRef.current;
-    if (!el || !zoomable) return;
+    if (!el) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       const rect = el.getBoundingClientRect();
@@ -206,7 +199,7 @@ function MapCanvas({
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
-  }, [zoomAt, zoomable]);
+  }, [zoomAt]);
 
   // Drag to pan, pinch to zoom. A real drag swallows the click that follows so
   // releasing over a label doesn't open that room.
@@ -270,45 +263,30 @@ function MapCanvas({
     }
   };
 
-  const scale = zoomable ? fitScale * view.zoom : fitScale;
-  const h = map.height * scale;
-  const offsetX = zoomable ? view.x : 0;
-  const offsetY = zoomable ? view.y : 0;
+  const scale = fitScale * view.zoom;
+  const offsetX = view.x;
+  const offsetY = view.y;
   const labelSize = clamp(scale, LABEL_MIN_SCALE, 1);
   const keyOf = (r: DirectoryRoom) => r.email || r.name;
 
   return (
     <div
       ref={boxRef}
-      className={`relative w-full overflow-hidden ${
-        fit === "width" ? "rounded-xl border border-[color:var(--separator)]" : "h-full"
-      } ${zoomable ? "touch-none select-none" : ""} bg-white`}
-      style={
-        zoomable
-          ? { cursor: dragging ? "grabbing" : "grab" }
-          : { height: h || undefined, aspectRatio: h ? undefined : `${map.width} / ${map.height}` }
-      }
-      {...(zoomable && {
-        onPointerDown,
-        onPointerMove,
-        onPointerUp,
-        onPointerCancel: onPointerUp,
-        onClickCapture,
-      })}
+      className="relative h-full w-full touch-none select-none overflow-hidden"
+      style={{ cursor: dragging ? "grabbing" : "grab" }}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerUp}
+      onClickCapture={onClickCapture}
     >
       {scale > 0 && (
         <>
-          {onOpen ? (
-            <button
-              type="button"
-              onClick={onOpen}
-              aria-label={t("roomWiki.openMap")}
-              title={t("roomWiki.openMap")}
-              className="absolute inset-0 cursor-zoom-in"
-            />
-          ) : null}
           <div
-            className="pointer-events-none absolute origin-top-left overflow-hidden"
+            // The drawings have a white ground; multiply lets the panel's grey
+            // show through (Figma: map sits on bg-tertiary). Set here, not on
+            // the <img>: the transform makes this layer its own blend group.
+            className="pointer-events-none absolute origin-top-left overflow-hidden mix-blend-multiply"
             style={{
               left: offsetX,
               top: offsetY,
@@ -354,19 +332,23 @@ function MapCanvas({
         </>
       )}
 
-      {zoomable && (
-        <div className="absolute bottom-4 right-4 z-[3] flex flex-col gap-1">
-          <Button isIconOnly size="sm" variant="secondary" aria-label={t("roomWiki.zoomIn")} onPress={() => zoomBy(1.5)}>
-            <Plus width={16} height={16} />
-          </Button>
-          <Button isIconOnly size="sm" variant="secondary" aria-label={t("roomWiki.zoomOut")} onPress={() => zoomBy(1 / 1.5)}>
-            <Minus width={16} height={16} />
-          </Button>
-          <Button isIconOnly size="sm" variant="secondary" aria-label={t("roomWiki.zoomReset")} onPress={reset}>
-            <ArrowsRotateLeft width={16} height={16} />
-          </Button>
-        </div>
-      )}
+      {/* Zoom tools, bottom right (Figma "Tool"): HeroUI vertical ButtonGroup. */}
+      <ButtonGroup
+        orientation="vertical"
+        variant="tertiary"
+        size="sm"
+        className="absolute bottom-4 right-4 z-[3]"
+      >
+        <Button isIconOnly aria-label={t("roomWiki.zoomIn")} onPress={() => zoomBy(1.5)}>
+          <Plus />
+        </Button>
+        <Button isIconOnly aria-label={t("roomWiki.zoomOut")} onPress={() => zoomBy(1 / 1.5)}>
+          <Minus />
+        </Button>
+        <Button isIconOnly aria-label={t("roomWiki.zoomReset")} onPress={reset}>
+          <ArrowsRotateLeft />
+        </Button>
+      </ButtonGroup>
     </div>
   );
 }
@@ -391,7 +373,7 @@ function FloorTabs({
       <Tabs.ListContainer>
         <Tabs.List aria-label={t("roomWiki.campusMap")}>
           {CAMPUS_FLOORS.map((f) => (
-            <Tabs.Tab key={f} id={f}>
+            <Tabs.Tab key={f} id={f} className="whitespace-nowrap">
               {t("booking.floor", { floor: f.slice(1) })}
               <Tabs.Indicator />
             </Tabs.Tab>
@@ -413,55 +395,24 @@ export function CampusMap({
   activeKey?: string | null;
   onSelectRoom: (room: DirectoryRoom) => void;
 }) {
-  const t = useT();
   const [floor, setFloor] = useState<CampusFloor>("F1");
-  const [fullscreen, setFullscreen] = useState(false);
   const labels = useMemo(() => placeLabels(floor, rooms), [floor, rooms]);
 
+  // Per Figma 696-19: the map fills a grey (#fafafa) rounded panel; HeroUI floor
+  // tabs float top-left, zoom tools bottom-right, both 16px from the edges.
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-2">
-        <h2 className="text-xl font-semibold leading-7 text-[#18181b] dark:text-[#f7f7f7]">
-          {t("roomWiki.campusMap")}
-        </h2>
-        <p className="text-base leading-6 text-[#414651] dark:text-[#cecfd2]">
-          {t("roomWiki.campusMapHint")}
-        </p>
-      </div>
-
-      <FloorTabs floor={floor} onChange={setFloor} />
-
+    <div className="relative min-h-[420px] w-full flex-1 overflow-hidden rounded-lg bg-[#fafafa] dark:bg-[#13161b]">
       <MapCanvas
         floor={floor}
         labels={labels}
-        fit="width"
         activeKey={activeKey}
         onSelectRoom={onSelectRoom}
-        onOpen={() => setFullscreen(true)}
       />
-
-      <Lightbox
-        isOpen={fullscreen}
-        onOpenChange={setFullscreen}
-        title={t("roomWiki.campusMap")}
-      >
-        {/* Same floor state as inline, so switching here carries back. */}
-        <div className="flex h-full flex-col gap-4 px-4 pb-4">
-          <FloorTabs floor={floor} onChange={setFloor} className="w-full max-w-md self-center" />
-          <div className="min-h-0 flex-1">
-            <MapCanvas
-              floor={floor}
-              labels={labels}
-              fit="contain"
-              activeKey={activeKey}
-              onSelectRoom={(room) => {
-                setFullscreen(false);
-                onSelectRoom(room);
-              }}
-            />
-          </div>
-        </div>
-      </Lightbox>
+      <FloorTabs
+        floor={floor}
+        onChange={setFloor}
+        className="absolute left-4 top-4 z-[3] max-w-[calc(100%-32px)]"
+      />
     </div>
   );
 }

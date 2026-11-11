@@ -7,6 +7,7 @@ import {
   PencilToSquare,
   Magnifier,
   Gear,
+  Comment,
   ArrowRightFromSquare,
   ClockArrowRotateLeft,
   Binoculars,
@@ -18,6 +19,7 @@ import { Button, Dropdown, Label } from "@heroui/react";
 import type { ChatThread } from "@/lib/api";
 import { useT } from "@/app/providers";
 import { useTokenExpiry } from "./TokenExpiryProvider";
+import { FeedbackModal } from "./FeedbackModal";
 import { BrandIcon } from "./BrandIcon";
 
 export type View =
@@ -338,10 +340,11 @@ export function Sidebar({
   // navigation row (picking a destination should reveal it, not hide it).
   open?: boolean;
   onClose?: () => void;
-  // Room Wiki: Campus rooms only, admin-only for now (decided by the page).
+  // Room list: shown to every signed-in user (decided by the page).
   showRoomWiki?: boolean;
 }) {
   const t = useT();
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const display = username || t("common.user");
   const name = display.replace(/@.*/, "");
   const email = display.includes("@") ? display : "";
@@ -490,8 +493,9 @@ export function Sidebar({
         </div>
       </div>
 
-      {/* Setting + divider + user (with logout) */}
+      {/* Setting + feedback + divider + user (with logout) */}
       <div className="flex flex-col gap-4 px-4 pb-5 pt-5">
+        <div className="flex flex-col gap-1">
         <button
           type="button"
           onClick={navigate(() => onChange("settings"))}
@@ -500,6 +504,18 @@ export function Sidebar({
           <Gear width={16} height={16} />
           {t("sidebar.settings")}
         </button>
+
+        {/* Feedback form (opens the Microsoft Forms modal; no view of its own). */}
+        <button
+          type="button"
+          onClick={() => setFeedbackOpen(true)}
+          className={`${ROW} hover:bg-[#f5f5f5] dark:hover:bg-[#22262f]`}
+        >
+          <Comment width={16} height={16} />
+          {t("sidebar.feedback")}
+        </button>
+        </div>
+        <FeedbackModal isOpen={feedbackOpen} onOpenChange={setFeedbackOpen} />
 
         <div className="h-px w-full bg-[#e9eaeb] dark:bg-[#373a41]" />
 
