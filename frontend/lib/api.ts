@@ -266,7 +266,6 @@ export type MinigameKind = "guess" | "recall" | "quiz";
 
 // --- Admin dashboard (backend/app/admin.py) --------------------------------
 export type AdminLevel = "ok" | "warn" | "down";
-export type AdminRoomSize = "small" | "medium" | "large";
 export type AdminBookingType = "instant" | "scheduled" | "scout";
 
 export interface AdminKpi {
@@ -302,31 +301,34 @@ export interface AdminHealth {
   stuckPending: { count: number; rows: AdminActivityRow[]; level: AdminLevel };
 }
 
-export interface AdminRoomCount {
-  name: string | null;
-  office: string | null;
-  count: number;
-}
+/** Who cancelled a booking, from user_activity.note. */
+export type AdminCancelKind = "user" | "outlook" | "auto" | "unknown";
+export type AdminScoutOutcome = "success" | "canceled_user" | "canceled_auto" | "active";
 
 export interface AdminOverview {
   generatedAt: string;
   range: { days: number; start: string; end: string };
   health: AdminHealth;
-  kpis: Record<"activeUsers" | "bookings" | "successRate" | "chatToBooking", AdminKpi>;
+  kpis: Record<"activeUsers" | "bookings" | "successRate", AdminKpi>;
   weeks: string[];
-  bookingsByDay: ({ date: string } & Record<AdminBookingType, number>)[];
-  statusCounts: Record<"success" | "failed" | "canceled" | "pending", number>;
-  methods: Record<"manual" | "chatbot", number>;
-  topRooms: AdminRoomCount[];
-  leastRooms: AdminRoomCount[];
+  bookingOutcomes: {
+    success: number;
+    canceled: { total: number } & Record<AdminCancelKind, number>;
+    /** System errors only; room declines are in `declined`. */
+    failed: number;
+    declined: number;
+  };
+  bookingsByDay: {
+    date: string;
+    success: Record<AdminBookingType, number>;
+    canceled: Record<AdminCancelKind, number>;
+  }[];
   users: {
     total: number;
     newByWeek: number[];
-    retention: { week: string; cohort: number; returned: number; partial: boolean }[];
+    /** Last 6 months, oldest first; `partial` = the follow-up month is still running. */
+    retention: { month: string; cohort: number; returned: number; rate: number | null; partial: boolean }[];
     byOffice: { office: string | null; count: number }[];
-    zaloLinked: number;
-    botLinks: number;
-    revocations: number;
   };
   chatbot: {
     conversations: number;
@@ -337,21 +339,14 @@ export interface AdminOverview {
   };
   scouts: {
     total: number;
-    byStatus: Record<string, number>;
+    outcomes: Record<AdminScoutOutcome, number>;
     successRate: number | null;
+    byDay: { date: string; success: number; canceledUser: number; canceledAuto: number }[];
     demandBySize: { size: string; count: number; unmet: number }[];
     demandByHour: { hour: number; count: number }[];
   };
   recentFailures: AdminActivityRow[];
   offices: string[];
-}
-
-export interface AdminHeatmap {
-  hours: number[];
-  /** Weekdays only, from today to the end of the cached window. */
-  days: { date: string; weekday: number; cells: (number | null)[] }[];
-  rooms: { name: string | null; office: string | null; size: AdminRoomSize | null; busy: number | null }[];
-  roomCount: number;
 }
 
 export interface MinigameQuestion {
@@ -512,10 +507,6 @@ export const api = {
   adminOverview: (days: number, office?: string | null) =>
     req<AdminOverview>(
       `/api/admin/overview?days=${days}${office ? `&office=${encodeURIComponent(office)}` : ""}`,
-    ),
-  adminHeatmap: (office?: string | null, size?: AdminRoomSize | null) =>
-    req<AdminHeatmap>(
-      `/api/admin/heatmap?${new URLSearchParams({ ...(office ? { office } : {}), ...(size ? { size } : {}) })}`,
     ),
   // Cached availability served from Supabase. The backend refreshes it on demand
   // with the current user's delegated Graph token when rows are older than 5 min.

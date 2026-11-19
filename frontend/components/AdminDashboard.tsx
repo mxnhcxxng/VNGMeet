@@ -2,8 +2,9 @@
 
 // Admin dashboard (/admin). Data comes from backend/app/admin.py; this file only
 // lays it out. Charts are hand-rolled SVG/CSS (no chart library in the app):
-// fixed categorical slots for booking types, one blue ramp for the heatmap, and
-// status colors only for health — each with an icon/label, never color alone.
+// fixed categorical slots for booking types (above the axis) and for who
+// cancelled (below it), and status colors only for health — each with an
+// icon/label, never color alone.
 
 import {
   type ReactNode,
@@ -23,11 +24,10 @@ import {
   api,
   type AdminActivityRow,
   type AdminBookingType,
-  type AdminHeatmap,
+  type AdminCancelKind,
   type AdminKpi,
   type AdminLevel,
   type AdminOverview,
-  type AdminRoomSize,
 } from "@/lib/api";
 import { BrandIcon } from "@/components/BrandIcon";
 import { useLanguage, useT } from "@/app/providers";
@@ -38,31 +38,35 @@ const MUTED = "text-[#71717a] dark:text-[#94979c]";
 const CARD = "rounded-2xl bg-white p-5 shadow-sm dark:bg-[#0c0e12]";
 
 const RANGES = [7, 30, 90] as const;
-const SIZES: AdminRoomSize[] = ["small", "medium", "large"];
 const TYPES: AdminBookingType[] = ["instant", "scheduled", "scout"];
 const TYPE_COLOR: Record<AdminBookingType, string> = {
   instant: "var(--viz-s1)",
   scheduled: "var(--viz-s2)",
   scout: "var(--viz-s3)",
 };
-const HEAT_STEPS = 7;
+const CANCEL_KINDS: AdminCancelKind[] = ["user", "outlook", "auto", "unknown"];
+const CANCEL_COLOR: Record<AdminCancelKind, string> = {
+  user: "var(--viz-c-user)",
+  outlook: "var(--viz-c-outlook)",
+  auto: "var(--viz-c-auto)",
+  unknown: "var(--viz-c-unknown)",
+};
 
-// Validated reference palette: categorical slots 1–3 (all-pairs safe), a blue
-// sequential ramp (reversed on dark so "near zero" recedes into the surface),
-// and the fixed status colors.
+// Validated reference palette: categorical slots 1–3 for booking types, slots
+// 4/5/7 for who cancelled (validated as their own adjacent stack, both modes;
+// light mode sits under 3:1 so every value is also in tooltips and the outcome
+// list), a neutral gray for "unknown", and the fixed status colors.
 const VIZ_STYLE = `
 .admin-viz {
   --viz-s1: #2a78d6; --viz-s2: #eb6834; --viz-s3: #1baf7a;
-  --viz-grid: #e9e9eb; --viz-track: #f0efec; --viz-surface: #ffffff;
+  --viz-c-user: #eda100; --viz-c-outlook: #e87ba4; --viz-c-auto: #6250d6; --viz-c-unknown: #a4a7ae;
+  --viz-grid: #e9e9eb; --viz-axis: #a4a7ae; --viz-track: #f0efec; --viz-surface: #ffffff;
   --viz-good: #0ca30c; --viz-warning: #fab219; --viz-critical: #d03b3b;
-  --viz-h0: #cde2fb; --viz-h1: #9ec5f4; --viz-h2: #6da7ec; --viz-h3: #3987e5;
-  --viz-h4: #256abf; --viz-h5: #184f95; --viz-h6: #0d366b;
 }
 html.dark .admin-viz {
   --viz-s1: #3987e5; --viz-s2: #d95926; --viz-s3: #199e70;
-  --viz-grid: #22262f; --viz-track: #1a1d23; --viz-surface: #0c0e12;
-  --viz-h0: #104281; --viz-h1: #184f95; --viz-h2: #256abf; --viz-h3: #2a78d6;
-  --viz-h4: #5598e7; --viz-h5: #86b6ef; --viz-h6: #cde2fb;
+  --viz-c-user: #c98500; --viz-c-outlook: #d55181; --viz-c-auto: #9085e9; --viz-c-unknown: #5d6068;
+  --viz-grid: #22262f; --viz-axis: #5d6068; --viz-track: #1a1d23; --viz-surface: #0c0e12;
 }`;
 
 // --------------------------------------------------------------------------- //
@@ -80,6 +84,8 @@ function useFormat() {
       num: (n: number) => n.toLocaleString(locale),
       day: (iso: string) =>
         new Date(`${iso}T00:00:00`).toLocaleDateString(locale, { day: "2-digit", month: "2-digit" }),
+      // "05/2026" in both languages (vi-VN would spell it "tháng 05, 2026").
+      month: (iso: string) => `${iso.slice(5, 7)}/${iso.slice(0, 4)}`,
       dateTime: (iso: string | null) =>
         iso
           ? new Date(iso).toLocaleString(locale, {
@@ -308,62 +314,113 @@ function KpiTile({
   );
 }
 
-function StackedBars({ data, t, tip, day }: { data: AdminOverview["bookingsByDay"]; t: TFunction; tip: TipApi; day: (iso: string) => string }) {
-  const totals = data.map((d) => TYPES.reduce((sum, type) => sum + d[type], 0));
-  const max = Math.max(1, ...totals);
-  if (!totals.some(Boolean)) return <Empty t={t} />;
+type BarSeries = { key: string; label: string; color: string };
+type DivergingDay = { date: string; up: Record<string, number>; down: Record<string, number> };
+
+/** Daily stacked bars around a zero line: `up` series grow above it, `down`
+ *  series (cancellations) below it, both on one scale. Series stack outward in
+ *  the order given; only the outermost segment gets the rounded end. */
+function DivergingBars({
+  data,
+  up,
+  down,
+  t,
+  tip,
+  day,
+}: {
+  data: DivergingDay[];
+  up: BarSeries[];
+  down: BarSeries[];
+  t: TFunction;
+  tip: TipApi;
+  day: (iso: string) => string;
+}) {
+  const sum = (values: Record<string, number>, series: BarSeries[]) =>
+    series.reduce((total, s) => total + (values[s.key] ?? 0), 0);
+  const maxUp = Math.max(0, ...data.map((d) => sum(d.up, up)));
+  const maxDown = Math.max(0, ...data.map((d) => sum(d.down, down)));
+  if (!maxUp && !maxDown) return <Empty t={t} />;
+  const scale = maxUp + maxDown;
+  const upShare = (maxUp / scale) * 100;
   const labelEvery = Math.ceil(data.length / 8);
+
+  const segments = (values: Record<string, number>, series: BarSeries[], dir: "up" | "down") => {
+    const present = series.filter((s) => values[s.key]);
+    return present.map((s, i) => {
+      const outermost = i === present.length - 1;
+      return (
+        <div
+          key={s.key}
+          className="shrink-0"
+          style={{
+            height: `${(values[s.key] / (dir === "up" ? maxUp : maxDown)) * 100}%`,
+            background: s.color,
+            borderRadius: outermost ? (dir === "up" ? "4px 4px 0 0" : "0 0 4px 4px") : 0,
+          }}
+        />
+      );
+    });
+  };
+
   return (
     <div className="flex flex-col gap-3">
-      <Legend items={TYPES.map((type) => ({ color: TYPE_COLOR[type], label: t(`admin.type.${type}` as TranslationKey) }))} />
-      <div className="relative h-48">
-        {[0.5, 1].map((f) => (
-          <div key={f} className="absolute inset-x-0 border-t border-[color:var(--viz-grid)]" style={{ bottom: `${f * 100}%` }}>
-            <span className={`absolute -top-2 right-0 bg-white pl-1 text-[10px] tabular-nums dark:bg-[#0c0e12] ${MUTED}`}>
-              {Math.round(max * f)}
-            </span>
-          </div>
-        ))}
-        <div className="absolute inset-0 flex items-end gap-[2px] pr-6">
-          {data.map((d, i) => (
+      <Legend items={[...up, ...down].map((s) => ({ color: s.color, label: s.label }))} />
+      <div className="relative h-56 pr-8">
+        {/* Axis labels: the largest stack on each side, and the zero line. */}
+        {maxUp > 0 && (
+          <span className={`absolute right-0 top-0 text-[10px] tabular-nums ${MUTED}`}>{maxUp}</span>
+        )}
+        {maxDown > 0 && (
+          <span className={`absolute bottom-0 right-0 text-[10px] tabular-nums ${MUTED}`}>−{maxDown}</span>
+        )}
+        <span
+          className={`absolute right-0 -translate-y-1/2 text-[10px] tabular-nums ${MUTED}`}
+          style={{ top: `${upShare}%` }}
+        >
+          0
+        </span>
+        <div
+          className="absolute inset-x-0 border-t border-[color:var(--viz-axis)]"
+          style={{ top: `${upShare}%`, right: "2rem" }}
+        />
+        <div className="flex h-full gap-[2px]">
+          {data.map((d) => (
             <div
               key={d.date}
-              className="flex h-full min-w-0 flex-1 cursor-default flex-col justify-end gap-[2px]"
+              className="flex h-full min-w-0 flex-1 cursor-default flex-col"
               onPointerMove={(e) =>
                 tip.show(
                   e,
                   <div className="flex flex-col gap-1">
                     <span className={`font-medium ${TEXT}`}>{day(d.date)}</span>
-                    {TYPES.map((type) => (
-                      <TipRow key={type} color={TYPE_COLOR[type]} label={t(`admin.type.${type}` as TranslationKey)} value={String(d[type])} />
+                    {up.map((s) => (
+                      <TipRow key={s.key} color={s.color} label={s.label} value={String(d.up[s.key] ?? 0)} />
+                    ))}
+                    {down.length > 0 && <div className="my-0.5 border-t border-[color:var(--separator)]" />}
+                    {down.map((s) => (
+                      <TipRow key={s.key} color={s.color} label={s.label} value={String(d.down[s.key] ?? 0)} />
                     ))}
                   </div>,
                 )
               }
               onPointerLeave={tip.hide}
             >
-              {/* Stacked bottom-up in TYPES order; only the top segment gets the rounded end. */}
-              {[...TYPES].reverse().map((type) =>
-                d[type] ? (
-                  <div
-                    key={type}
-                    style={{
-                      height: `${(d[type] / max) * 100}%`,
-                      background: TYPE_COLOR[type],
-                      borderRadius: TYPES.slice(TYPES.indexOf(type) + 1).every((x) => !d[x]) ? "4px 4px 0 0" : 0,
-                    }}
-                  />
-                ) : null,
-              )}
-              <span className="sr-only">{totals[i]}</span>
+              <div className="flex flex-col-reverse gap-[2px] pb-px" style={{ height: `${upShare}%` }}>
+                {maxUp > 0 && segments(d.up, up, "up")}
+              </div>
+              <div className="flex flex-col gap-[2px] pt-px" style={{ height: `${100 - upShare}%` }}>
+                {maxDown > 0 && segments(d.down, down, "down")}
+              </div>
             </div>
           ))}
         </div>
       </div>
-      <div className={`flex gap-[2px] pr-6 text-[10px] ${MUTED}`}>
+      <div className={`flex h-3 gap-[2px] pr-8 text-[10px] ${MUTED}`}>
         {data.map((d, i) => (
-          <span key={d.date} className="min-w-0 flex-1 truncate text-center">
-            {i % labelEvery === 0 ? day(d.date) : ""}
+          <span key={d.date} className="relative min-w-0 flex-1">
+            {i % labelEvery === 0 && (
+              <span className="absolute left-1/2 -translate-x-1/2 whitespace-nowrap tabular-nums">{day(d.date)}</span>
+            )}
           </span>
         ))}
       </div>
@@ -449,118 +506,6 @@ function ActivityTable({ rows, t, fmt }: { rows: AdminActivityRow[]; t: TFunctio
         </tbody>
       </table>
     </div>
-  );
-}
-
-// --------------------------------------------------------------------------- //
-// Heatmap
-// --------------------------------------------------------------------------- //
-function heatColor(value: number | null): string {
-  if (value == null) return "var(--viz-track)";
-  const step = Math.min(HEAT_STEPS - 1, Math.floor(value * HEAT_STEPS));
-  return `var(--viz-h${step})`;
-}
-
-function Heatmap({ office, t, tip, fmt }: { office: string | null; t: TFunction; tip: TipApi; fmt: ReturnType<typeof useFormat> }) {
-  const [size, setSize] = useState<AdminRoomSize | null>(null);
-  const [data, setData] = useState<AdminHeatmap | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let alive = true;
-    setError(null);
-    api
-      .adminHeatmap(office, size)
-      .then((d) => alive && setData(d))
-      .catch((e: Error) => alive && setError(e.message));
-    return () => {
-      alive = false;
-    };
-  }, [office, size]);
-
-  return (
-    <Section
-      title={t("admin.heat.title")}
-      hint={t("admin.heat.hint", { rooms: data?.roomCount ?? 0 })}
-      className="lg:col-span-2"
-    >
-      <div className="flex flex-wrap gap-1.5">
-        {[null, ...SIZES].map((s) => (
-          <Chip key={s ?? "all"} active={size === s} onPress={() => setSize(s)}>
-            {t(s ? (`admin.size.${s}` as TranslationKey) : "admin.size.all")}
-          </Chip>
-        ))}
-      </div>
-      {error && <p className="text-sm text-danger">{error}</p>}
-      {!data && !error && <Spinner size="sm" />}
-      {data && !data.days.length && <Empty t={t} />}
-      {data && data.days.length > 0 && (
-        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_260px]">
-          <div className="flex flex-col gap-3 overflow-x-auto">
-            <div
-              className="grid min-w-[420px] gap-[2px]"
-              style={{ gridTemplateColumns: `72px repeat(${data.hours.length}, minmax(0, 1fr))` }}
-            >
-              <span />
-              {data.hours.map((h) => (
-                <span key={h} className={`text-center text-[10px] tabular-nums ${MUTED}`}>
-                  {h}h
-                </span>
-              ))}
-              {data.days.map((d) => (
-                <div key={d.date} className="contents">
-                  <span className={`flex items-center text-xs tabular-nums ${MUTED}`}>
-                    {t(`admin.weekday.${d.weekday}` as TranslationKey)} {fmt.day(d.date)}
-                  </span>
-                  {d.cells.map((v, i) => (
-                    <div
-                      key={i}
-                      className="h-7 rounded-[4px]"
-                      style={{ background: heatColor(v) }}
-                      onPointerMove={(e) =>
-                        tip.show(
-                          e,
-                          <div className="flex flex-col gap-1">
-                            <span className={`font-medium ${TEXT}`}>
-                              {t(`admin.weekday.${d.weekday}` as TranslationKey)} {fmt.day(d.date)} · {data.hours[i]}:00
-                            </span>
-                            <TipRow color={heatColor(v)} label={t("admin.heat.legend")} value={pct(v)} />
-                          </div>,
-                        )
-                      }
-                      onPointerLeave={tip.hide}
-                    />
-                  ))}
-                </div>
-              ))}
-            </div>
-            <div className={`flex items-center gap-2 text-[10px] ${MUTED}`}>
-              <span>{t("admin.heat.legend")}</span>
-              <span>0%</span>
-              <div className="flex gap-[2px]">
-                {Array.from({ length: HEAT_STEPS }, (_, i) => (
-                  <span key={i} className="inline-block h-2.5 w-5 rounded-sm" style={{ background: `var(--viz-h${i})` }} />
-                ))}
-              </div>
-              <span>100%</span>
-            </div>
-          </div>
-          <div className="flex flex-col gap-3">
-            <span className={`text-sm font-medium ${TEXT}`}>{t("admin.heat.rooms")}</span>
-            <BarList
-              max={1}
-              rows={data.rooms.slice(0, 8).map((r) => ({
-                key: r.name ?? "",
-                label: r.name ?? "—",
-                sub: r.office,
-                value: r.busy ?? 0,
-                display: pct(r.busy),
-              }))}
-            />
-          </div>
-        </div>
-      )}
-    </Section>
   );
 }
 
@@ -734,13 +679,12 @@ export function AdminDashboard() {
             </div>
 
             {/* KPIs */}
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               {(
                 [
                   ["activeUsers", count],
                   ["bookings", count],
                   ["successRate", rate],
-                  ["chatToBooking", rate],
                 ] as const
               ).map(([key, format]) => (
                 <KpiTile
@@ -757,66 +701,27 @@ export function AdminDashboard() {
               ))}
             </div>
 
-            {/* 3. Rooms */}
+            {/* Bookings: outcomes in the range, then per day around a zero line. */}
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-              <Section
-                title={t("admin.bookings.title")}
-                hint={t("admin.bookings.total", { count: data.kpis.bookings.value ?? 0 })}
-                className="lg:col-span-2"
-              >
-                <StackedBars data={data.bookingsByDay} t={t} tip={tip} day={fmt.day} />
-                <div className="flex flex-wrap gap-x-6 gap-y-3 border-t border-[color:var(--separator)] pt-4">
-                  {(["success", "failed", "canceled", "pending"] as const).map((s) => (
-                    <Stat key={s} label={t(`admin.status.${s}`)} value={fmt.num(data.statusCounts[s])} />
-                  ))}
-                  {(["manual", "chatbot"] as const).map((m) => (
-                    <Stat key={m} label={t(`admin.method.${m}`)} value={fmt.num(data.methods[m])} />
-                  ))}
-                </div>
+              <Section title={t("admin.outcome.title")}>
+                <BookingOutcomes outcomes={data.bookingOutcomes} t={t} fmt={fmt} />
               </Section>
-              <Section title={t("admin.rooms.top")}>
-                {data.topRooms.length ? (
-                  <BarList
-                    max={data.topRooms[0]?.count ?? 0}
-                    rows={data.topRooms.map((r) => ({
-                      key: r.name ?? "",
-                      label: r.name ?? "—",
-                      sub: office ? null : r.office,
-                      value: r.count,
-                      display: fmt.num(r.count),
-                    }))}
-                  />
-                ) : (
-                  <Empty t={t} />
-                )}
-                <h3 className={`mt-2 text-sm font-medium ${TEXT}`}>{t("admin.rooms.least")}</h3>
-                <ul className="flex flex-col gap-1 text-sm">
-                  {data.leastRooms.slice(0, 5).map((r) => (
-                    <li key={r.name} className="flex justify-between gap-3">
-                      <span className={`truncate ${TEXT}`}>
-                        {r.name}
-                        {!office && r.office && <span className={`ml-1.5 text-xs ${MUTED}`}>{r.office}</span>}
-                      </span>
-                      <span className={`tabular-nums ${MUTED}`}>{fmt.num(r.count)}</span>
-                    </li>
-                  ))}
-                </ul>
+              <Section title={t("admin.bookings.title")} hint={t("admin.bookings.hint")} className="lg:col-span-2">
+                <DivergingBars
+                  data={data.bookingsByDay.map((d) => ({ date: d.date, up: d.success, down: d.canceled }))}
+                  up={TYPES.map((type) => ({ key: type, label: t(`admin.type.${type}`), color: TYPE_COLOR[type] }))}
+                  down={CANCEL_KINDS.map((kind) => ({ key: kind, label: t(`admin.cancel.${kind}`), color: CANCEL_COLOR[kind] }))}
+                  t={t}
+                  tip={tip}
+                  day={fmt.day}
+                />
               </Section>
             </div>
 
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-              <Heatmap office={office} t={t} tip={tip} fmt={fmt} />
-            </div>
-
-            {/* 2. Users */}
+            {/* Users */}
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
               <Section title={t("admin.users.title")}>
-                <div className="grid grid-cols-2 gap-4">
-                  <Stat label={t("admin.users.total")} value={fmt.num(data.users.total)} />
-                  <Stat label={t("admin.users.zalo")} value={fmt.num(data.users.zaloLinked)} />
-                  <Stat label={t("admin.users.botLinks")} value={fmt.num(data.users.botLinks)} />
-                  <Stat label={t("admin.users.revocations")} value={fmt.num(data.users.revocations)} />
-                </div>
+                <Stat label={t("admin.users.total")} value={fmt.num(data.users.total)} />
                 <h3 className={`text-sm font-medium ${TEXT}`}>{t("admin.users.newPerWeek")}</h3>
                 <BarList
                   max={Math.max(...data.users.newByWeek)}
@@ -833,11 +738,14 @@ export function AdminDashboard() {
                   max={1}
                   color="var(--viz-s3)"
                   rows={data.users.retention.map((r) => ({
-                    key: r.week,
-                    label: fmt.day(r.week),
-                    sub: r.partial ? t("admin.users.partial") : t("admin.users.retentionRow", { returned: r.returned, cohort: r.cohort }),
-                    value: r.cohort ? r.returned / r.cohort : 0,
-                    display: r.cohort ? pct(r.returned / r.cohort) : "—",
+                    key: r.month,
+                    label: fmt.month(r.month),
+                    sub: t(r.partial ? "admin.users.partial" : "admin.users.retentionRow", {
+                      returned: r.returned,
+                      cohort: r.cohort,
+                    }),
+                    value: r.rate ?? 0,
+                    display: pct(r.rate),
                   }))}
                 />
               </Section>
@@ -854,7 +762,7 @@ export function AdminDashboard() {
               </Section>
             </div>
 
-            {/* 4. Chatbot & Room Scout */}
+            {/* Chatbot & Room Scout */}
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
               <Section title={t("admin.chat.title")}>
                 <div className="grid grid-cols-3 gap-4">
@@ -890,12 +798,30 @@ export function AdminDashboard() {
                   />
                 </div>
                 <div className={`flex flex-wrap gap-x-4 gap-y-1 text-xs ${MUTED}`}>
-                  {Object.entries(data.scouts.byStatus).map(([s, n]) => (
-                    <span key={s}>
-                      {t(`admin.scout.status.${s}` as TranslationKey)}: <span className={`tabular-nums ${TEXT}`}>{n}</span>
+                  {(["success", "canceled_user", "canceled_auto", "active"] as const).map((o) => (
+                    <span key={o}>
+                      {t(`admin.scout.outcome.${o}`)}:{" "}
+                      <span className={`tabular-nums ${TEXT}`}>{fmt.num(data.scouts.outcomes[o])}</span>
                     </span>
                   ))}
                 </div>
+                <h3 className={`text-sm font-medium ${TEXT}`}>{t("admin.scout.byDay")}</h3>
+                <p className={`-mt-3 text-xs ${MUTED}`}>{t("admin.scout.byDayHint")}</p>
+                <DivergingBars
+                  data={data.scouts.byDay.map((d) => ({
+                    date: d.date,
+                    up: { success: d.success },
+                    down: { canceledUser: d.canceledUser, canceledAuto: d.canceledAuto },
+                  }))}
+                  up={[{ key: "success", label: t("admin.scout.outcome.success"), color: "var(--viz-s3)" }]}
+                  down={[
+                    { key: "canceledUser", label: t("admin.scout.outcome.canceled_user"), color: CANCEL_COLOR.user },
+                    { key: "canceledAuto", label: t("admin.scout.outcome.canceled_auto"), color: CANCEL_COLOR.auto },
+                  ]}
+                  t={t}
+                  tip={tip}
+                  day={fmt.day}
+                />
                 <h3 className={`text-sm font-medium ${TEXT}`}>{t("admin.scout.bySize")}</h3>
                 {data.scouts.demandBySize.length ? (
                   <ul className="flex flex-col gap-2">
@@ -937,7 +863,7 @@ export function AdminDashboard() {
                 )}
                 <Legend
                   items={[
-                    { color: "var(--viz-s1)", label: t("admin.scout.status.success") + " / " + t("admin.scout.status.active") },
+                    { color: "var(--viz-s1)", label: t("admin.scout.outcome.success") + " / " + t("admin.scout.outcome.active") },
                     { color: "var(--viz-s2)", label: t("admin.scout.unmet") },
                   ]}
                 />
@@ -956,6 +882,41 @@ export function AdminDashboard() {
           </>
         )}
       </main>
+    </div>
+  );
+}
+
+/** What happened to bookings in the range; doubles as the chart's table view. */
+function BookingOutcomes({
+  outcomes,
+  t,
+  fmt,
+}: {
+  outcomes: AdminOverview["bookingOutcomes"];
+  t: TFunction;
+  fmt: ReturnType<typeof useFormat>;
+}) {
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="grid grid-cols-2 gap-4">
+        <Stat label={t("admin.outcome.success")} value={fmt.num(outcomes.success)} />
+        <Stat label={t("admin.outcome.canceled")} value={fmt.num(outcomes.canceled.total)} />
+      </div>
+      <ul className="flex flex-col gap-1.5 border-l-2 border-[color:var(--separator)] pl-3 text-sm">
+        {CANCEL_KINDS.map((kind) => (
+          <li key={kind} className="flex items-center justify-between gap-3">
+            <span className={`flex items-center gap-1.5 ${MUTED}`}>
+              <span className="inline-block size-2.5 rounded-sm" style={{ background: CANCEL_COLOR[kind] }} />
+              {t(`admin.cancel.${kind}`)}
+            </span>
+            <span className={`tabular-nums ${TEXT}`}>{fmt.num(outcomes.canceled[kind])}</span>
+          </li>
+        ))}
+      </ul>
+      <div className="grid grid-cols-2 gap-4 border-t border-[color:var(--separator)] pt-4">
+        <Stat label={t("admin.outcome.failed")} value={fmt.num(outcomes.failed)} hint={t("admin.outcome.failedHint")} />
+        <Stat label={t("admin.outcome.declined")} value={fmt.num(outcomes.declined)} />
+      </div>
     </div>
   );
 }
