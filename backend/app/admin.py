@@ -50,6 +50,9 @@ CANCEL_KINDS = ("user", "outlook", "auto", "unknown")
 SPARK_WEEKS = 8
 RETENTION_MONTHS = 6
 RECENT_ROWS = 10
+SHAME_ROWS = 10
+# Thread intents written by chat.py (TOOL_INTENT); "none" = thread with no intent yet.
+CHAT_INTENTS = ("book", "schedule", "scout", "update", "delete", "info", "none")
 
 AVAILABILITY_WARN_MIN = 15
 AVAILABILITY_DOWN_MIN = 30
@@ -228,6 +231,25 @@ def _activity_view(row: dict, profiles: dict[str, dict]) -> dict:
     }
 
 
+def _minutes(hhmm: str | None) -> int | None:
+    try:
+        h, m = (hhmm or "").split(":")[:2]
+        return int(h) * 60 + int(m)
+    except ValueError:
+        return None
+
+
+def _hours_covered(start: str | None, end: str | None) -> list[int]:
+    """Clock hours a [start, end) window touches: 09:30–11:00 → [9, 10].
+    Without a usable end, just the start hour."""
+    s, e = _minutes(start), _minutes(end)
+    if s is None:
+        return []
+    if e is None or e <= s:
+        return [s // 60]
+    return list(range(s // 60, (e - 1) // 60 + 1))
+
+
 def _month_start(day: date_cls) -> date_cls:
     return day.replace(day=1)
 
@@ -334,24 +356,51 @@ def compute_overview(
     # the axis by type, cancellations below it by who cancelled).
     outcomes = Counter(booking_outcome(r) for r in cur)
     cancels = Counter(cancel_kind(r) for r in cur if booking_outcome(r) == "canceled")
-    range_days = [range_start + timedelta(days=i) for i in range(days)]
-    per_day: dict[date_cls, Counter] = {d: Counter() for d in range_days}
-    for r in cur:
+    # Last 7 days (today included), whatever the selected range.
+    last7 = [today - timedelta(days=i) for i in range(6, -1, -1)]
+    per_day: dict[date_cls, Counter] = {d: Counter() for d in last7}
+    for r in activity:
         d = day_of(r)
-        outcome = booking_outcome(r)
         if d not in per_day:
             continue
+        outcome = booking_outcome(r)
         if outcome == "success":
             per_day[d][r.get("booking_type") or "instant"] += 1
         elif outcome == "canceled":
             per_day[d][f"cancel_{cancel_kind(r)}"] += 1
-    bookings_by_day = [
+    bookings_last7 = [
         {
             "date": d.isoformat(),
+            "weekday": d.weekday(),
             "success": {t: per_day[d].get(t, 0) for t in BOOKING_TYPES},
             "canceled": {k: per_day[d].get(f"cancel_{k}", 0) for k in CANCEL_KINDS},
         }
-        for d in range_days
+        for d in last7
+    ]
+
+    # Hall of shame: who books and then lets Outlook auto-release the room
+    # (no check-in) most often in the range.
+    auto_by_user: Counter = Counter()
+    booked_by_user: Counter = Counter()
+    for r in booked(cur):
+        user_id = r.get("user_id")
+        if not user_id:
+            continue
+        booked_by_user[user_id] += 1
+        if booking_outcome(r) == "canceled" and cancel_kind(r) == "auto":
+            auto_by_user[user_id] += 1
+    shame = sorted(
+        auto_by_user.items(),
+        key=lambda item: (-item[1], -(item[1] / booked_by_user[item[0]]), item[0]),
+    )[:SHAME_ROWS]
+    hall_of_shame = [
+        {
+            "email": (profiles.get(user_id) or {}).get("email"),
+            "autoCanceled": count,
+            "booked": booked_by_user[user_id],
+            "rate": _rate(count, booked_by_user[user_id]),
+        }
+        for user_id, count in shame
     ]
 
     # Users.
@@ -362,8 +411,8 @@ def compute_overview(
         if d and d >= weeks[0]:
             new_by_week[_week_start(d)] += 1
 
-    # Monthly retention: users whose first booking was in month M — the share who
-    # booked again in M+1. The newest cohort's follow-up month may be in progress.
+    # Monthly cohorts: users grouped by the month of their first booking; cell k
+    # is the share of the cohort that booked in month M+k (k=0 is 100%).
     booked_months: dict[str, set[date_cls]] = defaultdict(set)
     first_month: dict[str, date_cls] = {}
     for r in sorted(booking_events, key=lambda r: r.get("created_at") or ""):
@@ -377,48 +426,72 @@ def compute_overview(
     for user_id, month in first_month.items():
         cohorts[month].append(user_id)
     retention = []
-    for i in range(RETENTION_MONTHS, 0, -1):
+    for i in range(RETENTION_MONTHS - 1, -1, -1):
         month = _add_months(this_month, -i)
-        nxt = _add_months(month, 1)
         members = cohorts.get(month, [])
-        returned = sum(1 for u in members if nxt in booked_months[u])
+        cells = []
+        for k in range(1, RETENTION_MONTHS):
+            target = _add_months(month, k)
+            if target > this_month:
+                cells.append(None)
+                continue
+            returned = sum(1 for u in members if target in booked_months[u])
+            cells.append({"returned": returned, "rate": _rate(returned, len(members)), "partial": target == this_month})
+        done = [c for c in cells if c and not c["partial"]]
         retention.append(
             {
                 "month": month.isoformat(),
                 "cohort": len(members),
-                "returned": returned,
-                "rate": _rate(returned, len(members)),
-                "partial": nxt == this_month,
+                "cells": cells,
+                # Mean over the finished months only; a running month would drag it down.
+                "avg": _rate(sum(c["returned"] for c in done), len(members) * len(done)),
             }
         )
-
-    by_office = Counter((p.get("office") or "") for p in profiles.values())
+    # All users: per column, cohorts pooled (weighted by size), finished months only.
+    all_cells = []
+    for k in range(RETENTION_MONTHS - 1):
+        pool = [(r["cells"][k]["returned"], r["cohort"]) for r in retention
+                if r["cohort"] and r["cells"][k] and not r["cells"][k]["partial"]]
+        returned, size = sum(p[0] for p in pool), sum(p[1] for p in pool)
+        all_cells.append({"returned": returned, "users": size, "rate": _rate(returned, size)} if pool else None)
+    pooled = [c for c in all_cells if c]
+    retention_all = {
+        "cohort": sum(r["cohort"] for r in retention),
+        "cells": all_cells,
+        "avg": _rate(sum(c["returned"] for c in pooled), sum(c["users"] for c in pooled)),
+    }
 
     # Chatbot.
     convs_in_range = sum(1 for r in threads if in_range(day_of(r), range_start, today))
     chat_bookings = sum(1 for r in booked(cur) if r.get("method") == "chatbot")
     fb = [m for m in feedback_messages if user_ok(m.get("to_user_id")) and in_range(day_of(m), range_start, today)]
+    intents = Counter(
+        (r.get("intent") if r.get("intent") in CHAT_INTENTS else "none")
+        for r in threads
+        if in_range(day_of(r), range_start, today)
+    )
     negatives = sorted((m for m in fb if m.get("feedback") == "negative"), key=lambda m: m.get("created_at") or "", reverse=True)
 
     # Room Scout: every scout that ended without a room counts against it.
     scouts_cur = [r for r in scouts if in_range(day_of(r), range_start, today)]
     scout_outcomes = Counter(scout_outcome(r) for r in scouts_cur)
     scout_finished = len(scouts_cur) - scout_outcomes.get("active", 0)
-    scout_per_day: dict[date_cls, Counter] = {d: Counter() for d in range_days}
+    scout_per_day: dict[date_cls, Counter] = {d: Counter() for d in last7}
     size_demand, size_unmet, hour_demand = Counter(), Counter(), Counter()
     for r in scouts_cur:
         outcome = scout_outcome(r)
-        d = day_of(r)
-        if d in scout_per_day and outcome != "active":
-            scout_per_day[d][outcome] += 1
         sizes = r.get("capacity_sizes") or ([r["capacity_size"]] if r.get("capacity_size") else ["any"])
         for size in sizes:
             size_demand[size] += 1
             if outcome in ("canceled_user", "canceled_auto"):
                 size_unmet[size] += 1
-        start = r.get("scout_start_time") or ""
-        if ":" in start:
-            hour_demand[int(start.split(":")[0])] += 1
+        for hour in _hours_covered(r.get("scout_start_time"), r.get("scout_end_time")):
+            hour_demand[hour] += 1
+    for r in scouts:
+        outcome = scout_outcome(r)
+        d = day_of(r)
+        if d in scout_per_day and outcome != "active":
+            scout_per_day[d][outcome] += 1
 
     return {
         "range": {"days": days, "start": range_start.isoformat(), "end": today.isoformat()},
@@ -430,17 +503,19 @@ def compute_overview(
             "failed": outcomes.get("failed", 0),
             "declined": outcomes.get("declined", 0),
         },
-        "bookingsByDay": bookings_by_day,
+        "bookingsLast7": bookings_last7,
+        "hallOfShame": hall_of_shame,
         "users": {
             "total": len(scoped_profiles),
             "newByWeek": [new_by_week[w] for w in weeks],
             "retention": retention,
-            "byOffice": [{"office": o or None, "count": c} for o, c in by_office.most_common()],
+            "retentionAll": retention_all,
         },
         "chatbot": {
             "conversations": convs_in_range,
             "chatbotBookings": chat_bookings,
             "rate": _rate(chat_bookings, convs_in_range),
+            "intents": [{"intent": i, "count": intents.get(i, 0)} for i in CHAT_INTENTS],
             "feedback": {
                 "positive": sum(1 for m in fb if m.get("feedback") == "positive"),
                 "negative": len(negatives),
@@ -458,14 +533,15 @@ def compute_overview(
             "total": len(scouts_cur),
             "outcomes": {k: scout_outcomes.get(k, 0) for k in ("success", "canceled_user", "canceled_auto", "active")},
             "successRate": _rate(scout_outcomes.get("success", 0), scout_finished),
-            "byDay": [
+            "last7": [
                 {
                     "date": d.isoformat(),
+                    "weekday": d.weekday(),
                     "success": scout_per_day[d].get("success", 0),
                     "canceledUser": scout_per_day[d].get("canceled_user", 0),
                     "canceledAuto": scout_per_day[d].get("canceled_auto", 0),
                 }
-                for d in range_days
+                for d in last7
             ],
             "demandBySize": [{"size": s, "count": c, "unmet": size_unmet.get(s, 0)} for s, c in size_demand.most_common()],
             "demandByHour": [{"hour": h, "count": hour_demand.get(h, 0)} for h in range(7, 21)],
@@ -564,12 +640,12 @@ def _build_overview(days: int, office: str | None) -> dict:
     if office:
         booking_events = [r for r in booking_events if room_office.get((r.get("room_email") or "").lower()) == office]
     threads = _fetch_all(
-        lambda: sb.table("thread").select("id, user_id, created_at").gte("created_at", since).order("created_at")
+        lambda: sb.table("thread").select("id, user_id, intent, created_at").gte("created_at", since).order("created_at")
     )
     scouts = _fetch_all(
         lambda: sb.table("room_scouts")
         .select(
-            "id, user_id, office, status, capacity_size, capacity_sizes, scout_start_time, "
+            "id, user_id, office, status, capacity_size, capacity_sizes, scout_start_time, scout_end_time, "
             "expires_at, updated_at, created_at"
         )
         .gte("created_at", since)

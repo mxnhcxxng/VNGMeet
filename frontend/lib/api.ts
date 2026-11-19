@@ -304,6 +304,9 @@ export interface AdminHealth {
 /** Who cancelled a booking, from user_activity.note. */
 export type AdminCancelKind = "user" | "outlook" | "auto" | "unknown";
 export type AdminScoutOutcome = "success" | "canceled_user" | "canceled_auto" | "active";
+export type AdminChatIntent = "book" | "schedule" | "scout" | "update" | "delete" | "info" | "none";
+/** 0 = Monday … 6 = Sunday. */
+export type AdminWeekday = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 
 export interface AdminOverview {
   generatedAt: string;
@@ -318,22 +321,39 @@ export interface AdminOverview {
     failed: number;
     declined: number;
   };
-  bookingsByDay: {
+  /** The last 7 days (today last), regardless of the selected range. */
+  bookingsLast7: {
     date: string;
+    weekday: AdminWeekday;
     success: Record<AdminBookingType, number>;
     canceled: Record<AdminCancelKind, number>;
   }[];
+  /** Top users by bookings Outlook auto-released (no check-in) in the range. */
+  hallOfShame: { email: string | null; autoCanceled: number; booked: number; rate: number | null }[];
   users: {
     total: number;
     newByWeek: number[];
-    /** Last 6 months, oldest first; `partial` = the follow-up month is still running. */
-    retention: { month: string; cohort: number; returned: number; rate: number | null; partial: boolean }[];
-    byOffice: { office: string | null; count: number }[];
+    /** Cohorts by first-booking month, last 6 months oldest first. `cells[k-1]` is
+     *  month M+k (null = still in the future; `partial` = month in progress). */
+    retention: {
+      month: string;
+      cohort: number;
+      cells: ({ returned: number; rate: number | null; partial: boolean } | null)[];
+      /** Mean of the finished months' rates. */
+      avg: number | null;
+    }[];
+    /** Every cohort above pooled (weighted by size), finished months only. */
+    retentionAll: {
+      cohort: number;
+      cells: ({ returned: number; users: number; rate: number | null } | null)[];
+      avg: number | null;
+    };
   };
   chatbot: {
     conversations: number;
     chatbotBookings: number;
     rate: number | null;
+    intents: { intent: AdminChatIntent; count: number }[];
     feedback: { positive: number; negative: number };
     recentNegative: { at: string | null; email: string | null; content: string }[];
   };
@@ -341,8 +361,10 @@ export interface AdminOverview {
     total: number;
     outcomes: Record<AdminScoutOutcome, number>;
     successRate: number | null;
-    byDay: { date: string; success: number; canceledUser: number; canceledAuto: number }[];
+    /** The last 7 days (today last), regardless of the selected range. */
+    last7: { date: string; weekday: AdminWeekday; success: number; canceledUser: number; canceledAuto: number }[];
     demandBySize: { size: string; count: number; unmet: number }[];
+    /** Scouts whose [start, end) window touches each clock hour. */
     demandByHour: { hour: number; count: number }[];
   };
   recentFailures: AdminActivityRow[];

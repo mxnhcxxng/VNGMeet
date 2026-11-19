@@ -28,6 +28,7 @@ import {
   type AdminKpi,
   type AdminLevel,
   type AdminOverview,
+  type AdminWeekday,
 } from "@/lib/api";
 import { BrandIcon } from "@/components/BrandIcon";
 import { useLanguage, useT } from "@/app/providers";
@@ -315,9 +316,17 @@ function KpiTile({
 }
 
 type BarSeries = { key: string; label: string; color: string };
-type DivergingDay = { date: string; up: Record<string, number>; down: Record<string, number> };
+type DivergingColumn = {
+  key: string;
+  /** Axis label under the column. */
+  label: string;
+  /** Tooltip heading. */
+  title: string;
+  up: Record<string, number>;
+  down: Record<string, number>;
+};
 
-/** Daily stacked bars around a zero line: `up` series grow above it, `down`
+/** Stacked columns around a zero line: `up` series grow above it, `down`
  *  series (cancellations) below it, both on one scale. Series stack outward in
  *  the order given; only the outermost segment gets the rounded end. */
 function DivergingBars({
@@ -326,14 +335,12 @@ function DivergingBars({
   down,
   t,
   tip,
-  day,
 }: {
-  data: DivergingDay[];
+  data: DivergingColumn[];
   up: BarSeries[];
   down: BarSeries[];
   t: TFunction;
   tip: TipApi;
-  day: (iso: string) => string;
 }) {
   const sum = (values: Record<string, number>, series: BarSeries[]) =>
     series.reduce((total, s) => total + (values[s.key] ?? 0), 0);
@@ -342,7 +349,6 @@ function DivergingBars({
   if (!maxUp && !maxDown) return <Empty t={t} />;
   const scale = maxUp + maxDown;
   const upShare = (maxUp / scale) * 100;
-  const labelEvery = Math.ceil(data.length / 8);
 
   const segments = (values: Record<string, number>, series: BarSeries[], dir: "up" | "down") => {
     const present = series.filter((s) => values[s.key]);
@@ -386,13 +392,13 @@ function DivergingBars({
         <div className="flex h-full gap-[2px]">
           {data.map((d) => (
             <div
-              key={d.date}
+              key={d.key}
               className="flex h-full min-w-0 flex-1 cursor-default flex-col"
               onPointerMove={(e) =>
                 tip.show(
                   e,
                   <div className="flex flex-col gap-1">
-                    <span className={`font-medium ${TEXT}`}>{day(d.date)}</span>
+                    <span className={`font-medium ${TEXT}`}>{d.title}</span>
                     {up.map((s) => (
                       <TipRow key={s.key} color={s.color} label={s.label} value={String(d.up[s.key] ?? 0)} />
                     ))}
@@ -416,11 +422,9 @@ function DivergingBars({
         </div>
       </div>
       <div className={`flex h-3 gap-[2px] pr-8 text-[10px] ${MUTED}`}>
-        {data.map((d, i) => (
-          <span key={d.date} className="relative min-w-0 flex-1">
-            {i % labelEvery === 0 && (
-              <span className="absolute left-1/2 -translate-x-1/2 whitespace-nowrap tabular-nums">{day(d.date)}</span>
-            )}
+        {data.map((d) => (
+          <span key={d.key} className="min-w-0 flex-1 truncate text-center">
+            {d.label}
           </span>
         ))}
       </div>
@@ -565,6 +569,10 @@ export function AdminDashboard() {
 
   const count = (v: number) => fmt.num(Math.round(v));
   const rate = (v: number) => pct(v);
+  const dayColumn = (d: { date: string; weekday: AdminWeekday }) => {
+    const label = `${t(`admin.weekday.${d.weekday}`)} ${fmt.day(d.date)}`;
+    return { key: d.date, label, title: label };
+  };
 
   return (
     <div className="admin-viz min-h-[100dvh] bg-[#f0f0f1] dark:bg-[#13161b]">
@@ -708,12 +716,11 @@ export function AdminDashboard() {
               </Section>
               <Section title={t("admin.bookings.title")} hint={t("admin.bookings.hint")} className="lg:col-span-2">
                 <DivergingBars
-                  data={data.bookingsByDay.map((d) => ({ date: d.date, up: d.success, down: d.canceled }))}
+                  data={data.bookingsLast7.map((d) => ({ ...dayColumn(d), up: d.success, down: d.canceled }))}
                   up={TYPES.map((type) => ({ key: type, label: t(`admin.type.${type}`), color: TYPE_COLOR[type] }))}
                   down={CANCEL_KINDS.map((kind) => ({ key: kind, label: t(`admin.cancel.${kind}`), color: CANCEL_COLOR[kind] }))}
                   t={t}
                   tip={tip}
-                  day={fmt.day}
                 />
               </Section>
             </div>
@@ -733,32 +740,8 @@ export function AdminDashboard() {
                   }))}
                 />
               </Section>
-              <Section title={t("admin.users.retention")} hint={t("admin.users.retentionHint")}>
-                <BarList
-                  max={1}
-                  color="var(--viz-s3)"
-                  rows={data.users.retention.map((r) => ({
-                    key: r.month,
-                    label: fmt.month(r.month),
-                    sub: t(r.partial ? "admin.users.partial" : "admin.users.retentionRow", {
-                      returned: r.returned,
-                      cohort: r.cohort,
-                    }),
-                    value: r.rate ?? 0,
-                    display: pct(r.rate),
-                  }))}
-                />
-              </Section>
-              <Section title={t("admin.users.byOffice")}>
-                <BarList
-                  max={data.users.byOffice[0]?.count ?? 0}
-                  rows={data.users.byOffice.map((o) => ({
-                    key: o.office ?? "none",
-                    label: o.office ?? t("admin.users.noOffice"),
-                    value: o.count,
-                    display: fmt.num(o.count),
-                  }))}
-                />
+              <Section title={t("admin.users.retention")} hint={t("admin.users.retentionHint")} className="lg:col-span-2">
+                <CohortTable rows={data.users.retention} all={data.users.retentionAll} t={t} fmt={fmt} tip={tip} />
               </Section>
             </div>
 
@@ -771,6 +754,17 @@ export function AdminDashboard() {
                   <Stat label={t("admin.kpi.chatToBooking")} value={pct(data.chatbot.rate)} />
                 </div>
                 <FeedbackBar fb={data.chatbot.feedback} t={t} tip={tip} />
+                <h3 className={`text-sm font-medium ${TEXT}`}>{t("admin.chat.intents")}</h3>
+                <p className={`-mt-3 text-xs ${MUTED}`}>{t("admin.chat.intentsHint")}</p>
+                <BarList
+                  max={Math.max(0, ...data.chatbot.intents.map((i) => i.count))}
+                  rows={data.chatbot.intents.map((i) => ({
+                    key: i.intent,
+                    label: t(`admin.intent.${i.intent}`),
+                    value: i.count,
+                    display: `${fmt.num(i.count)} · ${pct(data.chatbot.conversations ? i.count / data.chatbot.conversations : null)}`,
+                  }))}
+                />
                 <h3 className={`text-sm font-medium ${TEXT}`}>{t("admin.chat.recentNegative")}</h3>
                 {data.chatbot.recentNegative.length ? (
                   <ul className="flex max-h-72 flex-col gap-2 overflow-y-auto">
@@ -808,8 +802,8 @@ export function AdminDashboard() {
                 <h3 className={`text-sm font-medium ${TEXT}`}>{t("admin.scout.byDay")}</h3>
                 <p className={`-mt-3 text-xs ${MUTED}`}>{t("admin.scout.byDayHint")}</p>
                 <DivergingBars
-                  data={data.scouts.byDay.map((d) => ({
-                    date: d.date,
+                  data={data.scouts.last7.map((d) => ({
+                    ...dayColumn(d),
                     up: { success: d.success },
                     down: { canceledUser: d.canceledUser, canceledAuto: d.canceledAuto },
                   }))}
@@ -820,7 +814,6 @@ export function AdminDashboard() {
                   ]}
                   t={t}
                   tip={tip}
-                  day={fmt.day}
                 />
                 <h3 className={`text-sm font-medium ${TEXT}`}>{t("admin.scout.bySize")}</h3>
                 {data.scouts.demandBySize.length ? (
@@ -873,6 +866,9 @@ export function AdminDashboard() {
             </div>
 
             {/* Issues */}
+            <Section title={t("admin.shame.title")} hint={t("admin.shame.hint")}>
+              <ShameTable rows={data.hallOfShame} t={t} fmt={fmt} />
+            </Section>
             <Section title={t("admin.issues.failures")}>
               <ActivityTable rows={data.recentFailures} t={t} fmt={fmt} />
             </Section>
@@ -987,6 +983,158 @@ function HourColumns({ data, tip, label }: { data: { hour: number; count: number
           </span>
         ))}
       </div>
+    </div>
+  );
+}
+
+/** Cohort triangle: one row per first-booking month, one column per month after,
+ *  then each cohort's average; the last row pools every cohort. Cell shade is a
+ *  single-hue ramp on the rate; the number is always printed. */
+function CohortTable({
+  rows,
+  all,
+  t,
+  fmt,
+  tip,
+}: {
+  rows: AdminOverview["users"]["retention"];
+  all: AdminOverview["users"]["retentionAll"];
+  t: TFunction;
+  fmt: ReturnType<typeof useFormat>;
+  tip: TipApi;
+}) {
+  if (!rows.some((r) => r.cohort)) return <Empty t={t} />;
+  const offsets = rows[0]?.cells.map((_, i) => i + 1) ?? [];
+  const allLabel = t("admin.users.cohortAll");
+
+  const cell = (key: string, rate: number | null, opts: { partial?: boolean; title: string; detail: string }) => {
+    const strength = rate ?? 0;
+    return (
+      <td
+        key={key}
+        className={`rounded-md px-2 py-1.5 text-center tabular-nums ${strength > 0.5 ? "text-white" : TEXT}`}
+        style={{
+          background:
+            rate == null
+              ? "var(--viz-track)"
+              : `color-mix(in oklab, var(--viz-s1) ${Math.round(12 + strength * 88)}%, var(--viz-surface))`,
+        }}
+        onPointerMove={(e) =>
+          tip.show(
+            e,
+            <div className="flex flex-col gap-1">
+              <span className={`font-medium ${TEXT}`}>{opts.title}</span>
+              <TipRow label={opts.detail} value={pct(rate, 1)} />
+            </div>,
+          )
+        }
+        onPointerLeave={tip.hide}
+      >
+        {pct(rate)}
+        {opts.partial ? "*" : ""}
+      </td>
+    );
+  };
+
+  return (
+    <div className="-mx-1 overflow-x-auto">
+      <table className="w-full min-w-[600px] border-separate border-spacing-[2px] text-sm">
+        <thead className={`text-xs ${MUTED}`}>
+          <tr>
+            <th className="px-2 pb-1 text-left font-medium">{t("admin.users.cohort")}</th>
+            <th className="px-2 pb-1 text-right font-medium">{t("admin.users.cohortSize")}</th>
+            {offsets.map((k) => (
+              <th key={k} className="px-2 pb-1 text-center font-medium tabular-nums">
+                M+{k}
+              </th>
+            ))}
+            <th className={`px-2 pb-1 text-center font-semibold ${TEXT}`}>{t("admin.users.cohortAvg")}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.month}>
+              <td className={`whitespace-nowrap px-2 py-1.5 tabular-nums ${TEXT}`}>{fmt.month(row.month)}</td>
+              <td className={`px-2 py-1.5 text-right tabular-nums ${MUTED}`}>{fmt.num(row.cohort)}</td>
+              {row.cells.map((c, i) =>
+                !c || !row.cohort
+                  ? <td key={i} />
+                  : cell(String(i), c.rate, {
+                      partial: c.partial,
+                      title: `${fmt.month(row.month)} · M+${i + 1}`,
+                      detail: t(c.partial ? "admin.users.partial" : "admin.users.retentionRow", {
+                        returned: c.returned,
+                        cohort: row.cohort,
+                      }),
+                    }),
+              )}
+              {row.cohort && row.avg != null
+                ? cell("avg", row.avg, {
+                    title: `${fmt.month(row.month)} · ${t("admin.users.cohortAvg")}`,
+                    detail: t("admin.users.avgHint"),
+                  })
+                : <td />}
+            </tr>
+          ))}
+          <tr>
+            <td className={`whitespace-nowrap border-t border-[color:var(--separator)] px-2 py-1.5 font-semibold ${TEXT}`}>
+              {allLabel}
+            </td>
+            <td className={`border-t border-[color:var(--separator)] px-2 py-1.5 text-right tabular-nums ${MUTED}`}>
+              {fmt.num(all.cohort)}
+            </td>
+            {all.cells.map((c, i) =>
+              !c
+                ? <td key={i} className="border-t border-[color:var(--separator)]" />
+                : cell(String(i), c.rate, {
+                    title: `${allLabel} · M+${i + 1}`,
+                    detail: t("admin.users.retentionRow", { returned: c.returned, cohort: c.users }),
+                  }),
+            )}
+            {all.avg != null
+              ? cell("avg", all.avg, { title: `${allLabel} · ${t("admin.users.cohortAvg")}`, detail: t("admin.users.avgHint") })
+              : <td />}
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function ShameTable({
+  rows,
+  t,
+  fmt,
+}: {
+  rows: AdminOverview["hallOfShame"];
+  t: TFunction;
+  fmt: ReturnType<typeof useFormat>;
+}) {
+  if (!rows.length) return <p className={`text-sm ${MUTED}`}>{t("admin.shame.none")}</p>;
+  return (
+    <div className="-mx-1 overflow-x-auto">
+      <table className="w-full min-w-[420px] text-left text-sm">
+        <thead className={`text-xs ${MUTED}`}>
+          <tr>
+            <th className="w-8 px-1 pb-2 font-medium">#</th>
+            <th className="px-1 pb-2 font-medium">{t("admin.col.user")}</th>
+            <th className="px-1 pb-2 text-right font-medium">{t("admin.shame.auto")}</th>
+            <th className="px-1 pb-2 text-right font-medium">{t("admin.shame.booked")}</th>
+            <th className="px-1 pb-2 text-right font-medium">{t("admin.shame.rate")}</th>
+          </tr>
+        </thead>
+        <tbody className={TEXT}>
+          {rows.map((row, i) => (
+            <tr key={row.email ?? i} className="border-t border-[color:var(--separator)]">
+              <td className={`px-1 py-2 tabular-nums ${MUTED}`}>{i + 1}</td>
+              <td className="px-1 py-2">{row.email ?? "—"}</td>
+              <td className="px-1 py-2 text-right font-medium tabular-nums">{fmt.num(row.autoCanceled)}</td>
+              <td className={`px-1 py-2 text-right tabular-nums ${MUTED}`}>{fmt.num(row.booked)}</td>
+              <td className={`px-1 py-2 text-right tabular-nums ${MUTED}`}>{pct(row.rate)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
