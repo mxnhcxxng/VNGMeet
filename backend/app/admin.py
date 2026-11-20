@@ -579,7 +579,12 @@ def compute_overview(
         if outcome == "success":
             c[r.get("booking_type") or "instant"] += 1
         elif outcome == "canceled":
-            c[f"cancel_{cancel_kind(r)}"] += 1
+            kind = cancel_kind(r)
+            c[f"cancel_{kind}"] += 1
+            # Cancels with a known cause still went through: the overview chart
+            # adds them back onto their booking type. "unknown" counts as a fail.
+            if kind != "unknown":
+                c[f"canceled_type_{r.get('booking_type') or 'instant'}"] += 1
         elif outcome == "declined":
             c["declined"] += 1
     for p in scoped_profiles:
@@ -594,6 +599,8 @@ def compute_overview(
             "start": b,
             "success": {t: counters[b].get(t, 0) for t in BOOKING_TYPES},
             "canceled": {k: counters[b].get(f"cancel_{k}", 0) for k in CANCEL_KINDS},
+            # Cancelled by user / Outlook / auto, split by booking type ("unknown" excluded).
+            "canceledByType": {t: counters[b].get(f"canceled_type_{t}", 0) for t in BOOKING_TYPES},
             "declined": counters[b].get("declined", 0),
             "newUsers": counters[b].get("new_users", 0),
             "scouts": {
@@ -849,13 +856,13 @@ def admin_overview(
     gran: str | None = Query(None, pattern="^(hour|day|week|month|year)$"),
     office: str | None = Query(None, max_length=64),
 ):
-    """Dashboard for the period [from, to] (local dates, default: the last 7
+    """Dashboard for the period [from, to] (local dates, default: the last 30
     days), split into `gran` buckets (default: picked from the period length)."""
     _require_admin(request)
     office = office or None
     today = datetime.now(ZoneInfo(settings.timezone)).date()
     end = min(date_to or today, today)
-    start = date_from or end - timedelta(days=6)
+    start = date_from or end - timedelta(days=29)
     if start > end:
         raise HTTPException(400, "`from` must be on or before `to`")
     span = (end - start).days + 1

@@ -51,7 +51,9 @@ import type { TFunction, TranslationKey } from "@/lib/i18n";
 
 const TEXT = "text-[#181d27] dark:text-[#f7f7f7]";
 const MUTED = "text-[#71717a] dark:text-[#94979c]";
-const CARD = "rounded-2xl bg-white p-4 shadow-sm dark:bg-[#13161b]";
+// Same card as Booking History: white with a hairline border on the white page,
+// #13161b on the #0c0e12 page in dark mode.
+const CARD = "rounded-2xl border border-[color:var(--separator)] bg-white p-4 dark:bg-[#13161b]";
 
 const TYPES: AdminBookingType[] = ["instant", "scheduled", "scout"];
 const TYPE_COLOR: Record<AdminBookingType, string> = {
@@ -75,7 +77,7 @@ const VIZ_STYLE = `
 .admin-viz {
   --viz-s1: #2a78d6; --viz-s2: #eb6834; --viz-s3: #1baf7a;
   --viz-c-user: #eda100; --viz-c-outlook: #e87ba4; --viz-c-auto: #6250d6; --viz-c-unknown: #a4a7ae; --viz-declined: #e34948;
-  --viz-grid: #e9e9eb; --viz-axis: #a4a7ae; --viz-track: #f0efec; --viz-surface: #ffffff;
+  --viz-grid: #e9e9eb; --viz-axis: #a4a7ae; --viz-track: #f0f0f1; --viz-surface: #ffffff;
   --viz-good: #0ca30c; --viz-warning: #fab219; --viz-critical: #d03b3b;
 }
 html.dark .admin-viz {
@@ -758,11 +760,12 @@ export function AdminDashboard() {
   const tip = useTip();
   const today = useMemo(() => isoDay(new Date()), []);
   const [phase, setPhase] = useState<Phase>("loading");
-  const [preset, setPreset] = useState<Preset>("7d");
+  const [preset, setPreset] = useState<Preset>("30d");
   const [custom, setCustom] = useState<Period>(() => presetPeriod("30d", today));
   // null = the period's default; a pick only lasts until the period changes.
   const [gran, setGran] = useState<AdminGranularity | null>(null);
   const [office, setOffice] = useState<string | null>(null);
+  const [chartMode, setChartMode] = useState<"overview" | "detail">("overview");
   const [tab, setTab] = useState<DashTab>(() =>
     typeof window === "undefined" ? "overview" : tabFromPath(window.location.pathname),
   );
@@ -873,18 +876,57 @@ export function AdminDashboard() {
       ]
     : [];
 
+  // Bookings chart, two readings of the same rows:
+  //   overview — per booking type, cancels with a known cause folded back into
+  //              their type; unknown cancels + room declines below as "failed";
+  //   detail   — successes by type and cancels by who cancelled above, unknown
+  //              cancels and room declines below.
+  const KNOWN_CANCELS = CANCEL_KINDS.filter((k) => k !== "unknown");
   const bookingsChart = data && (
     <DivergingBars
-      data={data.trend.map((b) => ({ ...bucketColumn(b.start), up: b.success, down: { ...b.canceled, declined: b.declined } }))}
-      up={TYPES.map((type) => ({ key: type, label: t(`admin.type.${type}`), color: TYPE_COLOR[type] }))}
-      down={[
-        ...CANCEL_KINDS.map((kind) => ({ key: kind, label: t(`admin.cancel.${kind}`), color: CANCEL_COLOR[kind] })),
-        { key: "declined", label: t("admin.outcome.declined"), color: "var(--viz-declined)" },
+      data={data.trend.map((b) => ({
+        ...bucketColumn(b.start),
+        up:
+          chartMode === "overview"
+            ? Object.fromEntries(TYPES.map((type) => [type, b.success[type] + b.canceledByType[type]]))
+            : { ...b.success, ...Object.fromEntries(KNOWN_CANCELS.map((k) => [k, b.canceled[k]])) },
+        down: (chartMode === "overview"
+          ? { failed: b.canceled.unknown + b.declined }
+          : { unknown: b.canceled.unknown, declined: b.declined }) as Record<string, number>,
+      }))}
+      up={[
+        ...TYPES.map((type) => ({ key: type, label: t(`admin.type.${type}`), color: TYPE_COLOR[type] })),
+        ...(chartMode === "detail"
+          ? KNOWN_CANCELS.map((kind) => ({ key: kind, label: t(`admin.cancel.${kind}`), color: CANCEL_COLOR[kind] }))
+          : []),
       ]}
+      down={
+        chartMode === "overview"
+          ? [{ key: "failed", label: t("admin.bookings.failed"), color: "var(--viz-declined)" }]
+          : [
+              { key: "unknown", label: t("admin.cancel.unknown"), color: CANCEL_COLOR.unknown },
+              { key: "declined", label: t("admin.outcome.declined"), color: "var(--viz-declined)" },
+            ]
+      }
       t={t}
       tip={tip}
     />
   );
+  const chartModeToggle = (
+    <Tabs selectedKey={chartMode} onSelectionChange={(k) => setChartMode(k as "overview" | "detail")}>
+      <Tabs.ListContainer>
+        <Tabs.List aria-label={t("admin.bookings.title")}>
+          {(["overview", "detail"] as const).map((m) => (
+            <Tabs.Tab key={m} id={m} className="whitespace-nowrap">
+              {t(`admin.bookings.mode.${m}`)}
+              <Tabs.Indicator />
+            </Tabs.Tab>
+          ))}
+        </Tabs.List>
+      </Tabs.ListContainer>
+    </Tabs>
+  );
+  const bookingsHint = t(chartMode === "overview" ? "admin.bookings.hintOverview" : "admin.bookings.hintDetail");
 
   const scoutStats = data && (
     <div className="grid grid-cols-3 gap-4">
@@ -921,12 +963,12 @@ export function AdminDashboard() {
   );
 
   return (
-    <div className="admin-viz h-full overflow-y-auto bg-[#f0f0f1] dark:bg-[#0c0e12]">
+    <div className="admin-viz h-full overflow-y-auto bg-white dark:bg-[#0c0e12]">
       <style>{VIZ_STYLE}</style>
       <TipLayer tip={tip.tip} />
 
       {/* Filters + tabs: pinned while scrolling from `sm` up. */}
-      <div className="z-20 border-b border-[color:var(--separator)] bg-[#f0f0f1]/95 backdrop-blur dark:bg-[#0c0e12]/95 sm:sticky sm:top-0">
+      <div className="z-20 border-b border-[color:var(--separator)] bg-white/95 backdrop-blur dark:bg-[#0c0e12]/95 sm:sticky sm:top-0">
         <div className="flex w-full flex-col gap-3 px-3 pt-3 sm:px-4 sm:pt-4">
           {phase === "ready" && (
             <>
@@ -1110,7 +1152,16 @@ export function AdminDashboard() {
                   ))}
                 </div>
 
-                <Section title={t("admin.bookings.title")} hint={t("admin.bookings.hint")} action={more("bookings")}>
+                <Section
+                  title={t("admin.bookings.title")}
+                  hint={bookingsHint}
+                  action={
+                    <div className="flex flex-wrap items-center gap-2">
+                      {chartModeToggle}
+                      {more("bookings")}
+                    </div>
+                  }
+                >
                   {bookingsChart}
                 </Section>
 
@@ -1128,7 +1179,7 @@ export function AdminDashboard() {
 
             {tab === "bookings" && (
               <>
-                <Section title={t("admin.bookings.title")} hint={t("admin.bookings.hint")}>
+                <Section title={t("admin.bookings.title")} hint={bookingsHint} action={chartModeToggle}>
                   {bookingsChart}
                 </Section>
                 <div className="grid grid-cols-1 gap-3 sm:gap-4 lg:grid-cols-3">

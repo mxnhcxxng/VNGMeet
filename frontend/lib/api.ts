@@ -341,6 +341,8 @@ export interface AdminOverview {
     start: string;
     success: Record<AdminBookingType, number>;
     canceled: Record<AdminCancelKind, number>;
+    /** Cancelled by user / Outlook / auto, by booking type ("unknown" left out). */
+    canceledByType: Record<AdminBookingType, number>;
     declined: number;
     newUsers: number;
     scouts: { success: number; canceledUser: number; canceledAuto: number };
