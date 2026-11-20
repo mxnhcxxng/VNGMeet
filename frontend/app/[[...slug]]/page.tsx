@@ -40,6 +40,7 @@ import { linkMicrosoft, relinkFromStoredSession } from "@/lib/linkMicrosoft";
 import { isZaloMiniAppFlow } from "@/lib/zaloReturn";
 import ZaloReturnScreen from "@/components/ZaloReturnScreen";
 import { Sidebar, type View } from "@/components/Sidebar";
+import { AdminDashboard } from "@/components/AdminDashboard";
 import { TokenExpiryProvider } from "@/components/TokenExpiryProvider";
 import { BrowseRooms } from "@/components/BrowseRooms";
 import {
@@ -117,6 +118,7 @@ const VIEW_TO_PATH: Record<Exclude<View, "chat">, string> = {
   bookingHistory: "/booking-history",
   roomScout: "/room-scout",
   roomWiki: "/room-list",
+  dashboard: "/dashboard",
 };
 const SEGMENT_TO_VIEW: Record<string, View> = {
   browse: "browse",
@@ -125,6 +127,8 @@ const SEGMENT_TO_VIEW: Record<string, View> = {
   "room-scout": "roomScout",
   "room-list": "roomWiki",
   "room-wiki": "roomWiki", // old URL, kept so shared links still work
+  dashboard: "dashboard",
+  admin: "dashboard", // the dashboard used to be its own /admin page
   chat: "chat",
 };
 
@@ -875,6 +879,7 @@ const MOBILE_TITLE_KEY: Record<View, TranslationKey> = {
   roomWiki: "sidebar.roomWiki",
   bookingHistory: "sidebar.bookingHistory",
   settings: "sidebar.settings",
+  dashboard: "sidebar.dashboard",
 };
 
 export default function Home() {
@@ -969,6 +974,7 @@ export default function Home() {
     }
   };
   const cancelLeave = () => setPendingNav(null);
+  const isAdmin = me?.profile?.role === "admin";
   const canEnterBooking = Boolean(
     me?.authenticated && me.profileComplete !== false,
   );
@@ -983,7 +989,11 @@ export default function Home() {
   useEffect(() => {
     if (!canEnterBooking) return;
     const target = routeForView(view, activeThreadId);
-    if (window.location.pathname === target) {
+    // The dashboard keeps its own sub-tab in /dashboard/<tab>.
+    const onTarget =
+      window.location.pathname === target ||
+      (view === "dashboard" && window.location.pathname.startsWith("/dashboard/"));
+    if (onTarget) {
       urlSyncedRef.current = true;
       return;
     }
@@ -1497,6 +1507,7 @@ export default function Home() {
         onLogout={handleLogout}
         scoutingActive={scoutingActive}
         showRoomWiki={canSeeRoomWiki}
+        showDashboard={isAdmin}
         chatThreads={chatThreads}
         chatThreadsLoading={chatThreadsLoading}
         activeThreadId={activeThreadId}
@@ -1558,6 +1569,8 @@ export default function Home() {
         <div className="min-h-0 flex-1">
           {view === "bookingHistory" ? (
             <BookingHistory />
+          ) : view === "dashboard" && isAdmin ? (
+            <AdminDashboard />
           ) : view === "roomWiki" && canSeeRoomWiki ? (
             <RoomWiki buildingOptions={profileOptions?.building ?? []} />
           ) : view === "roomScout" ? (

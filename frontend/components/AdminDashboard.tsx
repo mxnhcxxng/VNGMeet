@@ -11,11 +11,25 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
-import { Button, Spinner } from "@heroui/react";
 import {
-  ArrowRotateRight,
+  Button,
+  Chip,
+  DateRangePicker,
+  ListBox,
+  ListBoxItem,
+  RangeCalendar,
+  Select,
+  Spinner,
+  Tabs,
+} from "@heroui/react";
+import { parseDate } from "@internationalized/date";
+import { I18nProvider } from "react-aria-components";
+import {
+  ArrowsRotateRight,
+  Calendar as CalendarIcon,
   CircleCheckFill,
   CircleExclamationFill,
   TriangleExclamationFill,
@@ -28,6 +42,7 @@ import {
   type AdminKpi,
   type AdminLevel,
   type AdminOverview,
+  type AdminGranularity,
   type AdminWeekday,
 } from "@/lib/api";
 import { BrandIcon } from "@/components/BrandIcon";
@@ -36,9 +51,8 @@ import type { TFunction, TranslationKey } from "@/lib/i18n";
 
 const TEXT = "text-[#181d27] dark:text-[#f7f7f7]";
 const MUTED = "text-[#71717a] dark:text-[#94979c]";
-const CARD = "rounded-2xl bg-white p-5 shadow-sm dark:bg-[#0c0e12]";
+const CARD = "rounded-2xl bg-white p-4 shadow-sm dark:bg-[#13161b]";
 
-const RANGES = [7, 30, 90] as const;
 const TYPES: AdminBookingType[] = ["instant", "scheduled", "scout"];
 const TYPE_COLOR: Record<AdminBookingType, string> = {
   instant: "var(--viz-s1)",
@@ -60,14 +74,14 @@ const CANCEL_COLOR: Record<AdminCancelKind, string> = {
 const VIZ_STYLE = `
 .admin-viz {
   --viz-s1: #2a78d6; --viz-s2: #eb6834; --viz-s3: #1baf7a;
-  --viz-c-user: #eda100; --viz-c-outlook: #e87ba4; --viz-c-auto: #6250d6; --viz-c-unknown: #a4a7ae;
+  --viz-c-user: #eda100; --viz-c-outlook: #e87ba4; --viz-c-auto: #6250d6; --viz-c-unknown: #a4a7ae; --viz-declined: #e34948;
   --viz-grid: #e9e9eb; --viz-axis: #a4a7ae; --viz-track: #f0efec; --viz-surface: #ffffff;
   --viz-good: #0ca30c; --viz-warning: #fab219; --viz-critical: #d03b3b;
 }
 html.dark .admin-viz {
   --viz-s1: #3987e5; --viz-s2: #d95926; --viz-s3: #199e70;
-  --viz-c-user: #c98500; --viz-c-outlook: #d55181; --viz-c-auto: #9085e9; --viz-c-unknown: #5d6068;
-  --viz-grid: #22262f; --viz-axis: #5d6068; --viz-track: #1a1d23; --viz-surface: #0c0e12;
+  --viz-c-user: #c98500; --viz-c-outlook: #d55181; --viz-c-auto: #9085e9; --viz-c-unknown: #5d6068; --viz-declined: #e66767;
+  --viz-grid: #2a2f38; --viz-axis: #5d6068; --viz-track: #22262f; --viz-surface: #13161b;
 }`;
 
 // --------------------------------------------------------------------------- //
@@ -85,6 +99,7 @@ function useFormat() {
       num: (n: number) => n.toLocaleString(locale),
       day: (iso: string) =>
         new Date(`${iso}T00:00:00`).toLocaleDateString(locale, { day: "2-digit", month: "2-digit" }),
+      dayYear: (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`,
       // "05/2026" in both languages (vi-VN would spell it "tháng 05, 2026").
       month: (iso: string) => `${iso.slice(5, 7)}/${iso.slice(0, 4)}`,
       dateTime: (iso: string | null) =>
@@ -125,7 +140,7 @@ function TipLayer({ tip }: { tip: Tip }) {
   return (
     <div
       role="tooltip"
-      className="pointer-events-none fixed z-[200] max-w-[240px] rounded-lg border border-[color:var(--separator)] bg-white px-3 py-2 text-xs shadow-lg dark:bg-[#13161b]"
+      className="pointer-events-none fixed z-[200] max-w-[240px] rounded-lg border border-[color:var(--separator)] bg-white px-3 py-2 text-xs shadow-lg dark:bg-[#1a1d23]"
       style={{
         left: flip ? undefined : tip.x + 12,
         right: flip ? window.innerWidth - tip.x + 12 : undefined,
@@ -152,12 +167,33 @@ function TipRow({ color, label, value }: { color?: string; label: string; value:
 // --------------------------------------------------------------------------- //
 // Building blocks
 // --------------------------------------------------------------------------- //
-function Section({ title, hint, children, className = "" }: { title: string; hint?: string; children: ReactNode; className?: string }) {
+function Section({
+  title,
+  hint,
+  action,
+  badge,
+  children,
+  className = "",
+}: {
+  title: string;
+  hint?: string;
+  action?: ReactNode;
+  /** Scope that differs from the page's period, e.g. "Right now". */
+  badge?: string;
+  children: ReactNode;
+  className?: string;
+}) {
   return (
     <section className={`${CARD} flex min-w-0 flex-col gap-4 ${className}`}>
-      <header>
-        <h2 className={`text-base font-semibold ${TEXT}`}>{title}</h2>
-        {hint && <p className={`mt-0.5 text-xs ${MUTED}`}>{hint}</p>}
+      <header className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <h2 className={`flex flex-wrap items-center gap-2 text-base font-semibold ${TEXT}`}>
+            {title}
+            {badge && <Badge>{badge}</Badge>}
+          </h2>
+          {hint && <p className={`mt-0.5 text-xs ${MUTED}`}>{hint}</p>}
+        </div>
+        {action}
       </header>
       {children}
     </section>
@@ -195,7 +231,7 @@ const LEVEL_COLOR: Record<AdminLevel, string> = {
 function HealthCard({ t, title, level, detail }: { t: TFunction; title: string; level: AdminLevel; detail: string }) {
   const Icon = LEVEL_ICON[level];
   return (
-    <div className={`${CARD} flex flex-col gap-2 !p-4`}>
+    <div className={`${CARD} flex flex-col gap-2`}>
       <span className={`text-sm ${MUTED}`}>{title}</span>
       <span className={`flex items-center gap-1.5 text-base font-semibold ${TEXT}`}>
         <Icon width={16} height={16} style={{ color: LEVEL_COLOR[level] }} aria-hidden />
@@ -206,33 +242,37 @@ function HealthCard({ t, title, level, detail }: { t: TFunction; title: string; 
   );
 }
 
-/** Weekly sparkline; nulls (no data that week) break the line. The last week is
- *  still in progress, so it's drawn dashed with a hollow marker. */
+/** Sparkline, one point per bucket of the period; nulls (no data) break the
+ *  line. When the period reaches today the last bucket is still filling up, so
+ *  it's drawn dashed with a hollow marker. */
 function Sparkline({
   series,
-  weeks,
+  buckets,
+  lastPartial,
   format,
   tip,
-  dayLabel,
+  bucketTitle,
 }: {
   series: (number | null)[];
-  weeks: string[];
+  buckets: string[];
+  lastPartial: boolean;
   format: (v: number) => string;
   tip: TipApi;
-  dayLabel: (iso: string) => string;
+  bucketTitle: (iso: string) => string;
 }) {
   const W = 120;
   const H = 32;
   const values = series.filter((v): v is number => v != null);
-  if (!values.length) return <div style={{ height: H }} />;
+  if (series.length < 2 || !values.length) return <div style={{ height: H }} />;
   const max = Math.max(...values);
   const min = Math.min(0, ...values);
   const span = max - min || 1;
   const step = W / Math.max(series.length - 1, 1);
   const pts = series.map((v, i) => (v == null ? null : [i * step, H - 3 - ((v - min) / span) * (H - 6)]));
+  const solid = lastPartial ? pts.slice(0, -1) : pts;
   const segments: string[] = [];
   let current = "";
-  pts.slice(0, -1).forEach((p) => {
+  solid.forEach((p) => {
     if (!p) {
       if (current) segments.push(current);
       current = "";
@@ -248,7 +288,7 @@ function Sparkline({
       {segments.map((d) => (
         <path key={d} d={d} fill="none" stroke="var(--viz-s1)" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
       ))}
-      {last && beforeLast && (
+      {lastPartial && last && beforeLast && (
         <path
           d={`M${beforeLast[0]},${beforeLast[1]}L${last[0]},${last[1]}`}
           fill="none"
@@ -257,16 +297,25 @@ function Sparkline({
           strokeDasharray="3 3"
         />
       )}
-      {last && <circle cx={last[0]} cy={last[1]} r={3} fill="var(--viz-surface)" stroke="var(--viz-s1)" strokeWidth={2} />}
+      {last && (
+        <circle
+          cx={last[0]}
+          cy={last[1]}
+          r={3}
+          fill={lastPartial ? "var(--viz-surface)" : "var(--viz-s1)"}
+          stroke="var(--viz-s1)"
+          strokeWidth={2}
+        />
+      )}
       {series.map((v, i) => (
         <rect
-          key={weeks[i]}
+          key={buckets[i]}
           x={i * step - step / 2}
           y={0}
           width={step}
           height={H}
           fill="transparent"
-          onPointerMove={(e) => tip.show(e, <TipRow label={dayLabel(weeks[i])} value={v == null ? "—" : format(v)} />)}
+          onPointerMove={(e) => tip.show(e, <TipRow label={bucketTitle(buckets[i])} value={v == null ? "—" : format(v)} />)}
           onPointerLeave={tip.hide}
         />
       ))}
@@ -279,37 +328,49 @@ function KpiTile({
   label,
   kpi,
   format,
-  days,
-  weeks,
+  buckets,
+  lastPartial,
+  granLabel,
+  bucketTitle,
+  compareTitle,
   tip,
-  dayLabel,
 }: {
   t: TFunction;
   label: string;
   kpi: AdminKpi;
+  /** Tooltip naming both periods' dates, e.g. "14/11 – 20/11 vs 07/11 – 13/11". */
+  compareTitle: string;
   format: (v: number) => string;
-  days: number;
-  weeks: string[];
+  buckets: string[];
+  lastPartial: boolean;
+  granLabel: string;
+  bucketTitle: (iso: string) => string;
   tip: TipApi;
-  dayLabel: (iso: string) => string;
 }) {
   const delta = kpi.value != null && kpi.prev != null ? kpi.value - kpi.prev : null;
   return (
-    <div className={`${CARD} flex flex-col gap-3 !p-4`}>
+    <div className={`${CARD} flex flex-col gap-3`}>
       <span className={`text-sm ${MUTED}`}>{label}</span>
       <div className="flex items-end justify-between gap-3">
         <span className={`text-2xl font-semibold tabular-nums ${TEXT}`}>{kpi.value == null ? "—" : format(kpi.value)}</span>
-        <Sparkline series={kpi.series} weeks={weeks} format={format} tip={tip} dayLabel={dayLabel} />
+        <Sparkline
+          series={kpi.series}
+          buckets={buckets}
+          lastPartial={lastPartial}
+          format={format}
+          tip={tip}
+          bucketTitle={bucketTitle}
+        />
       </div>
       <div className={`flex justify-between gap-3 text-xs tabular-nums ${MUTED}`}>
-        <span>
+        <span title={compareTitle} className="cursor-help">
           {delta != null && (
             <>
-              {delta > 0 ? "▲" : delta < 0 ? "▼" : "•"} {format(Math.abs(delta))} {t("admin.kpi.vsPrev", { days })}
+              {delta > 0 ? "▲" : delta < 0 ? "▼" : "•"} {format(Math.abs(delta))} {t("admin.kpi.vsPrevPeriod")}
             </>
           )}
         </span>
-        <span className="shrink-0 text-[10px]">{t("admin.kpi.weekly")}</span>
+        <span className="shrink-0 text-[10px]">{t("admin.kpi.by", { gran: granLabel.toLowerCase() })}</span>
       </div>
     </div>
   );
@@ -349,6 +410,7 @@ function DivergingBars({
   if (!maxUp && !maxDown) return <Empty t={t} />;
   const scale = maxUp + maxDown;
   const upShare = (maxUp / scale) * 100;
+  const labelEvery = Math.ceil(data.length / 8);
 
   const segments = (values: Record<string, number>, series: BarSeries[], dir: "up" | "down") => {
     const present = series.filter((s) => values[s.key]);
@@ -370,7 +432,7 @@ function DivergingBars({
 
   return (
     <div className="flex flex-col gap-3">
-      <Legend items={[...up, ...down].map((s) => ({ color: s.color, label: s.label }))} />
+      {up.length + down.length > 1 && <Legend items={[...up, ...down].map((s) => ({ color: s.color, label: s.label }))} />}
       <div className="relative h-56 pr-8">
         {/* Axis labels: the largest stack on each side, and the zero line. */}
         {maxUp > 0 && (
@@ -422,9 +484,11 @@ function DivergingBars({
         </div>
       </div>
       <div className={`flex h-3 gap-[2px] pr-8 text-[10px] ${MUTED}`}>
-        {data.map((d) => (
-          <span key={d.key} className="min-w-0 flex-1 truncate text-center">
-            {d.label}
+        {data.map((d, i) => (
+          <span key={d.key} className="relative min-w-0 flex-1">
+            {i % labelEvery === 0 && (
+              <span className="absolute left-1/2 -translate-x-1/2 whitespace-nowrap tabular-nums">{d.label}</span>
+            )}
           </span>
         ))}
       </div>
@@ -513,38 +577,205 @@ function ActivityTable({ rows, t, fmt }: { rows: AdminActivityRow[]; t: TFunctio
   );
 }
 
-function Chip({ active, onPress, children }: { active: boolean; onPress: () => void; children: ReactNode }) {
-  return (
-    <button
-      type="button"
-      onClick={onPress}
-      aria-pressed={active}
-      className={`h-8 rounded-full px-3 text-sm font-medium transition-colors ${
-        active
-          ? "bg-[#181d27] text-white dark:bg-[#f7f7f7] dark:text-[#181d27]"
-          : "bg-[#ebebec] text-[#181d27] hover:bg-[#e0e0e1] dark:bg-[#22262f] dark:text-[#f7f7f7] dark:hover:bg-[#2a2f38]"
-      }`}
-    >
-      {children}
-    </button>
-  );
-}
-
 // --------------------------------------------------------------------------- //
 // Page
 // --------------------------------------------------------------------------- //
 type Phase = "loading" | "unauthenticated" | "forbidden" | "ready";
 
+// --------------------------------------------------------------------------- //
+// Period: one for the whole page, compared with the equally long one before it.
+// --------------------------------------------------------------------------- //
+const PRESETS = ["today", "7d", "30d", "thisMonth", "lastMonth", "3m", "12m", "custom"] as const;
+type Preset = (typeof PRESETS)[number];
+type Period = { from: string; to: string };
+const GRANULARITIES: AdminGranularity[] = ["hour", "day", "week", "month", "year"];
+const MAX_PERIOD_DAYS = 731;
+
+function isoDay(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function shiftDays(iso: string, n: number): string {
+  const d = new Date(`${iso}T00:00:00`);
+  d.setDate(d.getDate() + n);
+  return isoDay(d);
+}
+
+function shiftMonths(iso: string, n: number): string {
+  const d = new Date(`${iso}T00:00:00`);
+  const day = d.getDate();
+  d.setDate(1);
+  d.setMonth(d.getMonth() + n);
+  const last = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+  d.setDate(Math.min(day, last));
+  return isoDay(d);
+}
+
+function presetPeriod(preset: Exclude<Preset, "custom">, today: string): Period {
+  switch (preset) {
+    case "today":
+      return { from: today, to: today };
+    case "7d":
+      return { from: shiftDays(today, -6), to: today };
+    case "30d":
+      return { from: shiftDays(today, -29), to: today };
+    case "thisMonth":
+      return { from: `${today.slice(0, 8)}01`, to: today };
+    case "lastMonth": {
+      const first = shiftMonths(`${today.slice(0, 8)}01`, -1);
+      return { from: first, to: shiftDays(`${today.slice(0, 8)}01`, -1) };
+    }
+    case "3m":
+      return { from: shiftDays(shiftMonths(today, -3), 1), to: today };
+    case "12m":
+      return { from: shiftDays(shiftMonths(today, -12), 1), to: today };
+  }
+}
+
+function spanDays({ from, to }: Period): number {
+  return Math.round((new Date(`${to}T00:00:00`).getTime() - new Date(`${from}T00:00:00`).getTime()) / 86_400_000) + 1;
+}
+
+/** Mirrors backend `allowed_granularities` / `default_granularity`. */
+function allowedGranularities(span: number): AdminGranularity[] {
+  const out = GRANULARITIES.filter(
+    (g) =>
+      (g === "hour" && span <= 3) ||
+      (g === "day" && span <= 92) ||
+      (g === "week" && span >= 14) ||
+      (g === "month" && span >= 60) ||
+      (g === "year" && span >= 365),
+  );
+  return out.length ? out : ["day"];
+}
+
+function defaultGranularity(span: number): AdminGranularity {
+  if (span === 1) return "hour";
+  return span <= 31 ? "day" : span <= 92 ? "week" : "month";
+}
+
+// --------------------------------------------------------------------------- //
+// Sub-tabs, mirrored into /dashboard/<tab> so a tab can be linked.
+// --------------------------------------------------------------------------- //
+const TABS = ["overview", "bookings", "users", "chat", "scout", "issues"] as const;
+type DashTab = (typeof TABS)[number];
+
+function tabFromPath(pathname: string): DashTab {
+  const segment = pathname.split("/").filter(Boolean)[1];
+  return (TABS as readonly string[]).includes(segment ?? "") ? (segment as DashTab) : "overview";
+}
+
+/** Labelled dropdown, same shape as Booking History's filters. */
+function FilterSelect<T extends string>({
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  label: string;
+  value: T;
+  onChange: (v: T) => void;
+  options: { value: T; label: string }[];
+}) {
+  return (
+    <div className="flex min-w-0 items-center gap-2">
+      <span className={`whitespace-nowrap text-sm ${MUTED}`}>{label}</span>
+      <Select aria-label={label} variant="secondary" selectedKey={value} onSelectionChange={(k) => onChange(String(k) as T)}>
+        <Select.Trigger className="min-w-[140px]">
+          <Select.Value />
+          <Select.Indicator />
+        </Select.Trigger>
+        <Select.Popover>
+          <ListBox>
+            {options.map((o) => (
+              <ListBoxItem key={o.value} id={o.value}>
+                {o.label}
+              </ListBoxItem>
+            ))}
+          </ListBox>
+        </Select.Popover>
+      </Select>
+    </div>
+  );
+}
+
+/** Custom period: HeroUI range picker with the app's calendar trigger style. */
+function PeriodPicker({
+  value,
+  max,
+  onChange,
+  label,
+  format,
+}: {
+  value: Period;
+  max: string;
+  onChange: (p: Period) => void;
+  label: string;
+  format: (iso: string) => string;
+}) {
+  // The custom trigger has no DateInput for react-aria to anchor the popover to.
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  return (
+    <I18nProvider locale="en-GB">
+      <DateRangePicker
+        aria-label={label}
+        value={{ start: parseDate(value.from), end: parseDate(value.to) }}
+        maxValue={parseDate(max)}
+        onChange={(range) => range && onChange({ from: range.start.toString(), to: range.end.toString() })}
+      >
+        <DateRangePicker.Trigger
+          ref={triggerRef}
+          className="flex min-h-9 items-center gap-2 rounded-field bg-[var(--default)] px-3 py-2 text-sm font-medium text-[var(--foreground)] outline-none transition-colors hover:bg-[var(--default-hover)]"
+        >
+          <CalendarIcon width={16} height={16} className="shrink-0 text-default-500" />
+          <span className="tabular-nums">
+            {format(value.from)} – {format(value.to)}
+          </span>
+        </DateRangePicker.Trigger>
+        <DateRangePicker.Popover triggerRef={triggerRef} placement="bottom start" className="!max-w-none !min-w-fit w-fit">
+          <RangeCalendar firstDayOfWeek="mon" maxValue={parseDate(max)}>
+            <RangeCalendar.Header>
+              <RangeCalendar.Heading className="text-left first-letter:uppercase" />
+              <div className="flex items-center gap-1">
+                <RangeCalendar.NavButton slot="previous" />
+                <RangeCalendar.NavButton slot="next" />
+              </div>
+            </RangeCalendar.Header>
+            <RangeCalendar.Grid>
+              <RangeCalendar.GridHeader>{(day) => <RangeCalendar.HeaderCell>{day}</RangeCalendar.HeaderCell>}</RangeCalendar.GridHeader>
+              <RangeCalendar.GridBody>{(date) => <RangeCalendar.Cell date={date} />}</RangeCalendar.GridBody>
+            </RangeCalendar.Grid>
+          </RangeCalendar>
+        </DateRangePicker.Popover>
+      </DateRangePicker>
+    </I18nProvider>
+  );
+}
+
 export function AdminDashboard() {
   const t = useT();
   const fmt = useFormat();
   const tip = useTip();
+  const today = useMemo(() => isoDay(new Date()), []);
   const [phase, setPhase] = useState<Phase>("loading");
-  const [days, setDays] = useState<(typeof RANGES)[number]>(7);
+  const [preset, setPreset] = useState<Preset>("7d");
+  const [custom, setCustom] = useState<Period>(() => presetPeriod("30d", today));
+  // null = the period's default; a pick only lasts until the period changes.
+  const [gran, setGran] = useState<AdminGranularity | null>(null);
   const [office, setOffice] = useState<string | null>(null);
+  const [tab, setTab] = useState<DashTab>(() =>
+    typeof window === "undefined" ? "overview" : tabFromPath(window.location.pathname),
+  );
   const [data, setData] = useState<AdminOverview | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const period = preset === "custom" ? custom : presetPeriod(preset, today);
+  const span = spanDays(period);
+  const periodValid = span >= 1 && span <= MAX_PERIOD_DAYS && period.to <= today;
+  const grans = allowedGranularities(span);
+  // A granularity that no longer fits the period falls back to the default.
+  const activeGran = gran && grans.includes(gran) ? gran : defaultGranularity(span);
 
   useEffect(() => {
     api
@@ -553,15 +784,29 @@ export function AdminDashboard() {
       .catch((e: Error) => setPhase(e.message === "UNAUTHENTICATED" ? "unauthenticated" : "forbidden"));
   }, []);
 
+  useEffect(() => {
+    const onPop = () => setTab(tabFromPath(window.location.pathname));
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
+  const changeTab = (next: DashTab) => {
+    setTab(next);
+    const path = next === "overview" ? "/dashboard" : `/dashboard/${next}`;
+    if (window.location.pathname !== path) window.history.pushState(window.history.state, "", path);
+  };
+
   const load = useCallback(() => {
+    if (!periodValid) return;
     setLoading(true);
     setError(null);
     api
-      .adminOverview(days, office)
+      .adminOverview({ from: period.from, to: period.to, gran: activeGran, office })
       .then(setData)
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [days, office]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [period.from, period.to, activeGran, office, periodValid]);
 
   useEffect(() => {
     if (phase === "ready") load();
@@ -569,53 +814,224 @@ export function AdminDashboard() {
 
   const count = (v: number) => fmt.num(Math.round(v));
   const rate = (v: number) => pct(v);
-  const dayColumn = (d: { date: string; weekday: AdminWeekday }) => {
-    const label = `${t(`admin.weekday.${d.weekday}`)} ${fmt.day(d.date)}`;
-    return { key: d.date, label, title: label };
+  // Axis label and tooltip heading for one bucket.
+  const bucketColumn = (start: string) => {
+    if (activeGran === "hour") {
+      // "2026-11-20T14:00": label the hour; over several days, also the date.
+      const day = start.slice(0, 10);
+      const hour = start.slice(11, 16);
+      const weekday = ((new Date(`${day}T00:00:00`).getDay() + 6) % 7) as AdminWeekday;
+      return {
+        key: start,
+        label: span > 1 ? `${fmt.day(day)} ${hour.slice(0, 2)}h` : hour,
+        title: `${t(`admin.weekday.${weekday}`)} ${fmt.day(day)} · ${hour}`,
+      };
+    }
+    if (activeGran === "year") return { key: start, label: start.slice(0, 4), title: start.slice(0, 4) };
+    if (activeGran === "month") return { key: start, label: fmt.month(start), title: fmt.month(start) };
+    if (activeGran === "week") return { key: start, label: fmt.day(start), title: t("admin.gran.weekOf", { date: fmt.day(start) }) };
+    const weekday = ((new Date(`${start}T00:00:00`).getDay() + 6) % 7) as AdminWeekday;
+    return { key: start, label: fmt.day(start), title: `${t(`admin.weekday.${weekday}`)} ${fmt.day(start)}` };
   };
+  const rangeLabel = (from: string, to: string) =>
+    from === to ? fmt.dayYear(from) : `${fmt.dayYear(from)} – ${fmt.dayYear(to)}`;
+
+  const health = data?.health;
+  const healthCards = health
+    ? [
+        {
+          key: "availability",
+          title: t("admin.health.availability"),
+          level: health.availability.level,
+          detail:
+            health.availability.ageMinutes == null
+              ? t("admin.health.availabilityNever")
+              : t("admin.health.availabilityAge", { minutes: Math.round(health.availability.ageMinutes) }),
+        },
+        {
+          key: "tokens",
+          title: t("admin.health.tokens"),
+          level: health.tokenPool.level,
+          detail: t("admin.health.tokensDetail", {
+            active: health.tokenPool.active,
+            expired: health.tokenPool.expired,
+            invalid: health.tokenPool.invalid,
+          }),
+        },
+        {
+          key: "failures",
+          title: t("admin.health.failures"),
+          level: health.failures24h.level,
+          detail: t("admin.health.failuresDetail", { failed: health.failures24h.failed, total: health.failures24h.total }),
+        },
+        {
+          key: "stuck",
+          title: t("admin.health.stuck"),
+          level: health.stuckPending.level,
+          detail: `${health.stuckPending.count} · ${t("admin.health.stuckDetail")}`,
+        },
+      ]
+    : [];
+
+  const bookingsChart = data && (
+    <DivergingBars
+      data={data.trend.map((b) => ({ ...bucketColumn(b.start), up: b.success, down: { ...b.canceled, declined: b.declined } }))}
+      up={TYPES.map((type) => ({ key: type, label: t(`admin.type.${type}`), color: TYPE_COLOR[type] }))}
+      down={[
+        ...CANCEL_KINDS.map((kind) => ({ key: kind, label: t(`admin.cancel.${kind}`), color: CANCEL_COLOR[kind] })),
+        { key: "declined", label: t("admin.outcome.declined"), color: "var(--viz-declined)" },
+      ]}
+      t={t}
+      tip={tip}
+    />
+  );
+
+  const scoutStats = data && (
+    <div className="grid grid-cols-3 gap-4">
+      <Stat label={t("admin.scout.total")} value={fmt.num(data.scouts.total)} />
+      <Stat label={t("admin.scout.successRate")} value={pct(data.scouts.successRate)} hint={t("admin.scout.successHint")} />
+      <Stat
+        label={t("admin.scout.declines")}
+        value={
+          data.scouts.declinesBeforeFound.avg == null
+            ? "—"
+            : data.scouts.declinesBeforeFound.avg.toLocaleString(undefined, { maximumFractionDigits: 1 })
+        }
+        hint={t("admin.scout.declinesHint", {
+          withDeclines: data.scouts.declinesBeforeFound.withDeclines,
+          found: data.scouts.declinesBeforeFound.found,
+          max: data.scouts.declinesBeforeFound.max,
+        })}
+      />
+    </div>
+  );
+
+  const chatStats = data && (
+    <div className="grid grid-cols-3 gap-4">
+      <Stat label={t("admin.chat.conversations")} value={fmt.num(data.chatbot.conversations)} />
+      <Stat label={t("admin.chat.bookings")} value={fmt.num(data.chatbot.chatbotBookings)} />
+      <Stat label={t("admin.kpi.chatToBooking")} value={pct(data.chatbot.rate)} />
+    </div>
+  );
+
+  const more = (target: DashTab) => (
+    <Button size="sm" variant="ghost" className="shrink-0 rounded-full" onPress={() => changeTab(target)}>
+      {t("admin.more")} →
+    </Button>
+  );
 
   return (
-    <div className="admin-viz min-h-[100dvh] bg-[#f0f0f1] dark:bg-[#13161b]">
+    <div className="admin-viz h-full overflow-y-auto bg-[#f0f0f1] dark:bg-[#0c0e12]">
       <style>{VIZ_STYLE}</style>
       <TipLayer tip={tip.tip} />
-      <main className="mx-auto flex w-full max-w-[1280px] flex-col gap-4 px-4 py-6 sm:px-6 sm:py-10">
-        <header className="flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <BrandIcon size={36} />
-            <div>
-              <h1 className={`text-xl font-semibold ${TEXT}`}>{t("admin.title")}</h1>
-              <p className={`text-sm ${MUTED}`}>
-                {data ? t("admin.updated", { time: fmt.time(data.generatedAt) }) : t("admin.subtitle")}
-              </p>
-            </div>
-          </div>
-          {phase === "ready" && (
-            <div className="flex flex-wrap items-center gap-2">
-              {RANGES.map((r) => (
-                <Chip key={r} active={days === r} onPress={() => setDays(r)}>
-                  {t("admin.range", { days: r })}
-                </Chip>
-              ))}
-              <select
-                value={office ?? ""}
-                onChange={(e) => setOffice(e.target.value || null)}
-                className="h-8 rounded-full border-0 bg-[#ebebec] px-3 text-sm font-medium text-[#181d27] dark:bg-[#22262f] dark:text-[#f7f7f7]"
-              >
-                <option value="">{t("admin.office.all")}</option>
-                {(data?.offices ?? []).map((o) => (
-                  <option key={o} value={o}>
-                    {o}
-                  </option>
-                ))}
-              </select>
-              <Button size="sm" variant="secondary" className="rounded-full" onPress={load} isDisabled={loading}>
-                {loading ? <Spinner size="sm" /> : <ArrowRotateRight width={14} height={14} />}
-                {t("admin.refresh")}
-              </Button>
-            </div>
-          )}
-        </header>
 
+      {/* Filters + tabs: pinned while scrolling from `sm` up. */}
+      <div className="z-20 border-b border-[color:var(--separator)] bg-[#f0f0f1]/95 backdrop-blur dark:bg-[#0c0e12]/95 sm:sticky sm:top-0">
+        <div className="flex w-full flex-col gap-3 px-3 pt-3 sm:px-4 sm:pt-4">
+          {phase === "ready" && (
+            <>
+              {/* Filters and refresh on one row. */}
+              <div className="flex items-start gap-3">
+                <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-2">
+                  <FilterSelect
+                    label={t("admin.period.label")}
+                    value={preset}
+                    onChange={(p) => {
+                      setPreset(p);
+                      setGran(null);
+                    }}
+                    options={PRESETS.map((p) => ({ value: p, label: t(`admin.period.${p}`) }))}
+                  />
+                  {preset === "custom" && (
+                    <PeriodPicker
+                      value={custom}
+                      max={today}
+                      onChange={(p) => {
+                        setCustom(p);
+                        setGran(null);
+                      }}
+                      label={t("admin.period.custom")}
+                      format={fmt.dayYear}
+                    />
+                  )}
+                  <FilterSelect
+                    label={t("admin.office.label")}
+                    value={office ?? ""}
+                    onChange={(v) => setOffice(v || null)}
+                    options={[
+                      { value: "", label: t("admin.office.all") },
+                      ...(data?.offices ?? []).map((o) => ({ value: o, label: o })),
+                    ]}
+                  />
+                  <div className="flex items-center gap-2">
+                    <span className={`whitespace-nowrap text-sm ${MUTED}`}>{t("admin.gran.label")}</span>
+                    {/* Always all five, so the control never changes size; the ones that
+                        don't fit the period are disabled and say why on hover. */}
+                    <Tabs
+                      selectedKey={activeGran}
+                      disabledKeys={GRANULARITIES.filter((g) => !grans.includes(g))}
+                      onSelectionChange={(k) => setGran(k as AdminGranularity)}
+                    >
+                      <Tabs.ListContainer>
+                        <Tabs.List aria-label={t("admin.gran.label")}>
+                          {GRANULARITIES.map((g) => (
+                            <Tabs.Tab key={g} id={g} className="whitespace-nowrap">
+                              <span title={grans.includes(g) ? undefined : t(`admin.gran.needs.${g}`)}>
+                                {t(`admin.gran.${g}`)}
+                              </span>
+                              <Tabs.Indicator />
+                            </Tabs.Tab>
+                          ))}
+                        </Tabs.List>
+                      </Tabs.ListContainer>
+                    </Tabs>
+                  </div>
+                </div>
+                {/* When the data was built shows on hover (there's no subtitle for it any more). */}
+                <span
+                  className="ml-auto shrink-0"
+                  title={data ? t("admin.updated", { time: fmt.time(data.generatedAt) }) : undefined}
+                >
+                  <Button
+                    isIconOnly
+                    size="sm"
+                    variant="tertiary"
+                    aria-label={t("admin.refresh")}
+                    onPress={load}
+                    isDisabled={loading || !periodValid}
+                  >
+                    {loading ? <Spinner size="sm" /> : <ArrowsRotateRight width={16} height={16} />}
+                  </Button>
+                </span>
+              </div>
+              {!periodValid && (
+                <p className="text-xs text-danger">{t("admin.period.invalid", { max: MAX_PERIOD_DAYS })}</p>
+              )}
+              <Tabs variant="secondary" selectedKey={tab} onSelectionChange={(k) => changeTab(k as DashTab)}>
+                <Tabs.ListContainer className="overflow-x-auto [scrollbar-width:none]">
+                  <Tabs.List aria-label={t("admin.title")} className="w-fit">
+                    {TABS.map((tb) => (
+                      <Tabs.Tab key={tb} id={tb} className="whitespace-nowrap">
+                        {t(`admin.tab.${tb}`)}
+                        {tb === "issues" && health && healthCards.some((h) => h.level !== "ok") && (
+                          <span
+                            className="ml-1.5 inline-block size-1.5 rounded-full align-middle"
+                            style={{ background: "var(--viz-critical)" }}
+                            aria-label={t("admin.level.down")}
+                          />
+                        )}
+                        <Tabs.Indicator />
+                      </Tabs.Tab>
+                    ))}
+                  </Tabs.List>
+                </Tabs.ListContainer>
+              </Tabs>
+            </>
+          )}
+        </div>
+      </div>
+
+      <div className="flex w-full flex-col gap-3 p-3 sm:gap-4 sm:p-4">
         {phase === "loading" && (
           <div className="flex justify-center py-20">
             <Spinner />
@@ -629,11 +1045,6 @@ export function AdminDashboard() {
                 {t(phase === "forbidden" ? "admin.notAdmin" : "admin.loginRequired")}
               </p>
               <p className={`text-sm ${MUTED}`}>{t(phase === "forbidden" ? "admin.notAdminHint" : "admin.loginHint")}</p>
-              {phase === "unauthenticated" && (
-                <Button className="mt-4 w-full rounded-full" onPress={() => window.location.assign("/")}>
-                  {t("admin.goLogin")}
-                </Button>
-              )}
             </div>
           </div>
         )}
@@ -644,241 +1055,279 @@ export function AdminDashboard() {
           </div>
         )}
 
-        {phase === "ready" && data && (
+        {phase === "ready" && data && health && (
           <>
-            {/* 1. System health — always system-wide. */}
-            <h2 className={`sr-only`}>{t("admin.health.title")}</h2>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <HealthCard
-                t={t}
-                title={t("admin.health.availability")}
-                level={data.health.availability.level}
-                detail={
-                  data.health.availability.ageMinutes == null
-                    ? t("admin.health.availabilityNever")
-                    : t("admin.health.availabilityAge", { minutes: Math.round(data.health.availability.ageMinutes) })
-                }
-              />
-              <HealthCard
-                t={t}
-                title={t("admin.health.tokens")}
-                level={data.health.tokenPool.level}
-                detail={t("admin.health.tokensDetail", {
-                  active: data.health.tokenPool.active,
-                  expired: data.health.tokenPool.expired,
-                  invalid: data.health.tokenPool.invalid,
-                })}
-              />
-              <HealthCard
-                t={t}
-                title={t("admin.health.failures")}
-                level={data.health.failures24h.level}
-                detail={t("admin.health.failuresDetail", {
-                  failed: data.health.failures24h.failed,
-                  total: data.health.failures24h.total,
-                })}
-              />
-              <HealthCard
-                t={t}
-                title={t("admin.health.stuck")}
-                level={data.health.stuckPending.level}
-                detail={`${data.health.stuckPending.count} · ${t("admin.health.stuckDetail")}`}
-              />
-            </div>
-
-            {/* KPIs */}
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-              {(
-                [
-                  ["activeUsers", count],
-                  ["bookings", count],
-                  ["successRate", rate],
-                ] as const
-              ).map(([key, format]) => (
-                <KpiTile
-                  key={key}
-                  t={t}
-                  label={t(`admin.kpi.${key}`)}
-                  kpi={data.kpis[key]}
-                  format={format}
-                  days={days}
-                  weeks={data.weeks}
-                  tip={tip}
-                  dayLabel={fmt.day}
-                />
-              ))}
-            </div>
-
-            {/* Bookings: outcomes in the range, then per day around a zero line. */}
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-              <Section title={t("admin.outcome.title")}>
-                <BookingOutcomes outcomes={data.bookingOutcomes} t={t} fmt={fmt} />
-              </Section>
-              <Section title={t("admin.bookings.title")} hint={t("admin.bookings.hint")} className="lg:col-span-2">
-                <DivergingBars
-                  data={data.bookingsLast7.map((d) => ({ ...dayColumn(d), up: d.success, down: d.canceled }))}
-                  up={TYPES.map((type) => ({ key: type, label: t(`admin.type.${type}`), color: TYPE_COLOR[type] }))}
-                  down={CANCEL_KINDS.map((kind) => ({ key: kind, label: t(`admin.cancel.${kind}`), color: CANCEL_COLOR[kind] }))}
-                  t={t}
-                  tip={tip}
-                />
-              </Section>
-            </div>
-
-            {/* Users */}
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-              <Section title={t("admin.users.title")}>
-                <Stat label={t("admin.users.total")} value={fmt.num(data.users.total)} />
-                <h3 className={`text-sm font-medium ${TEXT}`}>{t("admin.users.newPerWeek")}</h3>
-                <BarList
-                  max={Math.max(...data.users.newByWeek)}
-                  rows={data.weeks.map((w, i) => ({
-                    key: w,
-                    label: fmt.day(w),
-                    value: data.users.newByWeek[i],
-                    display: fmt.num(data.users.newByWeek[i]),
-                  }))}
-                />
-              </Section>
-              <Section title={t("admin.users.retention")} hint={t("admin.users.retentionHint")} className="lg:col-span-2">
-                <CohortTable rows={data.users.retention} all={data.users.retentionAll} t={t} fmt={fmt} tip={tip} />
-              </Section>
-            </div>
-
-            {/* Chatbot & Room Scout */}
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-              <Section title={t("admin.chat.title")}>
-                <div className="grid grid-cols-3 gap-4">
-                  <Stat label={t("admin.chat.conversations")} value={fmt.num(data.chatbot.conversations)} />
-                  <Stat label={t("admin.chat.bookings")} value={fmt.num(data.chatbot.chatbotBookings)} />
-                  <Stat label={t("admin.kpi.chatToBooking")} value={pct(data.chatbot.rate)} />
-                </div>
-                <FeedbackBar fb={data.chatbot.feedback} t={t} tip={tip} />
-                <h3 className={`text-sm font-medium ${TEXT}`}>{t("admin.chat.intents")}</h3>
-                <p className={`-mt-3 text-xs ${MUTED}`}>{t("admin.chat.intentsHint")}</p>
-                <BarList
-                  max={Math.max(0, ...data.chatbot.intents.map((i) => i.count))}
-                  rows={data.chatbot.intents.map((i) => ({
-                    key: i.intent,
-                    label: t(`admin.intent.${i.intent}`),
-                    value: i.count,
-                    display: `${fmt.num(i.count)} · ${pct(data.chatbot.conversations ? i.count / data.chatbot.conversations : null)}`,
-                  }))}
-                />
-                <h3 className={`text-sm font-medium ${TEXT}`}>{t("admin.chat.recentNegative")}</h3>
-                {data.chatbot.recentNegative.length ? (
-                  <ul className="flex max-h-72 flex-col gap-2 overflow-y-auto">
-                    {data.chatbot.recentNegative.map((m, i) => (
-                      <li key={`${m.at}-${i}`} className="rounded-xl bg-[#f5f5f5] p-3 text-sm dark:bg-[#13161b]">
-                        <div className={`mb-1 flex justify-between gap-3 text-xs ${MUTED}`}>
-                          <span>{m.email?.split("@")[0] ?? "—"}</span>
-                          <span className="tabular-nums">{fmt.dateTime(m.at)}</span>
-                        </div>
-                        <p className={`line-clamp-4 whitespace-pre-line ${TEXT}`}>{m.content}</p>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className={`text-sm ${MUTED}`}>{t("admin.chat.noNegative")}</p>
-                )}
-              </Section>
-              <Section title={t("admin.scout.title")}>
-                <div className="grid grid-cols-2 gap-4">
-                  <Stat label={t("admin.scout.total")} value={fmt.num(data.scouts.total)} />
-                  <Stat
-                    label={t("admin.scout.successRate")}
-                    value={pct(data.scouts.successRate)}
-                    hint={t("admin.scout.successHint")}
-                  />
-                </div>
-                <div className={`flex flex-wrap gap-x-4 gap-y-1 text-xs ${MUTED}`}>
-                  {(["success", "canceled_user", "canceled_auto", "active"] as const).map((o) => (
-                    <span key={o}>
-                      {t(`admin.scout.outcome.${o}`)}:{" "}
-                      <span className={`tabular-nums ${TEXT}`}>{fmt.num(data.scouts.outcomes[o])}</span>
+            {tab === "overview" && (
+              <>
+                {/* Health: one line while everything is fine, the problems otherwise. */}
+                {healthCards.every((h) => h.level === "ok") ? (
+                  <div className={`${CARD} flex flex-wrap items-center justify-between gap-2 !py-3`}>
+                    <span className={`flex items-center gap-2 text-sm font-medium ${TEXT}`}>
+                      <CircleCheckFill width={16} height={16} style={{ color: "var(--viz-good)" }} aria-hidden />
+                      {t("admin.health.allOk")}
+                      <span className={`font-normal ${MUTED}`}>· {healthCards[0].detail}</span>
                     </span>
+                    {more("issues")}
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-4">
+                      {healthCards
+                        .filter((h) => h.level !== "ok")
+                        .map((h) => (
+                          <HealthCard key={h.key} t={t} title={h.title} level={h.level} detail={h.detail} />
+                        ))}
+                    </div>
+                    <div className="flex justify-end">{more("issues")}</div>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-4">
+                  {(
+                    [
+                      ["activeUsers", count],
+                      ["bookings", count],
+                      ["successRate", rate],
+                      ["scoutSuccess", rate],
+                    ] as const
+                  ).map(([key, format]) => (
+                    <KpiTile
+                      key={key}
+                      t={t}
+                      label={t(`admin.kpi.${key}`)}
+                      kpi={data.kpis[key]}
+                      format={format}
+                      buckets={data.buckets}
+                      lastPartial={data.range.lastPartial}
+                      granLabel={t(`admin.gran.${activeGran}`)}
+                      bucketTitle={(b) => bucketColumn(b).title}
+                      compareTitle={t("admin.period.summary", {
+                        range: rangeLabel(period.from, period.to),
+                        prev: rangeLabel(shiftDays(period.from, -span), shiftDays(period.from, -1)),
+                      })}
+                      tip={tip}
+                    />
                   ))}
                 </div>
-                <h3 className={`text-sm font-medium ${TEXT}`}>{t("admin.scout.byDay")}</h3>
-                <p className={`-mt-3 text-xs ${MUTED}`}>{t("admin.scout.byDayHint")}</p>
-                <DivergingBars
-                  data={data.scouts.last7.map((d) => ({
-                    ...dayColumn(d),
-                    up: { success: d.success },
-                    down: { canceledUser: d.canceledUser, canceledAuto: d.canceledAuto },
-                  }))}
-                  up={[{ key: "success", label: t("admin.scout.outcome.success"), color: "var(--viz-s3)" }]}
-                  down={[
-                    { key: "canceledUser", label: t("admin.scout.outcome.canceled_user"), color: CANCEL_COLOR.user },
-                    { key: "canceledAuto", label: t("admin.scout.outcome.canceled_auto"), color: CANCEL_COLOR.auto },
-                  ]}
-                  t={t}
-                  tip={tip}
-                />
-                <h3 className={`text-sm font-medium ${TEXT}`}>{t("admin.scout.bySize")}</h3>
-                {data.scouts.demandBySize.length ? (
-                  <ul className="flex flex-col gap-2">
-                    {data.scouts.demandBySize.map((d) => {
-                      const max = data.scouts.demandBySize[0].count || 1;
-                      const label = t(`admin.size.${d.size}` as TranslationKey);
-                      return (
-                        <li
-                          key={d.size}
-                          className="flex flex-col gap-1"
-                          onPointerMove={(e) =>
-                            tip.show(
-                              e,
-                              <div className="flex flex-col gap-1">
-                                <span className={`font-medium ${TEXT}`}>{label}</span>
-                                <TipRow color="var(--viz-s1)" label={t("admin.scout.requested")} value={String(d.count)} />
-                                <TipRow color="var(--viz-s2)" label={t("admin.scout.unmet")} value={String(d.unmet)} />
-                              </div>,
-                            )
-                          }
-                          onPointerLeave={tip.hide}
-                        >
-                          <div className="flex justify-between text-sm">
-                            <span className={TEXT}>{label}</span>
-                            <span className={`tabular-nums ${MUTED}`}>
-                              {d.count} · {t("admin.scout.unmet")} {d.unmet}
-                            </span>
-                          </div>
-                          <div className="flex h-1.5 gap-[2px]">
-                            <div className="rounded-l-full" style={{ width: `${((d.count - d.unmet) / max) * 100}%`, background: "var(--viz-s1)" }} />
-                            <div className="rounded-r-full" style={{ width: `${(d.unmet / max) * 100}%`, background: "var(--viz-s2)" }} />
-                          </div>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                ) : (
-                  <Empty t={t} />
-                )}
-                <Legend
-                  items={[
-                    { color: "var(--viz-s1)", label: t("admin.scout.outcome.success") + " / " + t("admin.scout.outcome.active") },
-                    { color: "var(--viz-s2)", label: t("admin.scout.unmet") },
-                  ]}
-                />
-                <h3 className={`text-sm font-medium ${TEXT}`}>{t("admin.scout.byHour")}</h3>
-                <HourColumns data={data.scouts.demandByHour} tip={tip} label={t("admin.scout.requested")} />
-              </Section>
-            </div>
 
-            {/* Issues */}
-            <Section title={t("admin.shame.title")} hint={t("admin.shame.hint")}>
-              <ShameTable rows={data.hallOfShame} t={t} fmt={fmt} />
-            </Section>
-            <Section title={t("admin.issues.failures")}>
-              <ActivityTable rows={data.recentFailures} t={t} fmt={fmt} />
-            </Section>
-            <Section title={t("admin.issues.stuck")}>
-              <ActivityTable rows={data.health.stuckPending.rows} t={t} fmt={fmt} />
-            </Section>
+                <Section title={t("admin.bookings.title")} hint={t("admin.bookings.hint")} action={more("bookings")}>
+                  {bookingsChart}
+                </Section>
+
+                <div className="grid grid-cols-1 gap-3 sm:gap-4 lg:grid-cols-2">
+                  <Section title={t("admin.chat.title")} action={more("chat")}>
+                    {chatStats}
+                    <FeedbackBar fb={data.chatbot.feedback} t={t} tip={tip} />
+                  </Section>
+                  <Section title={t("admin.scout.title")} action={more("scout")}>
+                    {scoutStats}
+                  </Section>
+                </div>
+              </>
+            )}
+
+            {tab === "bookings" && (
+              <>
+                <Section title={t("admin.bookings.title")} hint={t("admin.bookings.hint")}>
+                  {bookingsChart}
+                </Section>
+                <div className="grid grid-cols-1 gap-3 sm:gap-4 lg:grid-cols-3">
+                  <Section title={t("admin.outcome.title")}>
+                    <BookingOutcomes outcomes={data.bookingOutcomes} t={t} fmt={fmt} />
+                  </Section>
+                  <Section title={t("admin.shame.title")} hint={t("admin.shame.hint")} className="lg:col-span-2">
+                    <ShameTable rows={data.hallOfShame} t={t} fmt={fmt} />
+                  </Section>
+                </div>
+              </>
+            )}
+
+            {tab === "users" && (
+              <div className="grid grid-cols-1 gap-3 sm:gap-4 lg:grid-cols-3">
+                <Section title={t("admin.users.title")}>
+                  <Stat label={t("admin.users.total")} value={fmt.num(data.users.total)} hint={t("admin.users.totalHint")} />
+                  <h3 className={`text-sm font-medium ${TEXT}`}>{t("admin.users.new")}</h3>
+                  <DivergingBars
+                    data={data.trend.map((b) => ({ ...bucketColumn(b.start), up: { newUsers: b.newUsers }, down: {} }))}
+                    up={[{ key: "newUsers", label: t("admin.users.new"), color: "var(--viz-s1)" }]}
+                    down={[]}
+                    t={t}
+                    tip={tip}
+                  />
+                </Section>
+                <Section
+                  title={t("admin.users.retention")}
+                  hint={t("admin.users.retentionHint")}
+                  badge={t("admin.badge.last6m")}
+                  className="lg:col-span-2"
+                >
+                  <CohortTable rows={data.users.retention} all={data.users.retentionAll} t={t} fmt={fmt} tip={tip} />
+                </Section>
+              </div>
+            )}
+
+            {tab === "chat" && (
+              <div className="grid grid-cols-1 gap-3 sm:gap-4 lg:grid-cols-2">
+                <Section title={t("admin.chat.title")}>
+                  {chatStats}
+                  <FeedbackBar fb={data.chatbot.feedback} t={t} tip={tip} />
+                  <h3 className={`text-sm font-medium ${TEXT}`}>{t("admin.chat.intents")}</h3>
+                  <p className={`-mt-3 text-xs ${MUTED}`}>{t("admin.chat.intentsHint")}</p>
+                  <BarList
+                    max={Math.max(0, ...data.chatbot.intents.map((i) => i.count))}
+                    rows={data.chatbot.intents.map((i) => ({
+                      key: i.intent,
+                      label: t(`admin.intent.${i.intent}`),
+                      value: i.count,
+                      display: `${fmt.num(i.count)} · ${pct(data.chatbot.conversations ? i.count / data.chatbot.conversations : null)}`,
+                    }))}
+                  />
+                </Section>
+                <Section title={t("admin.chat.recentNegative")}>
+                  {data.chatbot.recentNegative.length ? (
+                    <ul className="flex max-h-[560px] flex-col gap-2 overflow-y-auto">
+                      {data.chatbot.recentNegative.map((m, i) => (
+                        <li key={`${m.at}-${i}`} className="rounded-xl bg-[#f5f5f5] p-3 text-sm dark:bg-[#0c0e12]">
+                          <div className={`mb-1 flex justify-between gap-3 text-xs ${MUTED}`}>
+                            <span>{m.email?.split("@")[0] ?? "—"}</span>
+                            <span className="tabular-nums">{fmt.dateTime(m.at)}</span>
+                          </div>
+                          <p className={`line-clamp-4 whitespace-pre-line ${TEXT}`}>{m.content}</p>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className={`text-sm ${MUTED}`}>{t("admin.chat.noNegative")}</p>
+                  )}
+                </Section>
+              </div>
+            )}
+
+            {tab === "scout" && (
+              <div className="grid grid-cols-1 gap-3 sm:gap-4 lg:grid-cols-3">
+                <Section title={t("admin.scout.title")} className="lg:col-span-2">
+                  {scoutStats}
+                  <div className={`flex flex-wrap gap-x-4 gap-y-1 text-xs ${MUTED}`}>
+                    {(["success", "canceled_user", "canceled_auto", "active"] as const).map((o) => (
+                      <span key={o}>
+                        {t(`admin.scout.outcome.${o}`)}:{" "}
+                        <span className={`tabular-nums ${TEXT}`}>{fmt.num(data.scouts.outcomes[o])}</span>
+                      </span>
+                    ))}
+                  </div>
+                  <h3 className={`text-sm font-medium ${TEXT}`}>{t("admin.scout.byDay")}</h3>
+                  <p className={`-mt-3 text-xs ${MUTED}`}>{t("admin.scout.byDayHint")}</p>
+                  <DivergingBars
+                    data={data.trend.map((b) => ({
+                      ...bucketColumn(b.start),
+                      up: { success: b.scouts.success },
+                      down: { canceledUser: b.scouts.canceledUser, canceledAuto: b.scouts.canceledAuto },
+                    }))}
+                    up={[{ key: "success", label: t("admin.scout.outcome.success"), color: "var(--viz-s3)" }]}
+                    down={[
+                      { key: "canceledUser", label: t("admin.scout.outcome.canceled_user"), color: CANCEL_COLOR.user },
+                      { key: "canceledAuto", label: t("admin.scout.outcome.canceled_auto"), color: CANCEL_COLOR.auto },
+                    ]}
+                    t={t}
+                    tip={tip}
+                  />
+                </Section>
+                <Section title={t("admin.scout.demand")}>
+                  <h3 className={`text-sm font-medium ${TEXT}`}>{t("admin.scout.bySize")}</h3>
+                  <SizeDemand rows={data.scouts.demandBySize} t={t} tip={tip} />
+                  <h3 className={`text-sm font-medium ${TEXT}`}>{t("admin.scout.byHour")}</h3>
+                  <HourColumns data={data.scouts.demandByHour} tip={tip} label={t("admin.scout.requested")} />
+                </Section>
+              </div>
+            )}
+
+            {tab === "issues" && (
+              <>
+                <div className="flex items-center gap-2">
+                  <h2 className={`text-base font-semibold ${TEXT}`}>{t("admin.health.title")}</h2>
+                  <Badge>{t("admin.badge.now")}</Badge>
+                </div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-4">
+                  {healthCards.map((h) => (
+                    <HealthCard key={h.key} t={t} title={h.title} level={h.level} detail={h.detail} />
+                  ))}
+                </div>
+                <Section title={t("admin.issues.stuck")} badge={t("admin.badge.now")}>
+                  <ActivityTable rows={health.stuckPending.rows} t={t} fmt={fmt} />
+                </Section>
+                <Section title={t("admin.issues.failures")} hint={t("admin.issues.failuresHint")}>
+                  <ActivityTable rows={data.recentFailures} t={t} fmt={fmt} />
+                </Section>
+              </>
+            )}
           </>
         )}
-      </main>
+      </div>
     </div>
+  );
+}
+
+function Badge({ children }: { children: ReactNode }) {
+  return (
+    <Chip size="sm" color="default" variant="soft">
+      {children}
+    </Chip>
+  );
+}
+
+function SizeDemand({
+  rows,
+  t,
+  tip,
+}: {
+  rows: AdminOverview["scouts"]["demandBySize"];
+  t: TFunction;
+  tip: TipApi;
+}) {
+  if (!rows.length) return <Empty t={t} />;
+  const max = rows[0].count || 1;
+  return (
+    <>
+      <ul className="flex flex-col gap-2">
+        {rows.map((d) => {
+          const label = t(`admin.size.${d.size}` as TranslationKey);
+          return (
+            <li
+              key={d.size}
+              className="flex flex-col gap-1"
+              onPointerMove={(e) =>
+                tip.show(
+                  e,
+                  <div className="flex flex-col gap-1">
+                    <span className={`font-medium ${TEXT}`}>{label}</span>
+                    <TipRow color="var(--viz-s1)" label={t("admin.scout.requested")} value={String(d.count)} />
+                    <TipRow color="var(--viz-s2)" label={t("admin.scout.unmet")} value={String(d.unmet)} />
+                  </div>,
+                )
+              }
+              onPointerLeave={tip.hide}
+            >
+              <div className="flex justify-between text-sm">
+                <span className={TEXT}>{label}</span>
+                <span className={`tabular-nums ${MUTED}`}>
+                  {d.count} · {t("admin.scout.unmet")} {d.unmet}
+                </span>
+              </div>
+              <div className="flex h-1.5 gap-[2px]">
+                <div className="rounded-l-full" style={{ width: `${((d.count - d.unmet) / max) * 100}%`, background: "var(--viz-s1)" }} />
+                <div className="rounded-r-full" style={{ width: `${(d.unmet / max) * 100}%`, background: "var(--viz-s2)" }} />
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+      <Legend
+        items={[
+          { color: "var(--viz-s1)", label: t("admin.scout.outcome.success") + " / " + t("admin.scout.outcome.active") },
+          { color: "var(--viz-s2)", label: t("admin.scout.unmet") },
+        ]}
+      />
+    </>
   );
 }
 
@@ -911,7 +1360,11 @@ function BookingOutcomes({
       </ul>
       <div className="grid grid-cols-2 gap-4 border-t border-[color:var(--separator)] pt-4">
         <Stat label={t("admin.outcome.failed")} value={fmt.num(outcomes.failed)} hint={t("admin.outcome.failedHint")} />
-        <Stat label={t("admin.outcome.declined")} value={fmt.num(outcomes.declined)} />
+        <Stat
+          label={t("admin.outcome.declined")}
+          value={fmt.num(outcomes.declined)}
+          hint={t("admin.outcome.declinedHint", { scout: outcomes.declinedScout })}
+        />
       </div>
     </div>
   );

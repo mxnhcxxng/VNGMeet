@@ -47,11 +47,15 @@ CANCEL_REASONS = {
     "room_auto_canceled": "auto",
 }
 CANCEL_KINDS = ("user", "outlook", "auto", "unknown")
-SPARK_WEEKS = 8
 RETENTION_MONTHS = 6
 RECENT_ROWS = 10
 SHAME_ROWS = 10
 # Thread intents written by chat.py (TOOL_INTENT); "none" = thread with no intent yet.
+# One period drives the whole page; charts split it by a granularity that makes
+# sense for its length (see allowed_granularities).
+GRANULARITIES = ("hour", "day", "week", "month", "year")
+MAX_PERIOD_DAYS = 731
+MAX_BUCKETS = 120
 CHAT_INTENTS = ("book", "schedule", "scout", "update", "delete", "info", "none")
 
 AVAILABILITY_WARN_MIN = 15
@@ -254,6 +258,81 @@ def _month_start(day: date_cls) -> date_cls:
     return day.replace(day=1)
 
 
+def _bucket_start(day: date_cls, granularity: str) -> date_cls:
+    if granularity == "week":
+        return _week_start(day)
+    if granularity == "month":
+        return _month_start(day)
+    if granularity == "year":
+        return date_cls(day.year, 1, 1)
+    return day
+
+
+def allowed_granularities(span_days: int) -> list[str]:
+    """Granularities that give a readable chart for a period this long."""
+    out = []
+    if span_days <= 3:
+        out.append("hour")
+    if span_days <= 92:
+        out.append("day")
+    if 14 <= span_days:
+        out.append("week")
+    if 60 <= span_days:
+        out.append("month")
+    if 365 <= span_days:
+        out.append("year")
+    return out or ["day"]
+
+
+def default_granularity(span_days: int) -> str:
+    if span_days == 1:
+        return "hour"
+    return "day" if span_days <= 31 else "week" if span_days <= 92 else "month"
+
+
+def _period_buckets(start: date_cls, end: date_cls, granularity: str) -> list[date_cls]:
+    """Bucket starts covering [start, end]; the first may begin before `start`
+    (a week or month already under way) and is clipped when counting."""
+    out, b = [], _bucket_start(start, granularity)
+    while b <= end:
+        out.append(b)
+        if granularity == "day":
+            b += timedelta(days=1)
+        elif granularity == "week":
+            b += timedelta(weeks=1)
+        elif granularity == "month":
+            b = _add_months(b, 1)
+        else:
+            b = date_cls(b.year + 1, 1, 1)
+    return out
+
+
+def _bucket_key(ts: datetime, tz: ZoneInfo, granularity: str) -> str:
+    """The bucket a timestamp falls in, as the string the API returns:
+    "YYYY-MM-DDTHH:00" for hours, the bucket's first day otherwise."""
+    local = ts.astimezone(tz)
+    if granularity == "hour":
+        return local.strftime("%Y-%m-%dT%H:00")
+    return _bucket_start(local.date(), granularity).isoformat()
+
+
+def _period_bucket_keys(
+    start: date_cls, end: date_cls, granularity: str, until: datetime | None = None
+) -> list[str]:
+    """Bucket keys covering [start, end]. Hours after `until` (local "now") are
+    left out, so today's chart stops at the current hour."""
+    if granularity != "hour":
+        return [b.isoformat() for b in _period_buckets(start, end, granularity)]
+    keys, d = [], start
+    while d <= end:
+        for h in range(24):
+            if until is not None and (d, h) > (until.date(), until.hour):
+                return keys
+            keys.append(f"{d.isoformat()}T{h:02d}:00")
+        d += timedelta(days=1)
+    return keys
+
+
 def _add_months(month: date_cls, n: int) -> date_cls:
     index = month.year * 12 + month.month - 1 + n
     return date_cls(index // 12, index % 12 + 1, 1)
@@ -263,27 +342,33 @@ def compute_overview(
     *,
     now: datetime,
     tz: ZoneInfo,
-    days: int,
+    start: date_cls,
+    end: date_cls,
+    granularity: str,
     office: str | None,
     profiles: dict[str, dict],
     rooms: list[dict],
     activity: list[dict],
-    booking_events: list[dict],
+    history: list[dict],
     threads: list[dict],
     scouts: list[dict],
     feedback_messages: list[dict],
 ) -> dict:
     """Everything on the dashboard except health.
 
-    `activity` / `threads` / `scouts` must cover at least the previous range and
-    SPARK_WEEKS weeks back; `booking_events` (user_id, created_at of every booked
-    row, all time) feeds monthly retention. This function does all the windowing.
+    The period is [start, end] (local dates); it is compared with the period of
+    the same length right before it. `activity` / `threads` / `scouts` /
+    `feedback_messages` must cover both. `history` (every non-pending
+    user_activity row, all time, light columns) feeds monthly retention, which
+    always covers the last RETENTION_MONTHS months whatever the period.
+    This function does all the windowing.
     """
     today = now.astimezone(tz).date()
-    range_start = today - timedelta(days=days - 1)
-    prev_start = range_start - timedelta(days=days)
-    this_week = _week_start(today)
-    weeks = [this_week - timedelta(weeks=i) for i in range(SPARK_WEEKS - 1, -1, -1)]
+    range_start, range_end = start, end
+    span = (end - start).days + 1
+    prev_end = start - timedelta(days=1)
+    prev_start = start - timedelta(days=span)
+    buckets = _period_bucket_keys(start, end, granularity, until=now.astimezone(tz))
     this_month = _month_start(today)
 
     room_office = {(r.get("email") or "").lower(): r.get("office") for r in rooms}
@@ -297,15 +382,20 @@ def compute_overview(
     def day_of(row: dict) -> date_cls | None:
         return _local_date(parse_ts(row.get("created_at")), tz)
 
+    def key_of(row: dict) -> str | None:
+        ts = parse_ts(row.get("created_at"))
+        return _bucket_key(ts, tz, granularity) if ts else None
+
     activity = [r for r in activity if room_ok(r.get("room_email"))]
+    history = [r for r in history if room_ok(r.get("room_email"))]
     threads = [r for r in threads if user_ok(r.get("user_id"))]
     scouts = [r for r in scouts if not office or r.get("office") == office]
 
     def in_range(day: date_cls | None, start: date_cls, end: date_cls) -> bool:
         return day is not None and start <= day <= end
 
-    cur = [r for r in activity if in_range(day_of(r), range_start, today)]
-    prev = [r for r in activity if in_range(day_of(r), prev_start, range_start - timedelta(days=1))]
+    cur = [r for r in activity if in_range(day_of(r), range_start, range_end)]
+    prev = [r for r in activity if in_range(day_of(r), prev_start, prev_end)]
 
     def booked(rows: Iterable[dict]) -> list[dict]:
         return [r for r in rows if r.get("status") in BOOKED_STATUSES]
@@ -324,31 +414,45 @@ def compute_overview(
                     ids.add(r["user_id"])
         return len(ids)
 
-    # Weekly sparklines (Mon..Sun, last SPARK_WEEKS weeks; the current week is partial).
-    week_rows: dict[date_cls, list[dict]] = defaultdict(list)
-    for r in activity:
-        d = day_of(r)
-        if d and d >= weeks[0]:
-            week_rows[_week_start(d)].append(r)
+    def scout_rate(rows: list[dict]) -> float | None:
+        outcomes = Counter(scout_outcome(r) for r in rows)
+        return _rate(outcomes.get("success", 0), len(rows) - outcomes.get("active", 0))
 
-    def week_end(week: date_cls) -> date_cls:
-        return min(week + timedelta(days=6), today)
+    # Sparklines: one point per bucket (rows are already limited to the period,
+    # so a week or month that started before it only counts its in-period part).
+    by_bucket: dict[str, list[dict]] = defaultdict(list)
+    scouts_by_bucket: dict[str, list[dict]] = defaultdict(list)
+    users_by_bucket: dict[str, set[str]] = defaultdict(set)
+    for r in cur:
+        by_bucket[key_of(r) or ""].append(r)
+    scouts_in = [r for r in scouts if in_range(day_of(r), range_start, range_end)]
+    for r in scouts_in:
+        scouts_by_bucket[key_of(r) or ""].append(r)
+    for rows in (activity, threads, scouts):
+        for r in rows:
+            if r.get("user_id") and user_ok(r.get("user_id")) and in_range(day_of(r), range_start, range_end):
+                users_by_bucket[key_of(r) or ""].add(r["user_id"])
 
     kpis = {
         "activeUsers": {
-            "value": active_users(range_start, today),
-            "prev": active_users(prev_start, range_start - timedelta(days=1)),
-            "series": [active_users(w, week_end(w)) for w in weeks],
+            "value": active_users(range_start, range_end),
+            "prev": active_users(prev_start, prev_end),
+            "series": [len(users_by_bucket.get(b, ())) for b in buckets],
         },
         "bookings": {
             "value": len(booked(cur)),
             "prev": len(booked(prev)),
-            "series": [len(booked(week_rows.get(w, []))) for w in weeks],
+            "series": [len(booked(by_bucket.get(b, []))) for b in buckets],
         },
         "successRate": {
             "value": success_rate(cur),
             "prev": success_rate(prev),
-            "series": [success_rate(week_rows.get(w, [])) for w in weeks],
+            "series": [success_rate(by_bucket.get(b, [])) for b in buckets],
+        },
+        "scoutSuccess": {
+            "value": scout_rate(scouts_in),
+            "prev": scout_rate([r for r in scouts if in_range(day_of(r), prev_start, prev_end)]),
+            "series": [scout_rate(scouts_by_bucket.get(b, [])) for b in buckets],
         },
     }
 
@@ -356,27 +460,7 @@ def compute_overview(
     # the axis by type, cancellations below it by who cancelled).
     outcomes = Counter(booking_outcome(r) for r in cur)
     cancels = Counter(cancel_kind(r) for r in cur if booking_outcome(r) == "canceled")
-    # Last 7 days (today included), whatever the selected range.
-    last7 = [today - timedelta(days=i) for i in range(6, -1, -1)]
-    per_day: dict[date_cls, Counter] = {d: Counter() for d in last7}
-    for r in activity:
-        d = day_of(r)
-        if d not in per_day:
-            continue
-        outcome = booking_outcome(r)
-        if outcome == "success":
-            per_day[d][r.get("booking_type") or "instant"] += 1
-        elif outcome == "canceled":
-            per_day[d][f"cancel_{cancel_kind(r)}"] += 1
-    bookings_last7 = [
-        {
-            "date": d.isoformat(),
-            "weekday": d.weekday(),
-            "success": {t: per_day[d].get(t, 0) for t in BOOKING_TYPES},
-            "canceled": {k: per_day[d].get(f"cancel_{k}", 0) for k in CANCEL_KINDS},
-        }
-        for d in last7
-    ]
+    declined_scout = sum(1 for r in cur if booking_outcome(r) == "declined" and r.get("booking_type") == "scout")
 
     # Hall of shame: who books and then lets Outlook auto-release the room
     # (no check-in) most often in the range.
@@ -405,17 +489,12 @@ def compute_overview(
 
     # Users.
     scoped_profiles = [p for p in profiles.values() if not office or p.get("office") == office]
-    new_by_week = Counter()
-    for p in scoped_profiles:
-        d = _local_date(parse_ts(p.get("created_at")), tz)
-        if d and d >= weeks[0]:
-            new_by_week[_week_start(d)] += 1
 
     # Monthly cohorts: users grouped by the month of their first booking; cell k
     # is the share of the cohort that booked in month M+k (k=0 is 100%).
     booked_months: dict[str, set[date_cls]] = defaultdict(set)
     first_month: dict[str, date_cls] = {}
-    for r in sorted(booking_events, key=lambda r: r.get("created_at") or ""):
+    for r in sorted(booked(history), key=lambda r: r.get("created_at") or ""):
         user_id, d = r.get("user_id"), day_of(r)
         if not user_id or not d or not user_ok(user_id):
             continue
@@ -462,21 +541,20 @@ def compute_overview(
     }
 
     # Chatbot.
-    convs_in_range = sum(1 for r in threads if in_range(day_of(r), range_start, today))
+    convs_in_range = sum(1 for r in threads if in_range(day_of(r), range_start, range_end))
     chat_bookings = sum(1 for r in booked(cur) if r.get("method") == "chatbot")
-    fb = [m for m in feedback_messages if user_ok(m.get("to_user_id")) and in_range(day_of(m), range_start, today)]
+    fb = [m for m in feedback_messages if user_ok(m.get("to_user_id")) and in_range(day_of(m), range_start, range_end)]
     intents = Counter(
         (r.get("intent") if r.get("intent") in CHAT_INTENTS else "none")
         for r in threads
-        if in_range(day_of(r), range_start, today)
+        if in_range(day_of(r), range_start, range_end)
     )
     negatives = sorted((m for m in fb if m.get("feedback") == "negative"), key=lambda m: m.get("created_at") or "", reverse=True)
 
     # Room Scout: every scout that ended without a room counts against it.
-    scouts_cur = [r for r in scouts if in_range(day_of(r), range_start, today)]
+    scouts_cur = scouts_in
     scout_outcomes = Counter(scout_outcome(r) for r in scouts_cur)
     scout_finished = len(scouts_cur) - scout_outcomes.get("active", 0)
-    scout_per_day: dict[date_cls, Counter] = {d: Counter() for d in last7}
     size_demand, size_unmet, hour_demand = Counter(), Counter(), Counter()
     for r in scouts_cur:
         outcome = scout_outcome(r)
@@ -487,27 +565,71 @@ def compute_overview(
                 size_unmet[size] += 1
         for hour in _hours_covered(r.get("scout_start_time"), r.get("scout_end_time")):
             hour_demand[hour] += 1
-    for r in scouts:
+    # Rooms that declined a scout's booking before it finally got one.
+    found = [r for r in scouts_cur if scout_outcome(r) == "success"]
+    declines = [len(r.get("declined_attempts") or []) for r in found]
+
+    # Trend charts: the period split by the chosen granularity.
+    counters = {b: Counter() for b in buckets}
+    for r in cur:
+        c = counters.get(key_of(r) or "")
+        if c is None:
+            continue
+        outcome = booking_outcome(r)
+        if outcome == "success":
+            c[r.get("booking_type") or "instant"] += 1
+        elif outcome == "canceled":
+            c[f"cancel_{cancel_kind(r)}"] += 1
+        elif outcome == "declined":
+            c["declined"] += 1
+    for p in scoped_profiles:
+        if in_range(day_of(p), range_start, range_end) and key_of(p) in counters:
+            counters[key_of(p)]["new_users"] += 1  # type: ignore[index]
+    for r in scouts_cur:
         outcome = scout_outcome(r)
-        d = day_of(r)
-        if d in scout_per_day and outcome != "active":
-            scout_per_day[d][outcome] += 1
+        if outcome != "active" and key_of(r) in counters:
+            counters[key_of(r)][f"scout_{outcome}"] += 1  # type: ignore[index]
+    trend = [
+        {
+            "start": b,
+            "success": {t: counters[b].get(t, 0) for t in BOOKING_TYPES},
+            "canceled": {k: counters[b].get(f"cancel_{k}", 0) for k in CANCEL_KINDS},
+            "declined": counters[b].get("declined", 0),
+            "newUsers": counters[b].get("new_users", 0),
+            "scouts": {
+                "success": counters[b].get("scout_success", 0),
+                "canceledUser": counters[b].get("scout_canceled_user", 0),
+                "canceledAuto": counters[b].get("scout_canceled_auto", 0),
+            },
+        }
+        for b in buckets
+    ]
 
     return {
-        "range": {"days": days, "start": range_start.isoformat(), "end": today.isoformat()},
+        "range": {
+            "start": range_start.isoformat(),
+            "end": range_end.isoformat(),
+            "days": span,
+            "prevStart": prev_start.isoformat(),
+            "prevEnd": prev_end.isoformat(),
+            "granularity": granularity,
+            "granularities": allowed_granularities(span),
+            # The last bucket is still filling up when the period reaches today.
+            "lastPartial": range_end >= today,
+        },
         "kpis": kpis,
-        "weeks": [w.isoformat() for w in weeks],
+        "buckets": buckets,
         "bookingOutcomes": {
             "success": outcomes.get("success", 0),
             "canceled": {"total": outcomes.get("canceled", 0), **{k: cancels.get(k, 0) for k in CANCEL_KINDS}},
             "failed": outcomes.get("failed", 0),
             "declined": outcomes.get("declined", 0),
+            "declinedScout": declined_scout,
         },
-        "bookingsLast7": bookings_last7,
+        "trend": trend,
         "hallOfShame": hall_of_shame,
         "users": {
             "total": len(scoped_profiles),
-            "newByWeek": [new_by_week[w] for w in weeks],
             "retention": retention,
             "retentionAll": retention_all,
         },
@@ -533,16 +655,12 @@ def compute_overview(
             "total": len(scouts_cur),
             "outcomes": {k: scout_outcomes.get(k, 0) for k in ("success", "canceled_user", "canceled_auto", "active")},
             "successRate": _rate(scout_outcomes.get("success", 0), scout_finished),
-            "last7": [
-                {
-                    "date": d.isoformat(),
-                    "weekday": d.weekday(),
-                    "success": scout_per_day[d].get("success", 0),
-                    "canceledUser": scout_per_day[d].get("canceled_user", 0),
-                    "canceledAuto": scout_per_day[d].get("canceled_auto", 0),
-                }
-                for d in last7
-            ],
+            "declinesBeforeFound": {
+                "avg": round(sum(declines) / len(declines), 2) if declines else None,
+                "max": max(declines, default=0),
+                "withDeclines": sum(1 for n in declines if n),
+                "found": len(found),
+            },
             "demandBySize": [{"size": s, "count": c, "unmet": size_unmet.get(s, 0)} for s, c in size_demand.most_common()],
             "demandByHour": [{"hour": h, "count": hour_demand.get(h, 0)} for h in range(7, 21)],
         },
@@ -601,10 +719,6 @@ _ACTIVITY_COLUMNS = (
 )
 
 
-def _cutoff_iso(now: datetime, days: int) -> str:
-    return (now - timedelta(days=days)).isoformat()
-
-
 def _cached(key: tuple, build: Callable[[], dict]) -> dict:
     with _cache_lock:
         hit = _cache.get(key)
@@ -616,46 +730,59 @@ def _cached(key: tuple, build: Callable[[], dict]) -> dict:
     return payload
 
 
-def _build_overview(days: int, office: str | None) -> dict:
+def _local_midnight_iso(day: date_cls, tz: ZoneInfo) -> str:
+    return datetime(day.year, day.month, day.day, tzinfo=tz).isoformat()
+
+
+def _build_overview(start: date_cls, end: date_cls, granularity: str, office: str | None) -> dict:
     tz = ZoneInfo(settings.timezone)
     now = datetime.now(timezone.utc)
-    # Enough history for the previous range and the weekly sparklines.
-    lookback = max(days * 2, SPARK_WEEKS * 7 + 7) + 1
-    since = _cutoff_iso(now, lookback)
+    # The period plus the equally long one before it, for the comparison.
+    span = (end - start).days + 1
+    since = _local_midnight_iso(start - timedelta(days=span), tz)
+    until = _local_midnight_iso(end + timedelta(days=1), tz)
     sb = _sb()
 
     profiles = _load_profiles()
     rooms = _load_rooms()
     activity = _fetch_all(
-        lambda: sb.table("user_activity").select(_ACTIVITY_COLUMNS).gte("created_at", since).order("created_at")
-    )
-    # All-time, two columns: a user's first booking may predate the window.
-    booking_events = _fetch_all(
         lambda: sb.table("user_activity")
-        .select("user_id, room_email, created_at")
-        .in_("status", sorted(BOOKED_STATUSES))
+        .select(_ACTIVITY_COLUMNS)
+        .gte("created_at", since)
+        .lt("created_at", until)
         .order("created_at")
     )
-    room_office = {(r.get("email") or "").lower(): r.get("office") for r in rooms}
-    if office:
-        booking_events = [r for r in booking_events if room_office.get((r.get("room_email") or "").lower()) == office]
+    # All time, light columns: a user's first booking (their cohort) and the
+    # last RETENTION_MONTHS months both reach past the period.
+    history = _fetch_all(
+        lambda: sb.table("user_activity")
+        .select("user_id, room_email, booking_type, status, note, error_message, created_at")
+        .neq("status", "pending")
+        .order("created_at")
+    )
     threads = _fetch_all(
-        lambda: sb.table("thread").select("id, user_id, intent, created_at").gte("created_at", since).order("created_at")
+        lambda: sb.table("thread")
+        .select("id, user_id, intent, created_at")
+        .gte("created_at", since)
+        .lt("created_at", until)
+        .order("created_at")
     )
     scouts = _fetch_all(
         lambda: sb.table("room_scouts")
         .select(
             "id, user_id, office, status, capacity_size, capacity_sizes, scout_start_time, scout_end_time, "
-            "expires_at, updated_at, created_at"
+            "expires_at, updated_at, declined_attempts, created_at"
         )
         .gte("created_at", since)
+        .lt("created_at", until)
         .order("created_at")
     )
     feedback = _fetch_all(
         lambda: sb.table("messages")
         .select("id, to_user_id, content, feedback, created_at")
         .not_.is_("feedback", "null")
-        .gte("created_at", _cutoff_iso(now, days + 1))
+        .gte("created_at", _local_midnight_iso(start, tz))
+        .lt("created_at", until)
         .order("created_at")
     )
 
@@ -663,8 +790,14 @@ def _build_overview(days: int, office: str | None) -> dict:
         sb.table("room_availability").select("updated_at").order("updated_at", desc=True).limit(1).execute().data
     )
     tokens = _fetch_all(lambda: sb.table("graph_token_pool").select("status, last_error, updated_at"))
+    # Health is "right now", whatever the period: its own 24h read.
     since_24h = now - timedelta(days=1)
-    activity_24h = [r for r in activity if (parse_ts(r.get("created_at")) or since_24h) > since_24h]
+    activity_24h = _fetch_all(
+        lambda: sb.table("user_activity")
+        .select(_ACTIVITY_COLUMNS)
+        .gte("created_at", since_24h.isoformat())
+        .order("created_at")
+    )
     pending = _fetch_all(
         lambda: sb.table("user_activity").select(_ACTIVITY_COLUMNS).eq("status", "pending").order("created_at")
     )
@@ -672,12 +805,14 @@ def _build_overview(days: int, office: str | None) -> dict:
     overview = compute_overview(
         now=now,
         tz=tz,
-        days=days,
+        start=start,
+        end=end,
+        granularity=granularity,
         office=office,
         profiles=profiles,
         rooms=rooms,
         activity=activity,
-        booking_events=booking_events,
+        history=history,
         threads=threads,
         scouts=scouts,
         feedback_messages=feedback,
@@ -709,13 +844,31 @@ def admin_me(request: Request):
 @router.get("/api/admin/overview")
 def admin_overview(
     request: Request,
-    days: int = Query(7, ge=1, le=90),
+    date_from: date_cls | None = Query(None, alias="from"),
+    date_to: date_cls | None = Query(None, alias="to"),
+    gran: str | None = Query(None, pattern="^(hour|day|week|month|year)$"),
     office: str | None = Query(None, max_length=64),
 ):
+    """Dashboard for the period [from, to] (local dates, default: the last 7
+    days), split into `gran` buckets (default: picked from the period length)."""
     _require_admin(request)
     office = office or None
+    today = datetime.now(ZoneInfo(settings.timezone)).date()
+    end = min(date_to or today, today)
+    start = date_from or end - timedelta(days=6)
+    if start > end:
+        raise HTTPException(400, "`from` must be on or before `to`")
+    span = (end - start).days + 1
+    if span > MAX_PERIOD_DAYS:
+        raise HTTPException(400, f"Period is limited to {MAX_PERIOD_DAYS} days")
+    granularity = gran or default_granularity(span)
+    if granularity not in allowed_granularities(span):
+        raise HTTPException(400, f"`{granularity}` does not fit a {span}-day period")
+    if len(_period_bucket_keys(start, end, granularity)) > MAX_BUCKETS:
+        raise HTTPException(400, f"Too many {granularity} buckets for this period; pick a coarser one")
+    key = ("overview", start, end, granularity, office)
     try:
-        return _cached(("overview", days, office), lambda: _build_overview(days, office))
+        return _cached(key, lambda: _build_overview(start, end, granularity, office))
     except HTTPException:
         raise
     except Exception as e:  # noqa: BLE001 - surface a clean 502 to the page

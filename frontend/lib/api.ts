@@ -305,34 +305,50 @@ export interface AdminHealth {
 export type AdminCancelKind = "user" | "outlook" | "auto" | "unknown";
 export type AdminScoutOutcome = "success" | "canceled_user" | "canceled_auto" | "active";
 export type AdminChatIntent = "book" | "schedule" | "scout" | "update" | "delete" | "info" | "none";
+export type AdminGranularity = "hour" | "day" | "week" | "month" | "year";
 /** 0 = Monday … 6 = Sunday. */
 export type AdminWeekday = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 
 export interface AdminOverview {
   generatedAt: string;
-  range: { days: number; start: string; end: string };
+  range: {
+    start: string;
+    end: string;
+    days: number;
+    prevStart: string;
+    prevEnd: string;
+    granularity: AdminGranularity;
+    granularities: AdminGranularity[];
+    /** The period reaches today, so its last bucket is still filling up. */
+    lastPartial: boolean;
+  };
   health: AdminHealth;
-  kpis: Record<"activeUsers" | "bookings" | "successRate", AdminKpi>;
-  weeks: string[];
+  kpis: Record<"activeUsers" | "bookings" | "successRate" | "scoutSuccess", AdminKpi>;
+  /** Bucket starts for the KPI sparklines and `trend`. */
+  buckets: string[];
   bookingOutcomes: {
     success: number;
     canceled: { total: number } & Record<AdminCancelKind, number>;
     /** System errors only; room declines are in `declined`. */
     failed: number;
     declined: number;
+    /** Of `declined`, the ones a Room Scout booked (its retries). */
+    declinedScout: number;
   };
-  /** The last 7 days (today last), regardless of the selected range. */
-  bookingsLast7: {
-    date: string;
-    weekday: AdminWeekday;
+  /** The period split by `range.granularity`; `start` is the bucket's first
+   *  day (the first bucket may start before `range.start`). */
+  trend: {
+    start: string;
     success: Record<AdminBookingType, number>;
     canceled: Record<AdminCancelKind, number>;
+    declined: number;
+    newUsers: number;
+    scouts: { success: number; canceledUser: number; canceledAuto: number };
   }[];
   /** Top users by bookings Outlook auto-released (no check-in) in the range. */
   hallOfShame: { email: string | null; autoCanceled: number; booked: number; rate: number | null }[];
   users: {
     total: number;
-    newByWeek: number[];
     /** Cohorts by first-booking month, last 6 months oldest first. `cells[k-1]` is
      *  month M+k (null = still in the future; `partial` = month in progress). */
     retention: {
@@ -361,8 +377,8 @@ export interface AdminOverview {
     total: number;
     outcomes: Record<AdminScoutOutcome, number>;
     successRate: number | null;
-    /** The last 7 days (today last), regardless of the selected range. */
-    last7: { date: string; weekday: AdminWeekday; success: number; canceledUser: number; canceledAuto: number }[];
+    /** Rooms that declined a scout before it got one, over scouts that found a room. */
+    declinesBeforeFound: { avg: number | null; max: number; withDeclines: number; found: number };
     demandBySize: { size: string; count: number; unmet: number }[];
     /** Scouts whose [start, end) window touches each clock hour. */
     demandByHour: { hour: number; count: number }[];
@@ -526,9 +542,9 @@ export const api = {
     ),
   // Admin dashboard (/admin). 403 for anyone whose profile role isn't "admin".
   adminMe: () => req<{ isAdmin: boolean }>("/api/admin/me"),
-  adminOverview: (days: number, office?: string | null) =>
+  adminOverview: (q: { from: string; to: string; gran: AdminGranularity; office?: string | null }) =>
     req<AdminOverview>(
-      `/api/admin/overview?days=${days}${office ? `&office=${encodeURIComponent(office)}` : ""}`,
+      `/api/admin/overview?from=${q.from}&to=${q.to}&gran=${q.gran}${q.office ? `&office=${encodeURIComponent(q.office)}` : ""}`,
     ),
   // Cached availability served from Supabase. The backend refreshes it on demand
   // with the current user's delegated Graph token when rows are older than 5 min.

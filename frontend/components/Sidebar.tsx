@@ -8,6 +8,7 @@ import {
   Magnifier,
   Gear,
   Comment,
+  SquareChartColumn,
   ArrowRightFromSquare,
   ClockArrowRotateLeft,
   Binoculars,
@@ -28,11 +29,18 @@ export type View =
   | "settings"
   | "bookingHistory"
   | "roomScout"
-  | "roomWiki";
+  | "roomWiki"
+  | "dashboard";
 
 // Shared pill-button layout for the nav / setting rows (matches the design).
 const ROW =
   "flex h-10 w-full items-center gap-2 rounded-full px-4 text-base font-medium text-[#18181b] dark:text-[#f7f7f7] transition-colors";
+// Selected / hover fills for nav rows. Dark mode uses the app's cool grays (the
+// same family as the #0c0e12 sidebar), so hover is one step lighter than the
+// background and selected one step lighter again — never HeroUI's warmer
+// `--default`, which read as a different gray next to the blue-tinted hover.
+const ROW_ACTIVE = "bg-[var(--default)] dark:bg-[#22262f]";
+const ROW_HOVER = "hover:bg-[#f5f5f5] dark:hover:bg-[#1a1d23]";
 
 function ChatThreadRow({
   thread,
@@ -136,10 +144,10 @@ function ChatThreadRow({
     <div
       className={`group/thread relative flex h-10 w-full items-center rounded-full pl-4 pr-1 text-sm font-medium text-[#18181b] dark:text-[#f7f7f7] transition-colors ${
         active
-          ? "bg-[var(--default)]"
+          ? ROW_ACTIVE
           : menuOpen
-            ? "bg-[#f5f5f5] dark:bg-[#22262f]"
-            : "hover:bg-[#f5f5f5] dark:hover:bg-[#22262f]"
+            ? "bg-[#f5f5f5] dark:bg-[#1a1d23]"
+            : ROW_HOVER
       }`}
       title={thread.title || fallbackTitle}
       onMouseEnter={onPrefetch}
@@ -321,6 +329,7 @@ export function Sidebar({
   open = false,
   onClose,
   showRoomWiki = false,
+  showDashboard = false,
 }: {
   view: View;
   onChange: (v: View) => void;
@@ -342,6 +351,8 @@ export function Sidebar({
   onClose?: () => void;
   // Room list: shown to every signed-in user (decided by the page).
   showRoomWiki?: boolean;
+  // Admin dashboard: only for profiles with role "admin" (decided by the page).
+  showDashboard?: boolean;
 }) {
   const t = useT();
   const [feedbackOpen, setFeedbackOpen] = useState(false);
@@ -403,7 +414,7 @@ export function Sidebar({
         <button
           type="button"
           onClick={navigate(() => onNewChat?.())}
-          className={`${ROW} ${view === "chat" && !activeThreadId ? "bg-[var(--default)]" : "hover:bg-[#f5f5f5] dark:hover:bg-[#22262f]"}`}
+          className={`${ROW} ${view === "chat" && !activeThreadId ? ROW_ACTIVE : ROW_HOVER}`}
         >
           <PencilToSquare width={16} height={16} />
           {t("sidebar.newChat")}
@@ -411,7 +422,7 @@ export function Sidebar({
         <button
           type="button"
           onClick={navigate(() => onChange("browse"))}
-          className={`${ROW} ${view === "browse" ? "bg-[var(--default)]" : "hover:bg-[#f5f5f5] dark:hover:bg-[#22262f]"}`}
+          className={`${ROW} ${view === "browse" ? ROW_ACTIVE : ROW_HOVER}`}
         >
           <Magnifier width={16} height={16} />
           {t("sidebar.browseRooms")}
@@ -419,7 +430,7 @@ export function Sidebar({
         <button
           type="button"
           onClick={navigate(() => onChange("roomScout"))}
-          className={`${ROW} ${view === "roomScout" ? "bg-[var(--default)]" : "hover:bg-[#f5f5f5] dark:hover:bg-[#22262f]"}`}
+          className={`${ROW} ${view === "roomScout" ? ROW_ACTIVE : ROW_HOVER}`}
         >
           <Binoculars width={16} height={16} />
           {t("sidebar.roomScout")}
@@ -433,7 +444,7 @@ export function Sidebar({
         <button
           type="button"
           onClick={navigate(() => onChange("bookingHistory"))}
-          className={`${ROW} ${view === "bookingHistory" ? "bg-[var(--default)]" : "hover:bg-[#f5f5f5] dark:hover:bg-[#22262f]"}`}
+          className={`${ROW} ${view === "bookingHistory" ? ROW_ACTIVE : ROW_HOVER}`}
         >
           <ClockArrowRotateLeft width={16} height={16} />
           {t("sidebar.bookingHistory")}
@@ -442,7 +453,7 @@ export function Sidebar({
           <button
             type="button"
             onClick={navigate(() => onChange("roomWiki"))}
-            className={`${ROW} ${view === "roomWiki" ? "bg-[var(--default)]" : "hover:bg-[#f5f5f5] dark:hover:bg-[#22262f]"}`}
+            className={`${ROW} ${view === "roomWiki" ? ROW_ACTIVE : ROW_HOVER}`}
           >
             <Compass width={16} height={16} />
             {t("sidebar.roomWiki")}
@@ -499,7 +510,7 @@ export function Sidebar({
         <button
           type="button"
           onClick={navigate(() => onChange("settings"))}
-          className={`${ROW} ${view === "settings" ? "bg-[var(--default)]" : "hover:bg-[#f5f5f5] dark:hover:bg-[#22262f]"}`}
+          className={`${ROW} ${view === "settings" ? ROW_ACTIVE : ROW_HOVER}`}
         >
           <Gear width={16} height={16} />
           {t("sidebar.settings")}
@@ -509,11 +520,22 @@ export function Sidebar({
         <button
           type="button"
           onClick={() => setFeedbackOpen(true)}
-          className={`${ROW} hover:bg-[#f5f5f5] dark:hover:bg-[#22262f]`}
+          className={`${ROW} ${ROW_HOVER}`}
         >
           <Comment width={16} height={16} />
           {t("sidebar.feedback")}
         </button>
+
+        {showDashboard && (
+          <button
+            type="button"
+            onClick={navigate(() => onChange("dashboard"))}
+            className={`${ROW} ${view === "dashboard" ? ROW_ACTIVE : ROW_HOVER}`}
+          >
+            <SquareChartColumn width={16} height={16} />
+            {t("sidebar.dashboard")}
+          </button>
+        )}
         </div>
         <FeedbackModal isOpen={feedbackOpen} onOpenChange={setFeedbackOpen} />
 
